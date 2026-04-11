@@ -26,7 +26,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	result, err := h.authSvc.Register(services.RegisterInput{
+	result, err := h.authSvc.Register(c.Request.Context(), services.RegisterInput{
 		Email:    req.Email,
 		Password: req.Password,
 		Name:     req.Name,
@@ -52,7 +52,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	result, err := h.authSvc.Login(services.LoginInput{
+	result, err := h.authSvc.Login(c.Request.Context(), services.LoginInput{
 		Email:    req.Email,
 		Password: req.Password,
 	})

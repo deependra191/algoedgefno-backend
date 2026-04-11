@@ -8,14 +8,15 @@ import (
 )
 
 type Config struct {
-	Port      string
-	DBHost    string
-	DBPort    string
-	DBUser    string
-	DBPass    string
-	DBName    string
-	JWTSecret string
-	Env       string
+	Port           string
+	DBHost         string
+	DBPort         string
+	DBUser         string
+	DBPass         string
+	DBName         string
+	JWTSecret      string
+	AppSecretToken string
+	Env            string
 }
 
 func Load() *Config {
@@ -30,8 +31,9 @@ func Load() *Config {
 		DBUser:    getEnv("DB_USER", "algoedge"),
 		DBPass:    getEnv("DB_PASSWORD", "algoedge"),
 		DBName:    getEnv("DB_NAME", "algoedgefno"),
-		JWTSecret: getEnv("JWT_SECRET", "change-this-in-production"),
-		Env:       getEnv("ENV", "development"),
+		JWTSecret:      getEnv("JWT_SECRET", "change-this-in-production"),
+		AppSecretToken: getEnv("APP_SECRET_TOKEN", ""),
+		Env:            getEnv("ENV", "development"),
 	}
 }
 

@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"errors"
 	"time"
 
@@ -8,8 +9,8 @@ import (
 	"github.com/deependra191/algoedgefno-backend/internal/repository"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/bcrypt"
-	"gorm.io/gorm"
 )
 
 type AuthService struct {
@@ -40,8 +41,8 @@ type AuthResult struct {
 	User  *models.User
 }
 
-func (s *AuthService) Register(input RegisterInput) (*AuthResult, error) {
-	if _, err := s.userRepo.FindByEmail(input.Email); err == nil {
+func (s *AuthService) Register(ctx context.Context, input RegisterInput) (*AuthResult, error) {
+	if _, err := s.userRepo.FindByEmail(ctx, input.Email); err == nil {
 		return nil, errors.New("email already registered")
 	}
 
@@ -57,7 +58,7 @@ func (s *AuthService) Register(input RegisterInput) (*AuthResult, error) {
 		PasswordHash: string(hash),
 	}
 
-	if err := s.userRepo.Create(user); err != nil {
+	if err := s.userRepo.Create(ctx, user); err != nil {
 		return nil, errors.New("failed to create user")
 	}
 
@@ -69,10 +70,10 @@ func (s *AuthService) Register(input RegisterInput) (*AuthResult, error) {
 	return &AuthResult{Token: token, User: user}, nil
 }
 
-func (s *AuthService) Login(input LoginInput) (*AuthResult, error) {
-	user, err := s.userRepo.FindByEmail(input.Email)
+func (s *AuthService) Login(ctx context.Context, input LoginInput) (*AuthResult, error) {
+	user, err := s.userRepo.FindByEmail(ctx, input.Email)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, errors.New("invalid credentials")
 		}
 		return nil, errors.New("failed to find user")

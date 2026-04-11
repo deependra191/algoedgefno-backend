@@ -6,9 +6,7 @@ import (
 	"github.com/deependra191/algoedgefno-backend/internal/config"
 	"github.com/deependra191/algoedgefno-backend/internal/database"
 	"github.com/deependra191/algoedgefno-backend/internal/middleware"
-	"github.com/deependra191/algoedgefno-backend/internal/repository"
 	"github.com/deependra191/algoedgefno-backend/internal/routes"
-	"github.com/deependra191/algoedgefno-backend/internal/services"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
@@ -16,10 +14,8 @@ import (
 func main() {
 	cfg := config.Load()
 
-	db := database.Connect(cfg)
-
-	userRepo := repository.NewUserRepository(db)
-	authSvc := services.NewAuthService(userRepo, cfg.JWTSecret)
+	pool := database.Connect(cfg)
+	defer pool.Close()
 
 	if cfg.Env == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -28,9 +24,9 @@ func main() {
 	r := gin.New()
 	r.Use(middleware.Logger())
 	r.Use(gin.Recovery())
-	r.Use(cors.Default()) // allow all origins in dev; tighten in production
+	r.Use(cors.Default())
 
-	routes.Register(r, authSvc)
+	routes.Register(r, pool, cfg)
 
 	log.Printf("starting server on :%s (env=%s)", cfg.Port, cfg.Env)
 	if err := r.Run(":" + cfg.Port); err != nil {
