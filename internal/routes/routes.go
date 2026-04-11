@@ -26,7 +26,7 @@ func Register(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config) {
 		}
 
 		protected := v1.Group("")
-		protected.Use(middleware.JWTAuth(authSvc))
+		protected.Use(middleware.Auth(cfg.AppSecretToken, authSvc))
 		{
 			protected.GET("/config/app", handlers.AppConfig)
 		}
