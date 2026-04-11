@@ -2,27 +2,40 @@
 
 ## Project context
 
-Go REST API backend for AlgoEdgeFno, an Android-first intraday algo trading platform for Indian F&O markets. This service handles auth, app config delivery, and will grow to support strategy sync, historical data proxy, and WebSocket tick streaming.
+Go REST API backend for AlgoEdgeFno, an Android-first intraday algo trading platform for Indian F&O markets.
+This service handles auth, app config delivery, market data ingestion, strategy storage, and backtesting execution.
+Android is a thin client — all computation happens here.
 
 ## Tech stack decisions
 
 | Decision | Choice | Reason |
 |---|---|---|
-| Framework | Gin (not Fiber) | Fiber uses fasthttp which is incompatible with standard `net/http` middleware; Gin integrates cleanly with GORM, JWT libs, and the broader Go ecosystem |
-| Database | PostgreSQL | ACID compliance is non-negotiable for financial user data; no eventual-consistency trade-offs |
-| Auth | JWT (golang-jwt/jwt v5) | Stateless, Android-friendly, industry standard for mobile backends |
-| UUID primary keys | github.com/google/uuid | Avoids sequential ID enumeration attacks on user endpoints |
-| Password hashing | bcrypt cost 12 | Balances security and latency; cost 10 is minimum, 14+ is overkill for this scale |
+| Framework | Gin | Integrates cleanly with Go ecosystem |
+| Database | PostgreSQL + TimescaleDB | ACID + time-series hypertables for candle data |
+| DB driver | pgx/v5 | Direct SQL, no ORM overhead, full PostgreSQL feature support |
+| Migrations | golang-migrate/migrate | Numbered SQL files, CLI + library, no auto-migrate |
+| Auth (v1) | Static bearer token | Single-user personal tool, no login flow needed |
+| Auth (future) | JWT (golang-jwt/jwt v5) | Kept for multi-user support |
+| UUID keys | github.com/google/uuid | Avoid sequential ID enumeration |
 
 ## Hard rules
 
 1. **Never commit `.env`** — only `.env.example` goes in version control. The `.gitignore` enforces this.
-2. **Always hash passwords with bcrypt** — cost factor 12. Never store plain text or reversible hashes. Never log passwords.
-3. **All endpoints except `/health` and `/api/v1/auth/*` require JWT** — enforced via the `middleware.JWTAuth` middleware in `routes/routes.go`.
-4. **Repository pattern** — handlers call services, services call repositories. Handlers never import `gorm.io` or touch the DB directly.
-5. **`internal/` package** — nothing inside `internal/` is importable from outside this module. Keep it that way.
-6. **Consistent error JSON** — all error responses use `{ "error": "message" }`. No ad-hoc error shapes.
-7. **Never log tokens** — the `Logger` middleware logs method, path, status, and latency only.
+2. **`internal/` package** — nothing inside `internal/` is importable from outside this module. Keep it that way.
+3. **Consistent error JSON** — all error responses use `{ "error": "message" }`. No ad-hoc error shapes.
+4. **Never log tokens** — Logger middleware logs method, path, status, and latency only. Never log auth headers or tokens.
+5. **Handlers → services → storage** — never skip a layer. Handlers never import pgx or write SQL. Storage owns all SQL.
+6. **MarketDataProvider interface mandatory** — every new data provider must implement MarketDataProvider. Never call provider code directly from handlers or services without going through the registry.
+7. **Capability declarations mandatory** — every provider declares its Capability set. Services check capabilities before calling a provider.
+8. **No provider-specific types outside providers/** — types defined in `internal/providers/<name>/` never leak into handlers, services, or storage.
+9. **SQL lives in storage/** — all pgx queries live in `internal/storage/`. Never inline SQL in handlers or services.
+10. **Numbered SQL migrations only** — migration files live in `migrations/`. Never auto-migrate in code.
+11. **`internal/engine/` is pure computation** — no DB imports, no HTTP imports. Only depends on models.
+12. **Static bearer token (APP_SECRET_TOKEN) for v1 Android auth** — JWT middleware kept but not required in v1.
+13. **All timestamps stored as TIMESTAMPTZ in UTC** — no naive timestamps anywhere.
+14. **Use pgx/v5 for all database operations** — no ORM.
+15. **One PR per task** — propose plan and wait for approval before touching code.
+16. **Research & decisions rule** — before recommending a library, pattern, or architectural change: research current state, state assumptions explicitly. If guessing, say so.
 
 ## Build commands
 
@@ -33,13 +46,12 @@ go run ./cmd/server
 # Build binary
 go build -o bin/server ./cmd/server
 
+# Start local PostgreSQL + TimescaleDB
+docker compose -f docker/docker-compose.yml up -d
+
+# Run migrations
+migrate -path migrations/ -database "postgres://algoedge:algoedge@localhost:5432/algoedgefno?sslmode=disable" up
+
 # Download dependencies
 go mod tidy
-
-# Start local PostgreSQL
-docker compose -f docker/docker-compose.yml up -d
 ```
-
-## Research & decisions rule
-
-Before recommending a library, pattern, or architectural change: research the current state (check Go module versions, read the library docs, check open issues). State your assumptions explicitly. If you are guessing, say so.
