@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"crypto/subtle"
 	"net/http"
 	"strings"
 
@@ -22,7 +23,7 @@ func Auth(appSecretToken string, authSvc *services.AuthService) gin.HandlerFunc 
 		token := strings.TrimPrefix(header, "Bearer ")
 
 		// Path 1: static app token (v1 single-user)
-		if appSecretToken != "" && token == appSecretToken {
+		if appSecretToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(appSecretToken)) == 1 {
 			c.Set(UserIDKey, "app-owner")
 			c.Next()
 			return

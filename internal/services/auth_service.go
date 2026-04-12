@@ -42,8 +42,12 @@ type AuthResult struct {
 }
 
 func (s *AuthService) Register(ctx context.Context, input RegisterInput) (*AuthResult, error) {
-	if _, err := s.userRepo.FindByEmail(ctx, input.Email); err == nil {
+	_, err := s.userRepo.FindByEmail(ctx, input.Email)
+	if err == nil {
 		return nil, errors.New("email already registered")
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, errors.New("failed to check existing user")
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), 12)

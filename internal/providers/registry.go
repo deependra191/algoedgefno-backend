@@ -1,6 +1,9 @@
 package providers
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 // Registry holds all registered MarketDataProviders.
 type Registry struct {
@@ -26,6 +29,16 @@ func (r *Registry) All() []MarketDataProvider {
 		result = append(result, p)
 	}
 	return result
+}
+
+// GetWithCapability returns the first provider that has the given capability.
+func (r *Registry) GetWithCapability(cap Capability) (MarketDataProvider, error) {
+	for _, p := range r.providers {
+		if HasCapability(p, cap) {
+			return p, nil
+		}
+	}
+	return nil, fmt.Errorf("no provider with capability %q", cap)
 }
 
 // Statuses returns ProviderStatus for all registered providers.
