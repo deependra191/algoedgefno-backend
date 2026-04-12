@@ -29,6 +29,7 @@ const bhavURL = "https://nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_0_0
 type bhavRow struct {
 	InstrumentType string
 	Symbol         string
+	Underlying     string
 	Expiry         time.Time
 	Strike         float64
 	OptionType     string
@@ -42,14 +43,17 @@ type bhavRow struct {
 
 // colMap holds resolved column indices for the CSV.
 type colMap struct {
-	instrType, symbol, expiry, strike, optType int
-	open, high, low, close_, vol, ts           int
+	instrType, symbol, underlying, expiry, strike, optType int
+	open, high, low, close_, vol, ts                       int
 }
 
 type EODProvider struct {
 	instrumentStore *storage.InstrumentStore
 	candleStore     *storage.CandleStore
 	httpClient      *http.Client
+	// Cache to avoid downloading the same bhavcopy twice in one sync cycle.
+	cachedRows []bhavRow
+	cachedDate time.Time
 }
 
 func NewEODProvider(instrumentStore *storage.InstrumentStore, candleStore *storage.CandleStore) *EODProvider {
@@ -144,11 +148,20 @@ func (p *EODProvider) SyncCandles(ctx context.Context) (int, error) {
 }
 
 // fetchLatestBhavcopy tries the last few trading days until it finds an available file.
+// Results are cached so that SyncInstruments + SyncCandles in the same cycle don't
+// download the same file twice.
 func (p *EODProvider) fetchLatestBhavcopy(ctx context.Context) ([]bhavRow, error) {
-	date := latestTradingDate()
+	today := latestTradingDate()
+	if p.cachedRows != nil && p.cachedDate.Equal(today) {
+		return p.cachedRows, nil
+	}
+
+	date := today
 	for i := 0; i < 7; i++ {
 		rows, err := p.downloadBhavcopy(ctx, date)
 		if err == nil {
+			p.cachedRows = rows
+			p.cachedDate = today
 			return rows, nil
 		}
 		log.Printf("nse_eod: bhavcopy not available for %s: %v", date.Format("2006-01-02"), err)
@@ -220,19 +233,28 @@ func parseBhavCSV(r io.Reader, date time.Time) ([]bhavRow, error) {
 		idx[strings.TrimSpace(h)] = i
 	}
 
+	// NOTE: Column names must be verified against a real NSE bhavcopy file
+	// before first production sync. TckrSymb is required — it provides the
+	// unique per-contract ticker. Without it, instruments cannot be uniquely
+	// identified (the old "SYMBOL" column holds only the underlying name).
+	symbolIdx := col(idx, "TckrSymb")
+	if symbolIdx < 0 {
+		return nil, fmt.Errorf("required column TckrSymb not found in CSV header: %v", header)
+	}
+
 	cols := colMap{
-		// New NSE format → old NSE format fallbacks
-		instrType: col(idx, "FinInstrmTp", "INSTRUMENT"),
-		symbol:    col(idx, "TckrSymb", "SYMBOL"),
-		expiry:    col(idx, "XpryDt", "EXPIRY_DT"),
-		strike:    col(idx, "StrkPric", "STRIKE_PR"),
-		optType:   col(idx, "OptnTp", "OPTION_TYP"),
-		open:      col(idx, "OpnPric", "OPEN"),
-		high:      col(idx, "HghPric", "HIGH"),
-		low:       col(idx, "LwPric", "LOW"),
-		close_:    col(idx, "ClsPric", "CLOSE"),
-		vol:       col(idx, "TtlTradgVol", "CONTRACTS"),
-		ts:        col(idx, "TmStmp", "TIMESTAMP"),
+		instrType:  col(idx, "FinInstrmTp", "INSTRUMENT"),
+		symbol:     symbolIdx,
+		underlying: col(idx, "UndrlygAsst"),
+		expiry:     col(idx, "XpryDt", "EXPIRY_DT"),
+		strike:     col(idx, "StrkPric", "STRIKE_PR"),
+		optType:    col(idx, "OptnTp", "OPTION_TYP"),
+		open:       col(idx, "OpnPric", "OPEN"),
+		high:       col(idx, "HghPric", "HIGH"),
+		low:        col(idx, "LwPric", "LOW"),
+		close_:     col(idx, "ClsPric", "CLOSE"),
+		vol:        col(idx, "TtlTradgVol", "CONTRACTS"),
+		ts:         col(idx, "TmStmp", "TIMESTAMP"),
 	}
 
 	var rows []bhavRow
@@ -299,6 +321,7 @@ func parseRow(rec []string, cols colMap, fallbackDate time.Time) (bhavRow, error
 	return bhavRow{
 		InstrumentType: get(cols.instrType),
 		Symbol:         symbol,
+		Underlying:     get(cols.underlying),
 		Expiry:         expiry,
 		Strike:         strike,
 		OptionType:     get(cols.optType),
@@ -320,6 +343,9 @@ func bhavRowToInstrument(row bhavRow) models.Instrument {
 		InstrumentType: row.InstrumentType,
 		LotSize:        1, // lot sizes require NSE contract specs; default to 1
 	}
+	if row.Underlying != "" {
+		inst.Underlying = &row.Underlying
+	}
 	if !row.Expiry.IsZero() {
 		inst.Expiry = &row.Expiry
 	}
@@ -332,9 +358,12 @@ func bhavRowToInstrument(row bhavRow) models.Instrument {
 	return inst
 }
 
-// latestTradingDate returns the most recent weekday (Mon–Fri) in UTC.
+// ist is the Indian Standard Time location (UTC+5:30). NSE operates on IST.
+var ist = time.FixedZone("IST", 5*60*60+30*60)
+
+// latestTradingDate returns the most recent weekday (Mon–Fri) in IST.
 func latestTradingDate() time.Time {
-	t := time.Now().UTC().Truncate(24 * time.Hour)
+	t := time.Now().In(ist).Truncate(24 * time.Hour)
 	return prevTradingDayOrToday(t)
 }
 
@@ -365,7 +394,7 @@ func col(idx map[string]int, names ...string) int {
 
 func parseFloat(s string) (float64, error) {
 	if s == "" || s == "-" {
-		return 0, nil
+		return 0, fmt.Errorf("empty or missing value")
 	}
 	return strconv.ParseFloat(s, 64)
 }

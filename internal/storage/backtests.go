@@ -94,8 +94,6 @@ func scanBacktestRun(row pgx.Row) (*models.BacktestRun, error) {
 	var netPnl, maxDrawdown *float64
 	var totalTrades, winCount, lossCount *int
 	var errMsg *string
-	var completedAt *interface{}
-	_ = completedAt
 	err := row.Scan(
 		&r.ID, &r.StrategyID, &r.InstrumentToken, &r.FromTs, &r.ToTs,
 		&r.CandleInterval, &r.Status,

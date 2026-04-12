@@ -27,6 +27,8 @@ func NewCandleStore(pool *pgxpool.Pool) *CandleStore {
 }
 
 // InsertBatch bulk-inserts candles using the PostgreSQL COPY protocol for performance.
+// Fails on duplicate (instrument_id, ts, interval) — caller must ensure no duplicates exist.
+// For re-sync scenarios, delete existing data first, then re-insert.
 func (s *CandleStore) InsertBatch(ctx context.Context, candles []models.Candle) (int64, error) {
 	if len(candles) == 0 {
 		return 0, nil
