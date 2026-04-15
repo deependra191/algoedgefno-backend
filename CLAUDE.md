@@ -37,7 +37,7 @@ Android is a thin client — all computation happens here.
 15. **One PR per task** — propose plan and wait for approval before touching code.
 16. **Research & decisions rule** — before recommending a library, pattern, or architectural change: research current state, state assumptions explicitly. If guessing, say so.
 17. **No magic strings for values used in multiple places or with logic depending on them** — use named constants. Env var key names defined once in `config.go` are fine inline. Anything used across files, used twice with branching logic, or acting as a sentinel value must be a named constant.
-18. **Security review before every PR** — before raising a PR, review all changed files for security issues: hardcoded secrets or default credentials reaching production, auth bypasses, SQL injection, token leakage in logs, missing input validation at system boundaries. Scan the entire file and related files for the same class of issue — never fix one instance in isolation. See `docs/production-checklist.md`.
+18. **Security review before every PR — full read first, fix second** — before raising a PR: (1) read every changed file in full, (2) list ALL security issues found across all files, (3) get user confirmation, (4) fix everything in one pass, build, vet, then commit. Never fix reactively one issue at a time as they are spotted — that is whack-a-mole, not a security review. Check for: hardcoded secrets or default credentials, auth bypasses, SQL injection, token leakage in logs, missing input validation, timing attacks, race conditions on shared state. See `docs/production-checklist.md`.
 
 ## Build commands
 
