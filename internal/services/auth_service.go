@@ -74,16 +74,29 @@ func (s *AuthService) Register(ctx context.Context, input RegisterInput) (*AuthR
 	return &AuthResult{Token: token, User: user}, nil
 }
 
+// dummyHash is used in Login to ensure bcrypt runs even when a user is not found,
+// preventing user enumeration via response timing differences.
+const dummyHash = "$2a$12$dummy.hash.for.timing.mitigation.only.not.a.real.hash.."
+
 func (s *AuthService) Login(ctx context.Context, input LoginInput) (*AuthResult, error) {
-	user, err := s.userRepo.FindByEmail(ctx, input.Email)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+	user, lookupErr := s.userRepo.FindByEmail(ctx, input.Email)
+
+	// Always run bcrypt regardless of whether the user exists.
+	// This prevents an attacker from enumerating valid emails by measuring
+	// response time — bcrypt without this check returns instantly for unknown emails.
+	hashToCheck := dummyHash
+	if lookupErr == nil {
+		hashToCheck = user.PasswordHash
+	}
+	bcryptErr := bcrypt.CompareHashAndPassword([]byte(hashToCheck), []byte(input.Password))
+
+	if lookupErr != nil {
+		if errors.Is(lookupErr, pgx.ErrNoRows) {
 			return nil, errors.New("invalid credentials")
 		}
 		return nil, errors.New("failed to find user")
 	}
-
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(input.Password)); err != nil {
+	if bcryptErr != nil {
 		return nil, errors.New("invalid credentials")
 	}
 

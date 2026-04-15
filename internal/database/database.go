@@ -14,9 +14,14 @@ import (
 )
 
 func Connect(cfg *config.Config) *pgxpool.Pool {
+	sslMode := "require"
+	if cfg.Env != config.EnvProduction {
+		sslMode = "disable"
+	}
+
 	dsn := fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
-		cfg.DBUser, cfg.DBPass, cfg.DBHost, cfg.DBPort, cfg.DBName,
+		"postgres://%s:%s@%s:%s/%s?sslmode=%s",
+		cfg.DBUser, cfg.DBPass, cfg.DBHost, cfg.DBPort, cfg.DBName, sslMode,
 	)
 
 	pool, err := pgxpool.New(context.Background(), dsn)

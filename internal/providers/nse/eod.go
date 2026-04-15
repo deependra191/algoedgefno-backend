@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -52,6 +53,8 @@ type EODProvider struct {
 	candleStore     *storage.CandleStore
 	httpClient      *http.Client
 	// Cache to avoid downloading the same bhavcopy twice in one sync cycle.
+	// cacheMu protects cachedRows and cachedDate against concurrent sync calls.
+	cacheMu    sync.Mutex
 	cachedRows []bhavRow
 	cachedDate time.Time
 }
@@ -151,6 +154,9 @@ func (p *EODProvider) SyncCandles(ctx context.Context) (int, error) {
 // Results are cached so that SyncInstruments + SyncCandles in the same cycle don't
 // download the same file twice.
 func (p *EODProvider) fetchLatestBhavcopy(ctx context.Context) ([]bhavRow, error) {
+	p.cacheMu.Lock()
+	defer p.cacheMu.Unlock()
+
 	today := latestTradingDate()
 	if p.cachedRows != nil && p.cachedDate.Equal(today) {
 		return p.cachedRows, nil
