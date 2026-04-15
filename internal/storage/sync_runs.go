@@ -2,7 +2,6 @@ package storage
 
 import (
 	"context"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -32,18 +31,18 @@ func (s *SyncRunStore) Create(ctx context.Context, run *models.SyncRun) error {
 
 // Complete marks the sync run as COMPLETED or FAILED and records the final counts.
 func (s *SyncRunStore) Complete(ctx context.Context, id uuid.UUID, recordsProcessed int, errMsg *string) error {
-	status := "COMPLETED"
+	status := models.SyncRunCompleted
 	if errMsg != nil {
-		status = "FAILED"
+		status = models.SyncRunFailed
 	}
 	_, err := s.pool.Exec(ctx, `
 		UPDATE sync_runs SET
 			status            = $2,
 			records_processed = $3,
 			error_message     = $4,
-			completed_at      = $5
+			completed_at      = NOW()
 		WHERE id = $1`,
-		id, status, recordsProcessed, errMsg, time.Now().UTC(),
+		id, status, recordsProcessed, errMsg,
 	)
 	return err
 }

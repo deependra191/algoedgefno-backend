@@ -16,3 +16,10 @@ type SyncRun struct {
 	StartedAt        time.Time  `json:"started_at"`
 	CompletedAt      *time.Time `json:"completed_at,omitempty"`
 }
+
+const (
+	SyncRunPending   = "PENDING"
+	SyncRunRunning   = "RUNNING"
+	SyncRunCompleted = "COMPLETED"
+	SyncRunFailed    = "FAILED"
+)

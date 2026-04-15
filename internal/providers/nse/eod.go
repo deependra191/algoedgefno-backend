@@ -24,7 +24,11 @@ import (
 // bhavURL is the NSE F&O bhavcopy URL pattern.
 // NOTE: NSE has changed this URL format historically. Verify before deploying.
 // Current format (as of 2024-2025): BhavCopy_NSE_FO_0_0_0_YYYYMMDD_F_0000.csv.zip
-const bhavURL = "https://nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_0_0_0_%s_F_0000.csv.zip"
+const (
+	bhavURL       = "https://nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_0_0_0_%s_F_0000.csv.zip"
+	nseExchange   = "NFO"
+	eodInterval   = "1d"
+)
 
 // bhavRow holds one parsed row from the F&O bhavcopy CSV.
 type bhavRow struct {
@@ -111,7 +115,7 @@ func (p *EODProvider) SyncCandles(ctx context.Context) (int, error) {
 	}
 
 	// Load all NFO instruments into a symbol→ID map for FK lookup.
-	exchange := "NFO"
+	exchange := nseExchange
 	allInstr, err := p.instrumentStore.List(ctx, storage.InstrumentFilter{Exchange: &exchange})
 	if err != nil {
 		return 0, fmt.Errorf("list instruments: %w", err)
@@ -130,7 +134,7 @@ func (p *EODProvider) SyncCandles(ctx context.Context) (int, error) {
 		candles = append(candles, models.Candle{
 			InstrumentID: id,
 			Timestamp:    row.Date,
-			Interval:     "1d",
+			Interval:     eodInterval,
 			Open:         row.Open,
 			High:         row.High,
 			Low:          row.Low,
@@ -345,7 +349,7 @@ func bhavRowToInstrument(row bhavRow) models.Instrument {
 		ID:             uuid.New(),
 		Symbol:         row.Symbol,
 		Name:           row.Symbol,
-		Exchange:       "NFO",
+		Exchange:       nseExchange,
 		InstrumentType: row.InstrumentType,
 		LotSize:        1, // lot sizes require NSE contract specs; default to 1
 	}
