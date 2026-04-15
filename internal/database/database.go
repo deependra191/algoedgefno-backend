@@ -13,10 +13,16 @@ import (
 	"github.com/deependra191/algoedgefno-backend/internal/config"
 )
 
+const (
+	sslModeRequire  = "require"
+	sslModeDisable  = "disable"
+	migrationsPath  = "file://migrations"
+)
+
 func Connect(cfg *config.Config) *pgxpool.Pool {
-	sslMode := "require"
+	sslMode := sslModeRequire
 	if cfg.Env != config.EnvProduction {
-		sslMode = "disable"
+		sslMode = sslModeDisable
 	}
 
 	dsn := fmt.Sprintf(
@@ -40,7 +46,7 @@ func Connect(cfg *config.Config) *pgxpool.Pool {
 }
 
 func runMigrations(dsn string) {
-	m, err := migrate.New("file://migrations", dsn)
+	m, err := migrate.New(migrationsPath, dsn)
 	if err != nil {
 		log.Fatalf("failed to create migrate instance: %v", err)
 	}
