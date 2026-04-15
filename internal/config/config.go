@@ -7,6 +7,11 @@ import (
 	"github.com/joho/godotenv"
 )
 
+const (
+	EnvProduction    = "production"
+	DefaultJWTSecret = "change-this-in-production"
+)
+
 type Config struct {
 	Port           string
 	DBHost         string
@@ -31,16 +36,16 @@ func Load() *Config {
 		DBUser:         getEnv("DB_USER", "algoedge"),
 		DBPass:         getEnv("DB_PASSWORD", "algoedge"),
 		DBName:         getEnv("DB_NAME", "algoedgefno"),
-		JWTSecret:      getEnv("JWT_SECRET", "change-this-in-production"),
+		JWTSecret:      getEnv("JWT_SECRET", DefaultJWTSecret),
 		AppSecretToken: getEnv("APP_SECRET_TOKEN", ""),
 		Env:            getEnv("ENV", "development"),
 	}
 
-	if cfg.Env == "production" {
+	if cfg.Env == EnvProduction {
 		if cfg.AppSecretToken == "" {
 			log.Fatal("APP_SECRET_TOKEN must be set in production")
 		}
-		if cfg.JWTSecret == "change-this-in-production" {
+		if cfg.JWTSecret == DefaultJWTSecret {
 			log.Fatal("JWT_SECRET must be changed in production")
 		}
 	}

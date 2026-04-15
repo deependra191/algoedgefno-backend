@@ -28,7 +28,7 @@ func main() {
 	registry.Register(nse.NewEODProvider(instrumentStore, candleStore))
 	registry.Register(vendor.NewStub())
 
-	if cfg.Env == "production" {
+	if cfg.Env == config.EnvProduction {
 		gin.SetMode(gin.ReleaseMode)
 	}
 

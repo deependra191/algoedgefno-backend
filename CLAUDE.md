@@ -36,7 +36,8 @@ Android is a thin client — all computation happens here.
 14. **Use pgx/v5 for all database operations** — no ORM.
 15. **One PR per task** — propose plan and wait for approval before touching code.
 16. **Research & decisions rule** — before recommending a library, pattern, or architectural change: research current state, state assumptions explicitly. If guessing, say so.
-17. **Security issues are highest priority** — never defer a security issue to testing or production. Flag it immediately, fix it before moving on. Silent failures (wrong 401, forgeable tokens) are worse than crashes. Every PR must be reviewed with security in mind — see `docs/production-checklist.md`.
+17. **No magic strings for values used in multiple places or with logic depending on them** — use named constants. Env var key names defined once in `config.go` are fine inline. Anything used across files, used twice with branching logic, or acting as a sentinel value must be a named constant.
+18. **Security issues are highest priority** — never defer a security issue to testing or production. Flag it immediately, fix it before moving on. Silent failures (wrong 401, forgeable tokens) are worse than crashes. Every PR must be reviewed with security in mind — see `docs/production-checklist.md`.
 
 ## Build commands
 
