@@ -36,6 +36,7 @@ Android is a thin client — all computation happens here.
 14. **Use pgx/v5 for all database operations** — no ORM.
 15. **One PR per task** — propose plan and wait for approval before touching code.
 16. **Research & decisions rule** — before recommending a library, pattern, or architectural change: research current state, state assumptions explicitly. If guessing, say so.
+17. **Security issues are highest priority** — never defer a security issue to testing or production. Flag it immediately, fix it before moving on. Silent failures (wrong 401, forgeable tokens) are worse than crashes. Every PR must be reviewed with security in mind — see `docs/production-checklist.md`.
 
 ## Build commands
 
