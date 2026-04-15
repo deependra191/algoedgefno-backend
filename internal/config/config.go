@@ -22,6 +22,7 @@ type Config struct {
 	JWTSecret      string
 	AppSecretToken string
 	Env            string
+	MigrationsPath string
 }
 
 func Load() *Config {
@@ -39,6 +40,7 @@ func Load() *Config {
 		JWTSecret:      getEnv("JWT_SECRET", DefaultJWTSecret),
 		AppSecretToken: getEnv("APP_SECRET_TOKEN", ""),
 		Env:            getEnv("ENV", "development"),
+		MigrationsPath: getEnv("MIGRATIONS_PATH", "file://migrations"),
 	}
 
 	if cfg.Env == EnvProduction {

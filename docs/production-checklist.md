@@ -34,6 +34,7 @@ Run this twice — once for `APP_SECRET_TOKEN`, once for `JWT_SECRET`. Never reu
 
 - [ ] `ENV=production` is set — this enables startup secret validation and Gin release mode
 - [ ] `PORT` is set correctly
+- [ ] `MIGRATIONS_PATH` is set to an absolute path (e.g. `file:///opt/algoedgefno/migrations`) — the default `file://migrations` is relative and will break if the binary is not run from the project root
 - [ ] CORS is tightened — `cors.Default()` in `main.go` allows all origins, restrict to your Android app's origin before go-live
 
 ---

@@ -14,9 +14,8 @@ import (
 )
 
 const (
-	sslModeRequire  = "require"
-	sslModeDisable  = "disable"
-	migrationsPath  = "file://migrations"
+	sslModeRequire = "require"
+	sslModeDisable = "disable"
 )
 
 func Connect(cfg *config.Config) *pgxpool.Pool {
@@ -39,13 +38,13 @@ func Connect(cfg *config.Config) *pgxpool.Pool {
 		log.Fatalf("failed to ping database: %v", err)
 	}
 
-	runMigrations(dsn)
+	runMigrations(cfg.MigrationsPath, dsn)
 
 	log.Println("database connected and migrations applied")
 	return pool
 }
 
-func runMigrations(dsn string) {
+func runMigrations(migrationsPath, dsn string) {
 	m, err := migrate.New(migrationsPath, dsn)
 	if err != nil {
 		log.Fatalf("failed to create migrate instance: %v", err)
