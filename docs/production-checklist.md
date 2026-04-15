@@ -23,7 +23,9 @@ Run this twice — once for `APP_SECRET_TOKEN`, once for `JWT_SECRET`. Never reu
 
 - [ ] TimescaleDB is running and reachable
 - [ ] All migrations have been applied — run `migrate ... up` and confirm `no change`
-- [ ] DB credentials in env vars are production values, not the local `algoedge/algoedge` defaults
+- [ ] `DB_USER` is set and not the default `algoedge`
+- [ ] `DB_PASSWORD` is set to a strong value and not the default `algoedge`
+- [ ] `DB_NAME` is set and not the default `algoedgefno`
 - [ ] DB is not exposed on a public port — only accessible from the app server
 
 ---
