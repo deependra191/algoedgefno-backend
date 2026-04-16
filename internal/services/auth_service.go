@@ -72,13 +72,7 @@ func (s *AuthService) Register(ctx context.Context, input RegisterInput) (*AuthR
 		return nil, errors.New("failed to generate token")
 	}
 
-	return &AuthResult{Token: token, User: entityToModelUser(ent)}, nil
-}
-
-// entityToModelUser is a temporary bridge replaced by models.FromUserEntity
-// in the next commit when AuthResult is updated to hold a domain User.
-func entityToModelUser(e *entities.User) *models.User {
-	return models.FromUserEntity(e)
+	return &AuthResult{Token: token, User: models.FromUserEntity(ent)}, nil
 }
 
 const (
@@ -125,7 +119,7 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (*AuthResult,
 		return nil, errors.New("failed to generate token")
 	}
 
-	return &AuthResult{Token: token, User: entityToModelUser(user)}, nil
+	return &AuthResult{Token: token, User: models.FromUserEntity(user)}, nil
 }
 
 func (s *AuthService) ValidateToken(tokenStr string) (string, error) {
