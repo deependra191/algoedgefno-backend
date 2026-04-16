@@ -17,7 +17,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/deependra191/algoedgefno-backend/internal/entities"
-	"github.com/deependra191/algoedgefno-backend/internal/models"
 	"github.com/deependra191/algoedgefno-backend/internal/providers"
 	"github.com/deependra191/algoedgefno-backend/internal/storage"
 )
@@ -100,33 +99,13 @@ func (p *EODProvider) SyncInstruments(ctx context.Context) (int, error) {
 
 	instruments := make([]entities.Instrument, 0, len(rows))
 	for _, row := range rows {
-		instruments = append(instruments, modelToEntityInstrument(bhavRowToInstrument(row)))
+		instruments = append(instruments, bhavRowToInstrument(row))
 	}
 
 	if err := p.instrumentStore.UpsertBatch(ctx, instruments); err != nil {
 		return 0, fmt.Errorf("upsert instruments: %w", err)
 	}
 	return len(instruments), nil
-}
-
-// modelToEntityInstrument is a temporary bridge kept while bhavRowToInstrument
-// still returns models.Instrument. It is removed in the next commit when the
-// NSE provider is switched to return entities.Instrument directly.
-func modelToEntityInstrument(m models.Instrument) entities.Instrument {
-	return entities.Instrument{
-		ID:             m.ID,
-		Symbol:         m.Symbol,
-		Name:           m.Name,
-		Exchange:       m.Exchange,
-		InstrumentType: m.InstrumentType,
-		Underlying:     m.Underlying,
-		Expiry:         m.Expiry,
-		Strike:         m.Strike,
-		OptionType:     m.OptionType,
-		LotSize:        m.LotSize,
-		CreatedAt:      m.CreatedAt,
-		UpdatedAt:      m.UpdatedAt,
-	}
 }
 
 func (p *EODProvider) SyncCandles(ctx context.Context) (int, error) {
@@ -365,8 +344,8 @@ func parseRow(rec []string, cols colMap, fallbackDate time.Time) (bhavRow, error
 	}, nil
 }
 
-func bhavRowToInstrument(row bhavRow) models.Instrument {
-	inst := models.Instrument{
+func bhavRowToInstrument(row bhavRow) entities.Instrument {
+	inst := entities.Instrument{
 		ID:             uuid.New(),
 		Symbol:         row.Symbol,
 		Name:           row.Symbol,
