@@ -1,4 +1,4 @@
-package repository
+package storage
 
 import (
 	"context"
@@ -7,15 +7,15 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type UserRepository struct {
+type UserStore struct {
 	pool *pgxpool.Pool
 }
 
-func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
-	return &UserRepository{pool: pool}
+func NewUserStore(pool *pgxpool.Pool) *UserStore {
+	return &UserStore{pool: pool}
 }
 
-func (r *UserRepository) Create(ctx context.Context, user *models.User) error {
+func (r *UserStore) Create(ctx context.Context, user *models.User) error {
 	_, err := r.pool.Exec(ctx,
 		`INSERT INTO users (id, email, name, password_hash, created_at, updated_at)
 		 VALUES ($1, $2, $3, $4, NOW(), NOW())`,
@@ -24,7 +24,7 @@ func (r *UserRepository) Create(ctx context.Context, user *models.User) error {
 	return err
 }
 
-func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*models.User, error) {
+func (r *UserStore) FindByEmail(ctx context.Context, email string) (*models.User, error) {
 	var u models.User
 	err := r.pool.QueryRow(ctx,
 		`SELECT id, email, name, password_hash, created_at, updated_at
@@ -36,7 +36,7 @@ func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*models
 	return &u, nil
 }
 
-func (r *UserRepository) FindByID(ctx context.Context, id string) (*models.User, error) {
+func (r *UserStore) FindByID(ctx context.Context, id string) (*models.User, error) {
 	var u models.User
 	err := r.pool.QueryRow(ctx,
 		`SELECT id, email, name, password_hash, created_at, updated_at

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/deependra191/algoedgefno-backend/internal/models"
-	"github.com/deependra191/algoedgefno-backend/internal/repository"
+	"github.com/deependra191/algoedgefno-backend/internal/storage"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -14,11 +14,11 @@ import (
 )
 
 type AuthService struct {
-	userRepo  *repository.UserRepository
+	userRepo  *storage.UserStore
 	jwtSecret []byte
 }
 
-func NewAuthService(userRepo *repository.UserRepository, jwtSecret string) *AuthService {
+func NewAuthService(userRepo *storage.UserStore, jwtSecret string) *AuthService {
 	return &AuthService{
 		userRepo:  userRepo,
 		jwtSecret: []byte(jwtSecret),

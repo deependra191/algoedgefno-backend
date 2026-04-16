@@ -5,14 +5,14 @@ import (
 	"github.com/deependra191/algoedgefno-backend/internal/handlers"
 	"github.com/deependra191/algoedgefno-backend/internal/middleware"
 	"github.com/deependra191/algoedgefno-backend/internal/providers"
-	"github.com/deependra191/algoedgefno-backend/internal/repository"
 	"github.com/deependra191/algoedgefno-backend/internal/services"
+	"github.com/deependra191/algoedgefno-backend/internal/storage"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func Register(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, registry *providers.Registry) {
-	userRepo := repository.NewUserRepository(pool)
+	userRepo := storage.NewUserStore(pool)
 	authSvc := services.NewAuthService(userRepo, cfg.JWTSecret)
 	authHandler := handlers.NewAuthHandler(authSvc)
 
