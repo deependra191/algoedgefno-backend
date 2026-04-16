@@ -50,7 +50,7 @@ func (s *AuthService) Register(ctx context.Context, input RegisterInput) (*AuthR
 		return nil, errors.New("failed to check existing user")
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), 12)
+	hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), bcryptCost)
 	if err != nil {
 		return nil, errors.New("failed to process password")
 	}
@@ -74,9 +74,22 @@ func (s *AuthService) Register(ctx context.Context, input RegisterInput) (*AuthR
 	return &AuthResult{Token: token, User: user}, nil
 }
 
-// dummyHash is used in Login to ensure bcrypt runs even when a user is not found,
-// preventing user enumeration via response timing differences.
-const dummyHash = "$2a$12$dummy.hash.for.timing.mitigation.only.not.a.real.hash.."
+const (
+	// bcryptCost is the work factor for password hashing.
+	// Higher = slower hashing = more expensive brute force. 12 ≈ 250ms on modern hardware.
+	bcryptCost = 12
+
+	// tokenExpiry is how long a JWT remains valid after issue.
+	tokenExpiry = 24 * time.Hour
+
+	// jwtSubClaim is the JWT claim key used to store and retrieve the user ID.
+	// Must match in both generateToken and ValidateToken.
+	jwtSubClaim = "sub"
+
+	// dummyHash is used in Login to ensure bcrypt runs even when a user is not found,
+	// preventing user enumeration via response timing differences.
+	dummyHash = "$2a$12$dummy.hash.for.timing.mitigation.only.not.a.real.hash.."
+)
 
 func (s *AuthService) Login(ctx context.Context, input LoginInput) (*AuthResult, error) {
 	user, lookupErr := s.userRepo.FindByEmail(ctx, input.Email)
@@ -124,7 +137,7 @@ func (s *AuthService) ValidateToken(tokenStr string) (string, error) {
 		return "", errors.New("invalid token claims")
 	}
 
-	userID, ok := claims["sub"].(string)
+	userID, ok := claims[jwtSubClaim].(string)
 	if !ok {
 		return "", errors.New("invalid token subject")
 	}
@@ -134,9 +147,9 @@ func (s *AuthService) ValidateToken(tokenStr string) (string, error) {
 
 func (s *AuthService) generateToken(userID string) (string, error) {
 	claims := jwt.MapClaims{
-		"sub": userID,
-		"exp": time.Now().Add(24 * time.Hour).Unix(),
-		"iat": time.Now().Unix(),
+		jwtSubClaim: userID,
+		"exp":       time.Now().Add(tokenExpiry).Unix(),
+		"iat":       time.Now().Unix(),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString(s.jwtSecret)
