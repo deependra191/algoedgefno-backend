@@ -2,6 +2,7 @@
 // Domain objects are distinct from:
 //   - entities (DB scan targets in internal/entities/)
 //   - response DTOs (handler-local structs in internal/handlers/*)
+//
 // Domain types must not carry `json:` tags and must not include
 // DB-specific fields. Mappers convert between entity and domain forms.
 package models

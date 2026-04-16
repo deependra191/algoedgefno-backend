@@ -19,7 +19,7 @@ type Strategy struct {
 	Underlying         string
 	InstrumentType     string
 	ExpiryRule         string
-	OptionLeg          *json.RawMessage
+	OptionLeg          json.RawMessage
 	EntryConditionType string
 	TargetPct          *float64
 	StopLossPct        *float64
@@ -54,10 +54,7 @@ func FromStrategyEntity(e *entities.Strategy) *Strategy {
 		CreatedAt:          e.CreatedAt,
 		UpdatedAt:          e.UpdatedAt,
 	}
-	if e.OptionLegJSON != nil {
-		raw := json.RawMessage(e.OptionLegJSON)
-		s.OptionLeg = &raw
-	}
+	s.OptionLeg = json.RawMessage(e.OptionLegJSON)
 	return s
 }
 
@@ -83,8 +80,6 @@ func (s *Strategy) ToEntity() *entities.Strategy {
 		CreatedAt:          s.CreatedAt,
 		UpdatedAt:          s.UpdatedAt,
 	}
-	if s.OptionLeg != nil {
-		e.OptionLegJSON = []byte(*s.OptionLeg)
-	}
+	e.OptionLegJSON = []byte(s.OptionLeg)
 	return e
 }

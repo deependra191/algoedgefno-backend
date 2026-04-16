@@ -7,7 +7,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/deependra191/algoedgefno-backend/internal/entities"
-	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
 type SyncRunStore struct {
@@ -31,11 +30,9 @@ func (s *SyncRunStore) Create(ctx context.Context, run *entities.SyncRun) error 
 }
 
 // Complete marks the sync run as COMPLETED or FAILED and records the final counts.
-func (s *SyncRunStore) Complete(ctx context.Context, id uuid.UUID, recordsProcessed int, errMsg *string) error {
-	status := models.SyncRunCompleted
-	if errMsg != nil {
-		status = models.SyncRunFailed
-	}
+// The caller (service layer) is responsible for deciding the status value using
+// models.SyncRunCompleted / models.SyncRunFailed — storage must not import models.
+func (s *SyncRunStore) Complete(ctx context.Context, id uuid.UUID, status string, recordsProcessed int, errMsg *string) error {
 	_, err := s.pool.Exec(ctx, `
 		UPDATE sync_runs SET
 			status            = $2,

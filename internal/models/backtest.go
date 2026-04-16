@@ -10,8 +10,8 @@ import (
 )
 
 // BacktestRun is the domain representation of a backtest execution.
-// TradesJSON is a temporary bridge until the engine defines a typed Trade
-// struct in B09; at that point TradesJSON is replaced by []engine.Trade.
+// Trades is a temporary opaque JSON blob until B09 defines engine.Trade;
+// at that point Trades is replaced by []engine.Trade.
 type BacktestRun struct {
 	ID              uuid.UUID
 	StrategyID      uuid.UUID
@@ -25,7 +25,7 @@ type BacktestRun struct {
 	WinCount        *int
 	LossCount       *int
 	MaxDrawdown     *float64
-	TradesJSON      *json.RawMessage
+	Trades          json.RawMessage
 	ErrorMessage    *string
 	CreatedAt       time.Time
 	CompletedAt     *time.Time
@@ -59,10 +59,7 @@ func FromBacktestRunEntity(e *entities.BacktestRun) *BacktestRun {
 		CreatedAt:       e.CreatedAt,
 		CompletedAt:     e.CompletedAt,
 	}
-	if e.TradesJSON != nil {
-		raw := json.RawMessage(e.TradesJSON)
-		r.TradesJSON = &raw
-	}
+	r.Trades = json.RawMessage(e.TradesJSON)
 	return r
 }
 
@@ -87,8 +84,6 @@ func (r *BacktestRun) ToEntity() *entities.BacktestRun {
 		CreatedAt:       r.CreatedAt,
 		CompletedAt:     r.CompletedAt,
 	}
-	if r.TradesJSON != nil {
-		e.TradesJSON = []byte(*r.TradesJSON)
-	}
+	e.TradesJSON = []byte(r.Trades)
 	return e
 }
