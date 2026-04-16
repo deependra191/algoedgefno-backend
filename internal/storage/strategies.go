@@ -2,13 +2,12 @@ package storage
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/deependra191/algoedgefno-backend/internal/models"
+	"github.com/deependra191/algoedgefno-backend/internal/entities"
 )
 
 type StrategyStore struct {
@@ -19,13 +18,13 @@ func NewStrategyStore(pool *pgxpool.Pool) *StrategyStore {
 	return &StrategyStore{pool: pool}
 }
 
-func (s *StrategyStore) Create(ctx context.Context, strategy *models.Strategy) error {
+func (s *StrategyStore) Create(ctx context.Context, strategy *entities.Strategy) error {
 	if strategy.ID == uuid.Nil {
 		strategy.ID = uuid.New()
 	}
 	var optionLeg interface{}
-	if strategy.OptionLeg != nil {
-		optionLeg = string(*strategy.OptionLeg)
+	if strategy.OptionLegJSON != nil {
+		optionLeg = string(strategy.OptionLegJSON)
 	}
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO strategies
@@ -42,7 +41,7 @@ func (s *StrategyStore) Create(ctx context.Context, strategy *models.Strategy) e
 	return err
 }
 
-func (s *StrategyStore) GetByID(ctx context.Context, id uuid.UUID) (*models.Strategy, error) {
+func (s *StrategyStore) GetByID(ctx context.Context, id uuid.UUID) (*entities.Strategy, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, name, description, underlying, instrument_type, expiry_rule, option_leg_json,
 		       entry_condition_type, target_pct, stop_loss_pct, time_exit_minutes, lot_size,
@@ -51,7 +50,7 @@ func (s *StrategyStore) GetByID(ctx context.Context, id uuid.UUID) (*models.Stra
 	return scanStrategy(row)
 }
 
-func (s *StrategyStore) List(ctx context.Context) ([]models.Strategy, error) {
+func (s *StrategyStore) List(ctx context.Context) ([]entities.Strategy, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, name, description, underlying, instrument_type, expiry_rule, option_leg_json,
 		       entry_condition_type, target_pct, stop_loss_pct, time_exit_minutes, lot_size,
@@ -62,7 +61,7 @@ func (s *StrategyStore) List(ctx context.Context) ([]models.Strategy, error) {
 	}
 	defer rows.Close()
 
-	var result []models.Strategy
+	var result []entities.Strategy
 	for rows.Next() {
 		s, err := scanStrategyRow(rows)
 		if err != nil {
@@ -73,10 +72,10 @@ func (s *StrategyStore) List(ctx context.Context) ([]models.Strategy, error) {
 	return result, rows.Err()
 }
 
-func (s *StrategyStore) Update(ctx context.Context, strategy *models.Strategy) error {
+func (s *StrategyStore) Update(ctx context.Context, strategy *entities.Strategy) error {
 	var optionLeg interface{}
-	if strategy.OptionLeg != nil {
-		optionLeg = string(*strategy.OptionLeg)
+	if strategy.OptionLegJSON != nil {
+		optionLeg = string(strategy.OptionLegJSON)
 	}
 	_, err := s.pool.Exec(ctx, `
 		UPDATE strategies SET
@@ -110,8 +109,8 @@ func (s *StrategyStore) Delete(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
-func scanStrategy(row pgx.Row) (*models.Strategy, error) {
-	var st models.Strategy
+func scanStrategy(row pgx.Row) (*entities.Strategy, error) {
+	var st entities.Strategy
 	var optionLegBytes []byte
 	var targetPct, stopLossPct, capitalPerTrade *float64
 	var timeExitMinutes *int
@@ -125,10 +124,7 @@ func scanStrategy(row pgx.Row) (*models.Strategy, error) {
 	if err != nil {
 		return nil, err
 	}
-	if optionLegBytes != nil {
-		raw := json.RawMessage(optionLegBytes)
-		st.OptionLeg = &raw
-	}
+	st.OptionLegJSON = optionLegBytes
 	st.TargetPct = targetPct
 	st.StopLossPct = stopLossPct
 	st.TimeExitMinutes = timeExitMinutes
@@ -136,8 +132,8 @@ func scanStrategy(row pgx.Row) (*models.Strategy, error) {
 	return &st, nil
 }
 
-func scanStrategyRow(rows pgx.Rows) (*models.Strategy, error) {
-	var st models.Strategy
+func scanStrategyRow(rows pgx.Rows) (*entities.Strategy, error) {
+	var st entities.Strategy
 	var optionLegBytes []byte
 	var targetPct, stopLossPct, capitalPerTrade *float64
 	var timeExitMinutes *int
@@ -151,10 +147,7 @@ func scanStrategyRow(rows pgx.Rows) (*models.Strategy, error) {
 	if err != nil {
 		return nil, err
 	}
-	if optionLegBytes != nil {
-		raw := json.RawMessage(optionLegBytes)
-		st.OptionLeg = &raw
-	}
+	st.OptionLegJSON = optionLegBytes
 	st.TargetPct = targetPct
 	st.StopLossPct = stopLossPct
 	st.TimeExitMinutes = timeExitMinutes

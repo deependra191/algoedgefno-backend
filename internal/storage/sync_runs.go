@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/deependra191/algoedgefno-backend/internal/entities"
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
@@ -17,7 +18,7 @@ func NewSyncRunStore(pool *pgxpool.Pool) *SyncRunStore {
 	return &SyncRunStore{pool: pool}
 }
 
-func (s *SyncRunStore) Create(ctx context.Context, run *models.SyncRun) error {
+func (s *SyncRunStore) Create(ctx context.Context, run *entities.SyncRun) error {
 	if run.ID == uuid.Nil {
 		run.ID = uuid.New()
 	}
@@ -47,7 +48,7 @@ func (s *SyncRunStore) Complete(ctx context.Context, id uuid.UUID, recordsProces
 	return err
 }
 
-func (s *SyncRunStore) ListByProvider(ctx context.Context, provider string, limit int) ([]models.SyncRun, error) {
+func (s *SyncRunStore) ListByProvider(ctx context.Context, provider string, limit int) ([]entities.SyncRun, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, provider, sync_type, status, records_processed, error_message, started_at, completed_at
 		FROM sync_runs WHERE provider = $1
@@ -59,9 +60,9 @@ func (s *SyncRunStore) ListByProvider(ctx context.Context, provider string, limi
 	}
 	defer rows.Close()
 
-	var result []models.SyncRun
+	var result []entities.SyncRun
 	for rows.Next() {
-		var r models.SyncRun
+		var r entities.SyncRun
 		var errMsg *string
 		if err := rows.Scan(
 			&r.ID, &r.Provider, &r.SyncType, &r.Status,

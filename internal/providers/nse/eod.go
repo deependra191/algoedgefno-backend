@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/deependra191/algoedgefno-backend/internal/entities"
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 	"github.com/deependra191/algoedgefno-backend/internal/providers"
 	"github.com/deependra191/algoedgefno-backend/internal/storage"
@@ -97,15 +98,35 @@ func (p *EODProvider) SyncInstruments(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("fetch bhavcopy: %w", err)
 	}
 
-	instruments := make([]models.Instrument, 0, len(rows))
+	instruments := make([]entities.Instrument, 0, len(rows))
 	for _, row := range rows {
-		instruments = append(instruments, bhavRowToInstrument(row))
+		instruments = append(instruments, modelToEntityInstrument(bhavRowToInstrument(row)))
 	}
 
 	if err := p.instrumentStore.UpsertBatch(ctx, instruments); err != nil {
 		return 0, fmt.Errorf("upsert instruments: %w", err)
 	}
 	return len(instruments), nil
+}
+
+// modelToEntityInstrument is a temporary bridge kept while bhavRowToInstrument
+// still returns models.Instrument. It is removed in the next commit when the
+// NSE provider is switched to return entities.Instrument directly.
+func modelToEntityInstrument(m models.Instrument) entities.Instrument {
+	return entities.Instrument{
+		ID:             m.ID,
+		Symbol:         m.Symbol,
+		Name:           m.Name,
+		Exchange:       m.Exchange,
+		InstrumentType: m.InstrumentType,
+		Underlying:     m.Underlying,
+		Expiry:         m.Expiry,
+		Strike:         m.Strike,
+		OptionType:     m.OptionType,
+		LotSize:        m.LotSize,
+		CreatedAt:      m.CreatedAt,
+		UpdatedAt:      m.UpdatedAt,
+	}
 }
 
 func (p *EODProvider) SyncCandles(ctx context.Context) (int, error) {
@@ -125,13 +146,13 @@ func (p *EODProvider) SyncCandles(ctx context.Context) (int, error) {
 		instrMap[inst.Symbol] = inst.ID
 	}
 
-	candles := make([]models.Candle, 0, len(rows))
+	candles := make([]entities.Candle, 0, len(rows))
 	for _, row := range rows {
 		id, ok := instrMap[row.Symbol]
 		if !ok {
 			continue
 		}
-		candles = append(candles, models.Candle{
+		candles = append(candles, entities.Candle{
 			InstrumentID: id,
 			Timestamp:    row.Date,
 			Interval:     eodInterval,

@@ -2,13 +2,12 @@ package storage
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/deependra191/algoedgefno-backend/internal/models"
+	"github.com/deependra191/algoedgefno-backend/internal/entities"
 )
 
 type BacktestStore struct {
@@ -19,7 +18,7 @@ func NewBacktestStore(pool *pgxpool.Pool) *BacktestStore {
 	return &BacktestStore{pool: pool}
 }
 
-func (s *BacktestStore) Create(ctx context.Context, run *models.BacktestRun) error {
+func (s *BacktestStore) Create(ctx context.Context, run *entities.BacktestRun) error {
 	if run.ID == uuid.Nil {
 		run.ID = uuid.New()
 	}
@@ -33,7 +32,7 @@ func (s *BacktestStore) Create(ctx context.Context, run *models.BacktestRun) err
 	return err
 }
 
-func (s *BacktestStore) GetByID(ctx context.Context, id uuid.UUID) (*models.BacktestRun, error) {
+func (s *BacktestStore) GetByID(ctx context.Context, id uuid.UUID) (*entities.BacktestRun, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, strategy_id, instrument_token, from_ts, to_ts, candle_interval, status,
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
@@ -42,7 +41,7 @@ func (s *BacktestStore) GetByID(ctx context.Context, id uuid.UUID) (*models.Back
 	return scanBacktestRun(row)
 }
 
-func (s *BacktestStore) ListByStrategy(ctx context.Context, strategyID uuid.UUID) ([]models.BacktestRun, error) {
+func (s *BacktestStore) ListByStrategy(ctx context.Context, strategyID uuid.UUID) ([]entities.BacktestRun, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, strategy_id, instrument_token, from_ts, to_ts, candle_interval, status,
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
@@ -53,7 +52,7 @@ func (s *BacktestStore) ListByStrategy(ctx context.Context, strategyID uuid.UUID
 	}
 	defer rows.Close()
 
-	var result []models.BacktestRun
+	var result []entities.BacktestRun
 	for rows.Next() {
 		run, err := scanBacktestRunRow(rows)
 		if err != nil {
@@ -65,10 +64,10 @@ func (s *BacktestStore) ListByStrategy(ctx context.Context, strategyID uuid.UUID
 }
 
 // UpdateResult persists final backtest results (status, metrics, trades, error).
-func (s *BacktestStore) UpdateResult(ctx context.Context, run *models.BacktestRun) error {
+func (s *BacktestStore) UpdateResult(ctx context.Context, run *entities.BacktestRun) error {
 	var tradesJSON interface{}
 	if run.TradesJSON != nil {
-		tradesJSON = string(*run.TradesJSON)
+		tradesJSON = string(run.TradesJSON)
 	}
 	_, err := s.pool.Exec(ctx, `
 		UPDATE backtest_runs SET
@@ -88,8 +87,8 @@ func (s *BacktestStore) UpdateResult(ctx context.Context, run *models.BacktestRu
 	return err
 }
 
-func scanBacktestRun(row pgx.Row) (*models.BacktestRun, error) {
-	var r models.BacktestRun
+func scanBacktestRun(row pgx.Row) (*entities.BacktestRun, error) {
+	var r entities.BacktestRun
 	var tradesBytes []byte
 	var netPnl, maxDrawdown *float64
 	var totalTrades, winCount, lossCount *int
@@ -103,10 +102,7 @@ func scanBacktestRun(row pgx.Row) (*models.BacktestRun, error) {
 	if err != nil {
 		return nil, err
 	}
-	if tradesBytes != nil {
-		raw := json.RawMessage(tradesBytes)
-		r.TradesJSON = &raw
-	}
+	r.TradesJSON = tradesBytes
 	r.NetPnl = netPnl
 	r.TotalTrades = totalTrades
 	r.WinCount = winCount
@@ -116,8 +112,8 @@ func scanBacktestRun(row pgx.Row) (*models.BacktestRun, error) {
 	return &r, nil
 }
 
-func scanBacktestRunRow(rows pgx.Rows) (*models.BacktestRun, error) {
-	var r models.BacktestRun
+func scanBacktestRunRow(rows pgx.Rows) (*entities.BacktestRun, error) {
+	var r entities.BacktestRun
 	var tradesBytes []byte
 	var netPnl, maxDrawdown *float64
 	var totalTrades, winCount, lossCount *int
@@ -131,10 +127,7 @@ func scanBacktestRunRow(rows pgx.Rows) (*models.BacktestRun, error) {
 	if err != nil {
 		return nil, err
 	}
-	if tradesBytes != nil {
-		raw := json.RawMessage(tradesBytes)
-		r.TradesJSON = &raw
-	}
+	r.TradesJSON = tradesBytes
 	r.NetPnl = netPnl
 	r.TotalTrades = totalTrades
 	r.WinCount = winCount
