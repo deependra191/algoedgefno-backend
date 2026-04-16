@@ -1,23 +1,24 @@
 package services
 
 import (
+	"context"
 	"errors"
 	"time"
 
 	"github.com/deependra191/algoedgefno-backend/internal/models"
-	"github.com/deependra191/algoedgefno-backend/internal/repository"
+	"github.com/deependra191/algoedgefno-backend/internal/storage"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/bcrypt"
-	"gorm.io/gorm"
 )
 
 type AuthService struct {
-	userRepo  *repository.UserRepository
+	userRepo  *storage.UserStore
 	jwtSecret []byte
 }
 
-func NewAuthService(userRepo *repository.UserRepository, jwtSecret string) *AuthService {
+func NewAuthService(userRepo *storage.UserStore, jwtSecret string) *AuthService {
 	return &AuthService{
 		userRepo:  userRepo,
 		jwtSecret: []byte(jwtSecret),
@@ -40,12 +41,16 @@ type AuthResult struct {
 	User  *models.User
 }
 
-func (s *AuthService) Register(input RegisterInput) (*AuthResult, error) {
-	if _, err := s.userRepo.FindByEmail(input.Email); err == nil {
+func (s *AuthService) Register(ctx context.Context, input RegisterInput) (*AuthResult, error) {
+	_, err := s.userRepo.FindByEmail(ctx, input.Email)
+	if err == nil {
 		return nil, errors.New("email already registered")
 	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, errors.New("failed to check existing user")
+	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), 12)
+	hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), bcryptCost)
 	if err != nil {
 		return nil, errors.New("failed to process password")
 	}
@@ -57,7 +62,7 @@ func (s *AuthService) Register(input RegisterInput) (*AuthResult, error) {
 		PasswordHash: string(hash),
 	}
 
-	if err := s.userRepo.Create(user); err != nil {
+	if err := s.userRepo.Create(ctx, user); err != nil {
 		return nil, errors.New("failed to create user")
 	}
 
@@ -69,16 +74,42 @@ func (s *AuthService) Register(input RegisterInput) (*AuthResult, error) {
 	return &AuthResult{Token: token, User: user}, nil
 }
 
-func (s *AuthService) Login(input LoginInput) (*AuthResult, error) {
-	user, err := s.userRepo.FindByEmail(input.Email)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+const (
+	// bcryptCost is the work factor for password hashing.
+	// Higher = slower hashing = more expensive brute force. 12 ≈ 250ms on modern hardware.
+	bcryptCost = 12
+
+	// tokenExpiry is how long a JWT remains valid after issue.
+	tokenExpiry = 24 * time.Hour
+
+	// jwtSubClaim is the JWT claim key used to store and retrieve the user ID.
+	// Must match in both generateToken and ValidateToken.
+	jwtSubClaim = "sub"
+
+	// dummyHash is used in Login to ensure bcrypt runs even when a user is not found,
+	// preventing user enumeration via response timing differences.
+	dummyHash = "$2a$12$dummy.hash.for.timing.mitigation.only.not.a.real.hash.."
+)
+
+func (s *AuthService) Login(ctx context.Context, input LoginInput) (*AuthResult, error) {
+	user, lookupErr := s.userRepo.FindByEmail(ctx, input.Email)
+
+	// Always run bcrypt regardless of whether the user exists.
+	// This prevents an attacker from enumerating valid emails by measuring
+	// response time — bcrypt without this check returns instantly for unknown emails.
+	hashToCheck := dummyHash
+	if lookupErr == nil {
+		hashToCheck = user.PasswordHash
+	}
+	bcryptErr := bcrypt.CompareHashAndPassword([]byte(hashToCheck), []byte(input.Password))
+
+	if lookupErr != nil {
+		if errors.Is(lookupErr, pgx.ErrNoRows) {
 			return nil, errors.New("invalid credentials")
 		}
 		return nil, errors.New("failed to find user")
 	}
-
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(input.Password)); err != nil {
+	if bcryptErr != nil {
 		return nil, errors.New("invalid credentials")
 	}
 
@@ -106,7 +137,7 @@ func (s *AuthService) ValidateToken(tokenStr string) (string, error) {
 		return "", errors.New("invalid token claims")
 	}
 
-	userID, ok := claims["sub"].(string)
+	userID, ok := claims[jwtSubClaim].(string)
 	if !ok {
 		return "", errors.New("invalid token subject")
 	}
@@ -116,9 +147,9 @@ func (s *AuthService) ValidateToken(tokenStr string) (string, error) {
 
 func (s *AuthService) generateToken(userID string) (string, error) {
 	claims := jwt.MapClaims{
-		"sub": userID,
-		"exp": time.Now().Add(24 * time.Hour).Unix(),
-		"iat": time.Now().Unix(),
+		jwtSubClaim: userID,
+		"exp":       time.Now().Add(tokenExpiry).Unix(),
+		"iat":       time.Now().Unix(),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString(s.jwtSecret)
