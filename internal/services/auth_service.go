@@ -75,21 +75,10 @@ func (s *AuthService) Register(ctx context.Context, input RegisterInput) (*AuthR
 	return &AuthResult{Token: token, User: entityToModelUser(ent)}, nil
 }
 
-// entityToModelUser is a temporary bridge kept while models.User still
-// matches entities.User field-for-field. It is removed once models is
-// narrowed to a domain-only type with dedicated mappers.
+// entityToModelUser is a temporary bridge replaced by models.FromUserEntity
+// in the next commit when AuthResult is updated to hold a domain User.
 func entityToModelUser(e *entities.User) *models.User {
-	if e == nil {
-		return nil
-	}
-	return &models.User{
-		ID:           e.ID,
-		Email:        e.Email,
-		Name:         e.Name,
-		PasswordHash: e.PasswordHash,
-		CreatedAt:    e.CreatedAt,
-		UpdatedAt:    e.UpdatedAt,
-	}
+	return models.FromUserEntity(e)
 }
 
 const (
