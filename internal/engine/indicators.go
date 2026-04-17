@@ -145,8 +145,6 @@ func ATR(candles []models.Candle, period int) []float64 {
 		return out
 	}
 
-	out[0] = math.NaN()
-
 	tr := make([]float64, n)
 	tr[0] = candles[0].High - candles[0].Low
 	for i := 1; i < n; i++ {

@@ -37,7 +37,7 @@ func (s *SyncService) SyncProvider(ctx context.Context, providerName string) (*m
 	run := &models.SyncRun{
 		ID:       runID,
 		Provider: providerName,
-		SyncType: "full",
+		SyncType: models.SyncTypeFull,
 		Status:   models.SyncRunRunning,
 	}
 

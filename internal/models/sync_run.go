@@ -25,6 +25,8 @@ const (
 	SyncRunRunning   = "RUNNING"
 	SyncRunCompleted = "COMPLETED"
 	SyncRunFailed    = "FAILED"
+
+	SyncTypeFull = "full"
 )
 
 func FromSyncRunEntity(e *entities.SyncRun) *SyncRun {

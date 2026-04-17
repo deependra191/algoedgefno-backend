@@ -46,7 +46,7 @@ func TestEvaluate_UnknownCondition(t *testing.T) {
 }
 
 func TestEvaluate_EmptyCandles(t *testing.T) {
-	s := &models.Strategy{EntryConditionType: "MA_CROSSOVER"}
+	s := &models.Strategy{EntryConditionType: models.EntryConditionMACrossover}
 	signals, err := Evaluate(s, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -71,7 +71,7 @@ func TestEvaluateMACrossover(t *testing.T) {
 	}
 	candles := makeCandleSeries(closes, 5)
 
-	s := &models.Strategy{EntryConditionType: "MA_CROSSOVER"}
+	s := &models.Strategy{EntryConditionType: models.EntryConditionMACrossover}
 	signals, err := Evaluate(s, candles)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -111,7 +111,7 @@ func TestEvaluateRSI(t *testing.T) {
 	}
 	candles := makeCandleSeries(closes, 5)
 
-	s := &models.Strategy{EntryConditionType: "RSI_OVERSOLD"}
+	s := &models.Strategy{EntryConditionType: models.EntryConditionRSIOversold}
 	signals, err := Evaluate(s, candles)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -134,7 +134,7 @@ func TestEvaluateMomentum(t *testing.T) {
 	}
 	candles := makeCandleSeries(closes, 5)
 
-	s := &models.Strategy{EntryConditionType: "MOMENTUM"}
+	s := &models.Strategy{EntryConditionType: models.EntryConditionMomentum}
 	signals, err := Evaluate(s, candles)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -151,7 +151,7 @@ func TestEvaluateMomentum(t *testing.T) {
 func TestRunBacktest_MACrossover(t *testing.T) {
 	candles := makeUpDownCandles(30, 30)
 	s := &models.Strategy{
-		EntryConditionType: "MA_CROSSOVER",
+		EntryConditionType: models.EntryConditionMACrossover,
 		LotSize:            1,
 	}
 
@@ -205,7 +205,7 @@ func TestRunBacktest_TargetHit(t *testing.T) {
 	candles := makeCandleSeries(closes, 5)
 
 	s := &models.Strategy{
-		EntryConditionType: "MA_CROSSOVER",
+		EntryConditionType: models.EntryConditionMACrossover,
 		LotSize:            2,
 		TargetPct:          ptrFloat(5.0),
 	}
@@ -217,7 +217,7 @@ func TestRunBacktest_TargetHit(t *testing.T) {
 
 	targetHit := false
 	for _, tr := range result.Trades {
-		if tr.ExitReason == "target" {
+		if tr.ExitReason == ExitReasonTarget {
 			targetHit = true
 			if tr.PnL <= 0 {
 				t.Errorf("target exit should have positive PnL, got %f", tr.PnL)
@@ -247,7 +247,7 @@ func TestRunBacktest_StopLossHit(t *testing.T) {
 	candles := makeCandleSeries(closes, 5)
 
 	s := &models.Strategy{
-		EntryConditionType: "MA_CROSSOVER",
+		EntryConditionType: models.EntryConditionMACrossover,
 		LotSize:            1,
 		StopLossPct:        ptrFloat(3.0),
 	}
@@ -259,7 +259,7 @@ func TestRunBacktest_StopLossHit(t *testing.T) {
 
 	slHit := false
 	for _, tr := range result.Trades {
-		if tr.ExitReason == "stop_loss" {
+		if tr.ExitReason == ExitReasonStopLoss {
 			slHit = true
 			if tr.PnL >= 0 {
 				t.Errorf("stop loss exit should have negative PnL, got %f", tr.PnL)
@@ -283,7 +283,7 @@ func TestRunBacktest_TimeExit(t *testing.T) {
 	candles := makeCandleSeries(closes, 5)
 
 	s := &models.Strategy{
-		EntryConditionType: "MA_CROSSOVER",
+		EntryConditionType: models.EntryConditionMACrossover,
 		LotSize:            1,
 		TimeExitMinutes:    ptrInt(20),
 	}
@@ -295,7 +295,7 @@ func TestRunBacktest_TimeExit(t *testing.T) {
 
 	timeExitFound := false
 	for _, tr := range result.Trades {
-		if tr.ExitReason == "time_exit" {
+		if tr.ExitReason == ExitReasonTimeExit {
 			timeExitFound = true
 			elapsed := tr.ExitTimestamp.Sub(tr.EntryTimestamp)
 			if elapsed < 20*time.Minute {
@@ -311,7 +311,7 @@ func TestRunBacktest_TimeExit(t *testing.T) {
 func TestRunBacktest_MaxDrawdown(t *testing.T) {
 	candles := makeUpDownCandles(30, 30)
 	s := &models.Strategy{
-		EntryConditionType: "MA_CROSSOVER",
+		EntryConditionType: models.EntryConditionMACrossover,
 		LotSize:            1,
 	}
 
@@ -329,7 +329,7 @@ func TestRunBacktest_NoSignals(t *testing.T) {
 	// Flat prices → no MA crossover
 	candles := makeCandleSeries([]float64{100, 100, 100, 100, 100}, 5)
 	s := &models.Strategy{
-		EntryConditionType: "MA_CROSSOVER",
+		EntryConditionType: models.EntryConditionMACrossover,
 		LotSize:            1,
 	}
 
@@ -349,7 +349,7 @@ func TestRunBacktest_NoSignals(t *testing.T) {
 func TestRunBacktest_LotSizeApplied(t *testing.T) {
 	candles := makeUpDownCandles(30, 30)
 	s := &models.Strategy{
-		EntryConditionType: "MA_CROSSOVER",
+		EntryConditionType: models.EntryConditionMACrossover,
 		LotSize:            10,
 	}
 

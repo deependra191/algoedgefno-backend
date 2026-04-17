@@ -23,13 +23,13 @@ func Evaluate(strategy *models.Strategy, candles []models.Candle) ([]Signal, err
 	}
 
 	switch strategy.EntryConditionType {
-	case "MA_CROSSOVER":
+	case models.EntryConditionMACrossover:
 		return evaluateMACrossover(candles)
-	case "SUPERTREND":
+	case models.EntryConditionSupertrend:
 		return evaluateSupertrend(candles)
-	case "RSI_OVERSOLD":
+	case models.EntryConditionRSIOversold:
 		return evaluateRSI(candles)
-	case "MOMENTUM":
+	case models.EntryConditionMomentum:
 		return evaluateMomentum(candles)
 	default:
 		return nil, fmt.Errorf("unknown entry condition type: %s", strategy.EntryConditionType)

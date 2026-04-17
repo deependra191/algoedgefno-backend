@@ -32,6 +32,13 @@ type Strategy struct {
 	UpdatedAt          time.Time
 }
 
+const (
+	EntryConditionMACrossover = "MA_CROSSOVER"
+	EntryConditionSupertrend  = "SUPERTREND"
+	EntryConditionRSIOversold = "RSI_OVERSOLD"
+	EntryConditionMomentum    = "MOMENTUM"
+)
+
 func FromStrategyEntity(e *entities.Strategy) *Strategy {
 	if e == nil {
 		return nil

@@ -7,10 +7,18 @@ import (
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
+const (
+	ExitReasonTarget         = "target"
+	ExitReasonStopLoss       = "stop_loss"
+	ExitReasonTimeExit       = "time_exit"
+	ExitReasonSignalReversal = "signal_reversal"
+	ExitReasonEndOfData      = "end_of_data"
+)
+
 type Trade struct {
 	EntryTimestamp time.Time
 	ExitTimestamp  time.Time
-	Side          string
+	Side          SignalSide
 	Quantity      int
 	EntryPrice    float64
 	ExitPrice     float64
@@ -71,9 +79,9 @@ func RunBacktest(strategy *models.Strategy, candles []models.Candle) (*BacktestR
 			sigIdx++
 
 			if openTrade != nil {
-				if (openTrade.Side == "BUY" && sig.Side == SignalSell) ||
-					(openTrade.Side == "SELL" && sig.Side == SignalBuy) {
-					closeTrade(openTrade, sig.Price, sig.Timestamp, "signal_reversal", qty)
+				if (openTrade.Side == SignalBuy && sig.Side == SignalSell) ||
+					(openTrade.Side == SignalSell && sig.Side == SignalBuy) {
+					closeTrade(openTrade, sig.Price, sig.Timestamp, ExitReasonSignalReversal, qty)
 					result.Trades = append(result.Trades, *openTrade)
 					equity += openTrade.PnL
 					if equity > peakEquity {
@@ -93,7 +101,7 @@ func RunBacktest(strategy *models.Strategy, candles []models.Candle) (*BacktestR
 
 			openTrade = &Trade{
 				EntryTimestamp: sig.Timestamp,
-				Side:          string(sig.Side),
+				Side:          sig.Side,
 				Quantity:      qty,
 				EntryPrice:    sig.Price,
 				Reason:        sig.Reason,
@@ -103,7 +111,7 @@ func RunBacktest(strategy *models.Strategy, candles []models.Candle) (*BacktestR
 
 	if openTrade != nil {
 		last := candles[len(candles)-1]
-		closeTrade(openTrade, last.Close, last.Timestamp, "end_of_data", qty)
+		closeTrade(openTrade, last.Close, last.Timestamp, ExitReasonEndOfData, qty)
 		result.Trades = append(result.Trades, *openTrade)
 		equity += openTrade.PnL
 		if equity > peakEquity {
@@ -134,26 +142,26 @@ func RunBacktest(strategy *models.Strategy, candles []models.Candle) (*BacktestR
 func checkExitConditions(trade *Trade, candle *models.Candle, strategy *models.Strategy) (string, float64) {
 	if strategy.TargetPct != nil {
 		target := *strategy.TargetPct / 100
-		if trade.Side == "BUY" {
+		if trade.Side == SignalBuy {
 			if candle.High >= trade.EntryPrice*(1+target) {
-				return "target", trade.EntryPrice * (1 + target)
+				return ExitReasonTarget, trade.EntryPrice * (1 + target)
 			}
 		} else {
 			if candle.Low <= trade.EntryPrice*(1-target) {
-				return "target", trade.EntryPrice * (1 - target)
+				return ExitReasonTarget, trade.EntryPrice * (1 - target)
 			}
 		}
 	}
 
 	if strategy.StopLossPct != nil {
 		sl := *strategy.StopLossPct / 100
-		if trade.Side == "BUY" {
+		if trade.Side == SignalBuy {
 			if candle.Low <= trade.EntryPrice*(1-sl) {
-				return "stop_loss", trade.EntryPrice * (1 - sl)
+				return ExitReasonStopLoss, trade.EntryPrice * (1 - sl)
 			}
 		} else {
 			if candle.High >= trade.EntryPrice*(1+sl) {
-				return "stop_loss", trade.EntryPrice * (1 + sl)
+				return ExitReasonStopLoss, trade.EntryPrice * (1 + sl)
 			}
 		}
 	}
@@ -161,7 +169,7 @@ func checkExitConditions(trade *Trade, candle *models.Candle, strategy *models.S
 	if strategy.TimeExitMinutes != nil {
 		elapsed := candle.Timestamp.Sub(trade.EntryTimestamp)
 		if elapsed >= time.Duration(*strategy.TimeExitMinutes)*time.Minute {
-			return "time_exit", candle.Close
+			return ExitReasonTimeExit, candle.Close
 		}
 	}
 
@@ -172,7 +180,7 @@ func closeTrade(trade *Trade, exitPrice float64, exitTime time.Time, reason stri
 	trade.ExitTimestamp = exitTime
 	trade.ExitPrice = exitPrice
 	trade.ExitReason = reason
-	if trade.Side == "BUY" {
+	if trade.Side == SignalBuy {
 		trade.PnL = (exitPrice - trade.EntryPrice) * float64(qty)
 	} else {
 		trade.PnL = (trade.EntryPrice - exitPrice) * float64(qty)

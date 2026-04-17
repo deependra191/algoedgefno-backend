@@ -101,7 +101,10 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 		return s.failRun(ctx, run, err.Error())
 	}
 
-	tradesJSON, _ := json.Marshal(result.Trades)
+	tradesJSON, err := json.Marshal(result.Trades)
+	if err != nil {
+		return s.failRun(ctx, run, "failed to marshal trade results")
+	}
 	run.Status = models.BacktestCompleted
 	run.NetPnl = &result.NetPnL
 	run.TotalTrades = &result.TotalTrades
