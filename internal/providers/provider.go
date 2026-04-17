@@ -14,11 +14,13 @@ const (
 	CapLiveTicks         Capability = "live_ticks"
 )
 
-// ProviderStatus is returned to the Android app via /api/v1/provider/status.
+// ProviderStatus is a service-internal representation of a provider's health
+// and capabilities. Handlers must map this to a local response DTO before
+// serializing to JSON — it carries no `json:` tags on purpose.
 type ProviderStatus struct {
-	Name         string       `json:"name"`
-	Capabilities []Capability `json:"capabilities"`
-	Healthy      bool         `json:"healthy"`
+	Name         string
+	Capabilities []Capability
+	Healthy      bool
 }
 
 // MarketDataProvider is the interface every data source must implement.

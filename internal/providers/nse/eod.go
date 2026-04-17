@@ -16,7 +16,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/deependra191/algoedgefno-backend/internal/models"
+	"github.com/deependra191/algoedgefno-backend/internal/entities"
 	"github.com/deependra191/algoedgefno-backend/internal/providers"
 	"github.com/deependra191/algoedgefno-backend/internal/storage"
 )
@@ -97,7 +97,7 @@ func (p *EODProvider) SyncInstruments(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("fetch bhavcopy: %w", err)
 	}
 
-	instruments := make([]models.Instrument, 0, len(rows))
+	instruments := make([]entities.Instrument, 0, len(rows))
 	for _, row := range rows {
 		instruments = append(instruments, bhavRowToInstrument(row))
 	}
@@ -125,13 +125,13 @@ func (p *EODProvider) SyncCandles(ctx context.Context) (int, error) {
 		instrMap[inst.Symbol] = inst.ID
 	}
 
-	candles := make([]models.Candle, 0, len(rows))
+	candles := make([]entities.Candle, 0, len(rows))
 	for _, row := range rows {
 		id, ok := instrMap[row.Symbol]
 		if !ok {
 			continue
 		}
-		candles = append(candles, models.Candle{
+		candles = append(candles, entities.Candle{
 			InstrumentID: id,
 			Timestamp:    row.Date,
 			Interval:     eodInterval,
@@ -344,8 +344,8 @@ func parseRow(rec []string, cols colMap, fallbackDate time.Time) (bhavRow, error
 	}, nil
 }
 
-func bhavRowToInstrument(row bhavRow) models.Instrument {
-	inst := models.Instrument{
+func bhavRowToInstrument(row bhavRow) entities.Instrument {
+	inst := entities.Instrument{
 		ID:             uuid.New(),
 		Symbol:         row.Symbol,
 		Name:           row.Symbol,

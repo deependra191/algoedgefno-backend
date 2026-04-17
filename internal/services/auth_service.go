@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/deependra191/algoedgefno-backend/internal/entities"
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 	"github.com/deependra191/algoedgefno-backend/internal/storage"
 	"github.com/golang-jwt/jwt/v5"
@@ -55,23 +56,23 @@ func (s *AuthService) Register(ctx context.Context, input RegisterInput) (*AuthR
 		return nil, errors.New("failed to process password")
 	}
 
-	user := &models.User{
+	ent := &entities.User{
 		ID:           uuid.New(),
 		Email:        input.Email,
 		Name:         input.Name,
 		PasswordHash: string(hash),
 	}
 
-	if err := s.userRepo.Create(ctx, user); err != nil {
+	if err := s.userRepo.Create(ctx, ent); err != nil {
 		return nil, errors.New("failed to create user")
 	}
 
-	token, err := s.generateToken(user.ID.String())
+	token, err := s.generateToken(ent.ID.String())
 	if err != nil {
 		return nil, errors.New("failed to generate token")
 	}
 
-	return &AuthResult{Token: token, User: user}, nil
+	return &AuthResult{Token: token, User: models.FromUserEntity(ent)}, nil
 }
 
 const (
@@ -118,7 +119,7 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (*AuthResult,
 		return nil, errors.New("failed to generate token")
 	}
 
-	return &AuthResult{Token: token, User: user}, nil
+	return &AuthResult{Token: token, User: models.FromUserEntity(user)}, nil
 }
 
 func (s *AuthService) ValidateToken(tokenStr string) (string, error) {
