@@ -3,7 +3,6 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/deependra191/algoedgefno-backend/internal/models"
 	"github.com/deependra191/algoedgefno-backend/internal/services"
 	"github.com/gin-gonic/gin"
 )
@@ -19,13 +18,6 @@ type registerRequest struct {
 type loginRequest struct {
 	Email    string `json:"email"    binding:"required,email"`
 	Password string `json:"password" binding:"required,min=8"`
-}
-
-// --- response structs ---
-
-type authResponse struct {
-	Token string       `json:"token"`
-	User  *models.User `json:"user"`
 }
 
 // --- handler ---
@@ -55,7 +47,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, authResponse{Token: result.Token, User: result.User})
+	c.JSON(http.StatusCreated, authResponse{Token: result.Token, User: toUserResponse(result.User)})
 }
 
 func (h *AuthHandler) Login(c *gin.Context) {
@@ -74,5 +66,5 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, authResponse{Token: result.Token, User: result.User})
+	c.JSON(http.StatusOK, authResponse{Token: result.Token, User: toUserResponse(result.User)})
 }

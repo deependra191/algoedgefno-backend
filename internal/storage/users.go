@@ -3,7 +3,7 @@ package storage
 import (
 	"context"
 
-	"github.com/deependra191/algoedgefno-backend/internal/models"
+	"github.com/deependra191/algoedgefno-backend/internal/entities"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -15,7 +15,7 @@ func NewUserStore(pool *pgxpool.Pool) *UserStore {
 	return &UserStore{pool: pool}
 }
 
-func (r *UserStore) Create(ctx context.Context, user *models.User) error {
+func (r *UserStore) Create(ctx context.Context, user *entities.User) error {
 	_, err := r.pool.Exec(ctx,
 		`INSERT INTO users (id, email, name, password_hash, created_at, updated_at)
 		 VALUES ($1, $2, $3, $4, NOW(), NOW())`,
@@ -24,8 +24,8 @@ func (r *UserStore) Create(ctx context.Context, user *models.User) error {
 	return err
 }
 
-func (r *UserStore) FindByEmail(ctx context.Context, email string) (*models.User, error) {
-	var u models.User
+func (r *UserStore) FindByEmail(ctx context.Context, email string) (*entities.User, error) {
+	var u entities.User
 	err := r.pool.QueryRow(ctx,
 		`SELECT id, email, name, password_hash, created_at, updated_at
 		 FROM users WHERE email = $1`, email,
@@ -36,8 +36,8 @@ func (r *UserStore) FindByEmail(ctx context.Context, email string) (*models.User
 	return &u, nil
 }
 
-func (r *UserStore) FindByID(ctx context.Context, id string) (*models.User, error) {
-	var u models.User
+func (r *UserStore) FindByID(ctx context.Context, id string) (*entities.User, error) {
+	var u entities.User
 	err := r.pool.QueryRow(ctx,
 		`SELECT id, email, name, password_hash, created_at, updated_at
 		 FROM users WHERE id = $1`, id,
