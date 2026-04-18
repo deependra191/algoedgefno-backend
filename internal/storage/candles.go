@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -44,6 +45,66 @@ func (s *CandleStore) InsertBatch(ctx context.Context, candles []entities.Candle
 		}),
 	)
 	return count, err
+}
+
+// InsertBatchIgnoreDuplicates bulk-inserts candles, skipping any that already exist
+// (matching on the instrument_id, ts, interval primary key).
+// Uses COPY into a staging table + INSERT ... ON CONFLICT DO NOTHING for performance.
+func (s *CandleStore) InsertBatchIgnoreDuplicates(ctx context.Context, candles []entities.Candle) (int64, error) {
+	if len(candles) == 0 {
+		return 0, nil
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+
+	_, err = tx.Exec(ctx, `
+		CREATE TEMP TABLE _candle_stage (
+			instrument_id UUID,
+			ts            TIMESTAMPTZ,
+			interval      TEXT,
+			open          DOUBLE PRECISION,
+			high          DOUBLE PRECISION,
+			low           DOUBLE PRECISION,
+			close         DOUBLE PRECISION,
+			volume        BIGINT,
+			provider      TEXT
+		) ON COMMIT DROP`)
+	if err != nil {
+		return 0, fmt.Errorf("create staging table: %w", err)
+	}
+
+	columns := []string{"instrument_id", "ts", "interval", "open", "high", "low", "close", "volume", "provider"}
+	_, err = tx.CopyFrom(
+		ctx,
+		pgx.Identifier{"_candle_stage"},
+		columns,
+		pgx.CopyFromSlice(len(candles), func(i int) ([]any, error) {
+			c := candles[i]
+			return []any{c.InstrumentID, c.Timestamp, c.Interval, c.Open, c.High, c.Low, c.Close, c.Volume, c.Provider}, nil
+		}),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("copy to staging: %w", err)
+	}
+
+	tag, err := tx.Exec(ctx, `
+		INSERT INTO candles (instrument_id, ts, interval, open, high, low, close, volume, provider)
+		SELECT instrument_id, ts, interval, open, high, low, close, volume, provider
+		FROM _candle_stage
+		ON CONFLICT (instrument_id, ts, interval) DO NOTHING`)
+	if err != nil {
+		return 0, fmt.Errorf("insert from staging: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+
+	return tag.RowsAffected(), nil
 }
 
 // Query returns candles for an instrument within a time range, ordered chronologically.

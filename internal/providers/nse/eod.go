@@ -43,19 +43,21 @@ type bhavRow struct {
 	Low            float64
 	Close          float64
 	Volume         int64
+	LotSize        int
 	Date           time.Time
 }
 
 // colMap holds resolved column indices for the CSV.
 type colMap struct {
 	instrType, symbol, underlying, expiry, strike, optType int
-	open, high, low, close_, vol, ts                       int
+	open, high, low, close_, vol, ts, lotSize              int
 }
 
 type EODProvider struct {
 	instrumentStore *storage.InstrumentStore
 	candleStore     *storage.CandleStore
 	httpClient      *http.Client
+	targetDate      time.Time
 	// Cache to avoid downloading the same bhavcopy twice in one sync cycle.
 	// cacheMu protects cachedRows and cachedDate against concurrent sync calls.
 	cacheMu    sync.Mutex
@@ -70,6 +72,8 @@ func NewEODProvider(instrumentStore *storage.InstrumentStore, candleStore *stora
 		httpClient:      &http.Client{Timeout: 60 * time.Second},
 	}
 }
+
+func (p *EODProvider) SetTargetDate(date time.Time) { p.targetDate = date }
 
 func (p *EODProvider) Name() string { return "nse_eod" }
 
@@ -147,7 +151,7 @@ func (p *EODProvider) SyncCandles(ctx context.Context) (int, error) {
 	if len(candles) == 0 {
 		return 0, nil
 	}
-	count, err := p.candleStore.InsertBatch(ctx, candles)
+	count, err := p.candleStore.InsertBatchIgnoreDuplicates(ctx, candles)
 	if err != nil {
 		return 0, fmt.Errorf("insert candles: %w", err)
 	}
@@ -161,17 +165,30 @@ func (p *EODProvider) fetchLatestBhavcopy(ctx context.Context) ([]bhavRow, error
 	p.cacheMu.Lock()
 	defer p.cacheMu.Unlock()
 
-	today := latestTradingDate()
-	if p.cachedRows != nil && p.cachedDate.Equal(today) {
+	anchor := latestTradingDate()
+	if !p.targetDate.IsZero() {
+		anchor = p.targetDate
+	}
+	if p.cachedRows != nil && p.cachedDate.Equal(anchor) {
 		return p.cachedRows, nil
 	}
 
-	date := today
+	if !p.targetDate.IsZero() {
+		rows, err := p.downloadBhavcopy(ctx, p.targetDate)
+		if err != nil {
+			return nil, fmt.Errorf("bhavcopy for %s: %w", p.targetDate.Format("2006-01-02"), err)
+		}
+		p.cachedRows = rows
+		p.cachedDate = anchor
+		return rows, nil
+	}
+
+	date := anchor
 	for i := 0; i < 7; i++ {
 		rows, err := p.downloadBhavcopy(ctx, date)
 		if err == nil {
 			p.cachedRows = rows
-			p.cachedDate = today
+			p.cachedDate = anchor
 			return rows, nil
 		}
 		log.Printf("nse_eod: bhavcopy not available for %s: %v", date.Format("2006-01-02"), err)
@@ -243,19 +260,17 @@ func parseBhavCSV(r io.Reader, date time.Time) ([]bhavRow, error) {
 		idx[strings.TrimSpace(h)] = i
 	}
 
-	// NOTE: Column names must be verified against a real NSE bhavcopy file
-	// before first production sync. TckrSymb is required — it provides the
-	// unique per-contract ticker. Without it, instruments cannot be uniquely
-	// identified (the old "SYMBOL" column holds only the underlying name).
-	symbolIdx := col(idx, "TckrSymb")
+	// FinInstrmNm is the unique per-contract name (e.g. "NIFTY26APR22500CE").
+	// TckrSymb holds only the underlying (e.g. "NIFTY"), not unique per contract.
+	symbolIdx := col(idx, "FinInstrmNm")
 	if symbolIdx < 0 {
-		return nil, fmt.Errorf("required column TckrSymb not found in CSV header: %v", header)
+		return nil, fmt.Errorf("required column FinInstrmNm not found in CSV header: %v", header)
 	}
 
 	cols := colMap{
 		instrType:  col(idx, "FinInstrmTp", "INSTRUMENT"),
 		symbol:     symbolIdx,
-		underlying: col(idx, "UndrlygAsst"),
+		underlying: col(idx, "TckrSymb"),
 		expiry:     col(idx, "XpryDt", "EXPIRY_DT"),
 		strike:     col(idx, "StrkPric", "STRIKE_PR"),
 		optType:    col(idx, "OptnTp", "OPTION_TYP"),
@@ -265,6 +280,7 @@ func parseBhavCSV(r io.Reader, date time.Time) ([]bhavRow, error) {
 		close_:     col(idx, "ClsPric", "CLOSE"),
 		vol:        col(idx, "TtlTradgVol", "CONTRACTS"),
 		ts:         col(idx, "TmStmp", "TIMESTAMP"),
+		lotSize:    col(idx, "NewBrdLotQty"),
 	}
 
 	var rows []bhavRow
@@ -316,6 +332,7 @@ func parseRow(rec []string, cols colMap, fallbackDate time.Time) (bhavRow, error
 	}
 
 	vol, _ := parseInt64(get(cols.vol)) // non-fatal if missing
+	lotSize, _ := parseInt64(get(cols.lotSize))
 
 	expiry := parseExpiry(get(cols.expiry))
 	strike, _ := parseFloat(get(cols.strike))
@@ -340,18 +357,23 @@ func parseRow(rec []string, cols colMap, fallbackDate time.Time) (bhavRow, error
 		Low:            low,
 		Close:          close_,
 		Volume:         vol,
+		LotSize:        int(lotSize),
 		Date:           rowDate,
 	}, nil
 }
 
 func bhavRowToInstrument(row bhavRow) entities.Instrument {
+	lotSize := row.LotSize
+	if lotSize <= 0 {
+		lotSize = 1
+	}
 	inst := entities.Instrument{
 		ID:             uuid.New(),
 		Symbol:         row.Symbol,
 		Name:           row.Symbol,
 		Exchange:       nseExchange,
 		InstrumentType: row.InstrumentType,
-		LotSize:        1, // lot sizes require NSE contract specs; default to 1
+		LotSize:        lotSize,
 	}
 	if row.Underlying != "" {
 		inst.Underlying = &row.Underlying
