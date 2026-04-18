@@ -2,54 +2,53 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"flag"
 	"log"
-	"os"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
+	"github.com/deependra191/algoedgefno-backend/internal/config"
+	"github.com/deependra191/algoedgefno-backend/internal/database"
+	"github.com/deependra191/algoedgefno-backend/internal/providers"
 	"github.com/deependra191/algoedgefno-backend/internal/providers/nse"
+	"github.com/deependra191/algoedgefno-backend/internal/services"
 	"github.com/deependra191/algoedgefno-backend/internal/storage"
 )
 
 func main() {
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		dsn = "postgres://algoedge:algoedge@localhost:5432/algoedgefno?sslmode=disable"
+	dateStr := flag.String("date", "", "target date in YYYY-MM-DD format (default: latest trading day)")
+	flag.Parse()
+
+	cfg := config.Load()
+
+	pool := database.Connect(cfg)
+	defer pool.Close()
+
+	instrumentStore := storage.NewInstrumentStore(pool)
+	candleStore := storage.NewCandleStore(pool)
+	syncRunStore := storage.NewSyncRunStore(pool)
+
+	var opts []nse.EODOption
+	if *dateStr != "" {
+		t, err := time.Parse("2006-01-02", *dateStr)
+		if err != nil {
+			log.Fatalf("invalid date %q: %v", *dateStr, err)
+		}
+		opts = append(opts, nse.WithTargetDate(t))
 	}
+
+	registry := providers.NewRegistry()
+	registry.Register(nse.NewEODProvider(instrumentStore, candleStore, opts...))
+
+	syncService := services.NewSyncService(syncRunStore, registry)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	pool, err := pgxpool.New(ctx, dsn)
+	log.Println("syncing NSE EOD data...")
+	run, err := syncService.SyncProvider(ctx, nse.ProviderName)
 	if err != nil {
-		log.Fatalf("connect: %v", err)
+		log.Fatalf("sync failed: %v", err)
 	}
-	defer pool.Close()
 
-	if err := pool.Ping(ctx); err != nil {
-		log.Fatalf("ping: %v", err)
-	}
-	log.Println("connected to database")
-
-	instrumentStore := storage.NewInstrumentStore(pool)
-	candleStore := storage.NewCandleStore(pool)
-	provider := nse.NewEODProvider(instrumentStore, candleStore)
-
-	log.Println("syncing instruments from NSE bhavcopy...")
-	instCount, err := provider.SyncInstruments(ctx)
-	if err != nil {
-		log.Fatalf("sync instruments: %v", err)
-	}
-	fmt.Printf("instruments synced: %d\n", instCount)
-
-	log.Println("syncing candles from NSE bhavcopy...")
-	candleCount, err := provider.SyncCandles(ctx)
-	if err != nil {
-		log.Fatalf("sync candles: %v", err)
-	}
-	fmt.Printf("candles synced: %d\n", candleCount)
-
-	log.Println("done")
+	log.Printf("sync completed: %d records processed", run.RecordsProcessed)
 }

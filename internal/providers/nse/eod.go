@@ -25,9 +25,11 @@ import (
 // NOTE: NSE has changed this URL format historically. Verify before deploying.
 // Current format (as of 2024-2025): BhavCopy_NSE_FO_0_0_0_YYYYMMDD_F_0000.csv.zip
 const (
-	bhavURL       = "https://nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_0_0_0_%s_F_0000.csv.zip"
-	nseExchange   = "NFO"
-	eodInterval   = "1d"
+	bhavURL      = "https://nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_0_0_0_%s_F_0000.csv.zip"
+	nseExchange  = "NFO"
+	eodInterval  = "1d"
+	ProviderName = "nse_eod"
+	maxBhavSize  = 50 << 20
 )
 
 // bhavRow holds one parsed row from the F&O bhavcopy CSV.
@@ -65,17 +67,27 @@ type EODProvider struct {
 	cachedDate time.Time
 }
 
-func NewEODProvider(instrumentStore *storage.InstrumentStore, candleStore *storage.CandleStore) *EODProvider {
-	return &EODProvider{
+type EODOption func(*EODProvider)
+
+func WithTargetDate(date time.Time) EODOption {
+	return func(p *EODProvider) {
+		p.targetDate = date
+	}
+}
+
+func NewEODProvider(instrumentStore *storage.InstrumentStore, candleStore *storage.CandleStore, opts ...EODOption) *EODProvider {
+	p := &EODProvider{
 		instrumentStore: instrumentStore,
 		candleStore:     candleStore,
 		httpClient:      &http.Client{Timeout: 60 * time.Second},
 	}
+	for _, opt := range opts {
+		opt(p)
+	}
+	return p
 }
 
-func (p *EODProvider) SetTargetDate(date time.Time) { p.targetDate = date }
-
-func (p *EODProvider) Name() string { return "nse_eod" }
+func (p *EODProvider) Name() string { return ProviderName }
 
 func (p *EODProvider) Capabilities() []providers.Capability {
 	return []providers.Capability{providers.CapEODHistory}
@@ -191,7 +203,7 @@ func (p *EODProvider) fetchLatestBhavcopy(ctx context.Context) ([]bhavRow, error
 			p.cachedDate = anchor
 			return rows, nil
 		}
-		log.Printf("nse_eod: bhavcopy not available for %s: %v", date.Format("2006-01-02"), err)
+		log.Printf("%s: bhavcopy not available for %s: %v", ProviderName, date.Format("2006-01-02"), err)
 		date = prevTradingDay(date)
 	}
 	return nil, fmt.Errorf("no bhavcopy available in the last 7 trading days")
@@ -220,7 +232,7 @@ func (p *EODProvider) downloadBhavcopy(ctx context.Context, date time.Time) ([]b
 		return nil, fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBhavSize))
 	if err != nil {
 		return nil, err
 	}
@@ -236,8 +248,9 @@ func (p *EODProvider) downloadBhavcopy(ctx context.Context, date time.Time) ([]b
 			if err != nil {
 				return nil, err
 			}
-			defer rc.Close()
-			return parseBhavCSV(rc, date)
+			rows, err := parseBhavCSV(rc, date)
+			rc.Close()
+			return rows, err
 		}
 	}
 	return nil, fmt.Errorf("no CSV found in zip")

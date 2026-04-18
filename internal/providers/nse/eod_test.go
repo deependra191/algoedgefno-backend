@@ -248,10 +248,10 @@ func TestBhavRowToInstrument_Futures(t *testing.T) {
 	}
 }
 
-func TestSetTargetDate(t *testing.T) {
-	p := &EODProvider{}
+func TestWithTargetDate(t *testing.T) {
 	target := date(2026, 4, 15)
-	p.SetTargetDate(target)
+	p := &EODProvider{}
+	WithTargetDate(target)(p)
 	if !p.targetDate.Equal(target) {
 		t.Errorf("targetDate = %v, want %v", p.targetDate, target)
 	}
