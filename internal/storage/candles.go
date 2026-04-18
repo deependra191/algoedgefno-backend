@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/deependra191/algoedgefno-backend/internal/entities"
@@ -105,6 +106,23 @@ func (s *CandleStore) InsertBatchIgnoreDuplicates(ctx context.Context, candles [
 	}
 
 	return tag.RowsAffected(), nil
+}
+
+// LastSyncedDate returns the most recent candle date for a given provider.
+// Returns a zero time.Time if no candles exist yet for that provider.
+func (s *CandleStore) LastSyncedDate(ctx context.Context, provider string) (time.Time, error) {
+	var d pgtype.Date
+	err := s.pool.QueryRow(ctx,
+		`SELECT MAX(ts::date) FROM candles WHERE provider = $1`,
+		provider,
+	).Scan(&d)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if !d.Valid {
+		return time.Time{}, nil
+	}
+	return d.Time, nil
 }
 
 // Query returns candles for an instrument within a time range, ordered chronologically.

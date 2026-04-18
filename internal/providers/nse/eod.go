@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/http/cookiejar"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,6 +27,7 @@ import (
 // Current format (as of 2024-2025): BhavCopy_NSE_FO_0_0_0_YYYYMMDD_F_0000.csv.zip
 const (
 	bhavURL      = "https://nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_0_0_0_%s_F_0000.csv.zip"
+	nseMainURL   = "https://www.nseindia.com"
 	nseExchange  = "NFO"
 	eodInterval  = "1d"
 	ProviderName = "nse_eod"
@@ -76,15 +78,34 @@ func WithTargetDate(date time.Time) EODOption {
 }
 
 func NewEODProvider(instrumentStore *storage.InstrumentStore, candleStore *storage.CandleStore, opts ...EODOption) *EODProvider {
+	jar, _ := cookiejar.New(nil)
 	p := &EODProvider{
 		instrumentStore: instrumentStore,
 		candleStore:     candleStore,
-		httpClient:      &http.Client{Timeout: 60 * time.Second},
+		httpClient:      &http.Client{Timeout: 60 * time.Second, Jar: jar},
 	}
 	for _, opt := range opts {
 		opt(p)
 	}
 	return p
+}
+
+// warmSession visits the NSE homepage to acquire the session cookies that
+// nsearchives.nseindia.com requires before serving archive files.
+func (p *EODProvider) warmSession(ctx context.Context) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, nseMainURL, nil)
+	if err != nil {
+		return
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		log.Printf("%s: session warm-up failed: %v", ProviderName, err)
+		return
+	}
+	resp.Body.Close()
 }
 
 func (p *EODProvider) Name() string { return ProviderName }
@@ -184,6 +205,8 @@ func (p *EODProvider) fetchLatestBhavcopy(ctx context.Context) ([]bhavRow, error
 	if p.cachedRows != nil && p.cachedDate.Equal(anchor) {
 		return p.cachedRows, nil
 	}
+
+	p.warmSession(ctx)
 
 	if !p.targetDate.IsZero() {
 		rows, err := p.downloadBhavcopy(ctx, p.targetDate)
