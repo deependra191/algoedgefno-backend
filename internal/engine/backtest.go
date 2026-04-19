@@ -64,8 +64,8 @@ func (b *Backtester) RunBacktest(strategy *models.Strategy, candles []models.Can
 			sigIdx++
 
 			if openTrade != nil {
-				if (openTrade.Side == models.TradeSideBuy && sig.Side == SignalSell) ||
-					(openTrade.Side == models.TradeSideSell && sig.Side == SignalBuy) {
+				if (openTrade.Side == models.TradeSideBuy && sig.Side == models.TradeSideSell) ||
+					(openTrade.Side == models.TradeSideSell && sig.Side == models.TradeSideBuy) {
 					closeTrade(openTrade, sig.Price, sig.Timestamp, ExitReasonSignalReversal, qty)
 					result.Trades = append(result.Trades, *openTrade)
 					equity += openTrade.PnL
@@ -86,7 +86,7 @@ func (b *Backtester) RunBacktest(strategy *models.Strategy, candles []models.Can
 
 			openTrade = &models.Trade{
 				EntryTimestamp: sig.Timestamp,
-				Side:           models.TradeSide(sig.Side),
+				Side:           sig.Side,
 				Quantity:       qty,
 				EntryPrice:     sig.Price,
 				Reason:         sig.Reason,

@@ -1,17 +1,14 @@
 package engine
 
-import "time"
+import (
+	"time"
 
-type SignalSide string
-
-const (
-	SignalBuy  SignalSide = "BUY"
-	SignalSell SignalSide = "SELL"
+	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
 type Signal struct {
 	Timestamp time.Time
-	Side      SignalSide
+	Side      models.TradeSide
 	Price     float64
 	Reason    string
 }
