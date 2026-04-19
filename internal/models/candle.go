@@ -1,12 +1,22 @@
 package models
 
 import (
+	"context"
 	"time"
 
 	"github.com/google/uuid"
-
-	"github.com/deependra191/algoedgefno-backend/internal/entities"
 )
+
+type CandleFilter struct {
+	InstrumentID uuid.UUID
+	From         time.Time
+	To           time.Time
+	Interval     string
+}
+
+type CandleRepository interface {
+	Query(ctx context.Context, f CandleFilter) ([]Candle, error)
+}
 
 // Candle is the domain representation of an OHLCV bar.
 type Candle struct {
@@ -19,38 +29,4 @@ type Candle struct {
 	Close        float64
 	Volume       int64
 	Provider     string
-}
-
-func FromCandleEntity(e *entities.Candle) *Candle {
-	if e == nil {
-		return nil
-	}
-	return &Candle{
-		InstrumentID: e.InstrumentID,
-		Timestamp:    e.Timestamp,
-		Interval:     e.Interval,
-		Open:         e.Open,
-		High:         e.High,
-		Low:          e.Low,
-		Close:        e.Close,
-		Volume:       e.Volume,
-		Provider:     e.Provider,
-	}
-}
-
-func (c *Candle) ToEntity() *entities.Candle {
-	if c == nil {
-		return nil
-	}
-	return &entities.Candle{
-		InstrumentID: c.InstrumentID,
-		Timestamp:    c.Timestamp,
-		Interval:     c.Interval,
-		Open:         c.Open,
-		High:         c.High,
-		Low:          c.Low,
-		Close:        c.Close,
-		Volume:       c.Volume,
-		Provider:     c.Provider,
-	}
 }

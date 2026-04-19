@@ -12,6 +12,8 @@ import (
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
+var _ models.BacktestRepository = (*BacktestStore)(nil)
+
 type BacktestStore struct {
 	pool *pgxpool.Pool
 }
@@ -31,6 +33,40 @@ func (s *BacktestStore) Create(ctx context.Context, run *models.BacktestRun) err
 		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
 		ent.ID, ent.StrategyID, ent.InstrumentToken,
 		ent.FromTs, ent.ToTs, ent.CandleInterval, ent.Status,
+	)
+	return err
+}
+
+// UpdateStatus persists only the status column — used for PENDING→RUNNING transitions.
+func (s *BacktestStore) UpdateStatus(ctx context.Context, run *models.BacktestRun) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE backtest_runs SET status = $2 WHERE id = $1`,
+		run.ID, run.Status,
+	)
+	return err
+}
+
+// UpdateResult persists final metrics and stamps completed_at — used for COMPLETED/FAILED.
+func (s *BacktestStore) UpdateResult(ctx context.Context, run *models.BacktestRun) error {
+	ent := toBacktestEntity(run)
+	var tradesJSON any
+	if ent.TradesJSON != nil {
+		tradesJSON = string(ent.TradesJSON)
+	}
+	_, err := s.pool.Exec(ctx, `
+		UPDATE backtest_runs SET
+			status        = $2,
+			net_pnl       = $3,
+			total_trades  = $4,
+			win_count     = $5,
+			loss_count    = $6,
+			max_drawdown  = $7,
+			trades_json   = $8::jsonb,
+			error_message = $9,
+			completed_at  = NOW()
+		WHERE id = $1`,
+		ent.ID, ent.Status, ent.NetPnl, ent.TotalTrades, ent.WinCount,
+		ent.LossCount, ent.MaxDrawdown, tradesJSON, ent.ErrorMessage,
 	)
 	return err
 }
@@ -70,32 +106,8 @@ func (s *BacktestStore) ListByStrategy(ctx context.Context, strategyID uuid.UUID
 	return result, rows.Err()
 }
 
-func (s *BacktestStore) UpdateResult(ctx context.Context, run *models.BacktestRun) error {
-	ent := toBacktestEntity(run)
-	var tradesJSON interface{}
-	if ent.TradesJSON != nil {
-		tradesJSON = string(ent.TradesJSON)
-	}
-	_, err := s.pool.Exec(ctx, `
-		UPDATE backtest_runs SET
-			status        = $2,
-			net_pnl       = $3,
-			total_trades  = $4,
-			win_count     = $5,
-			loss_count    = $6,
-			max_drawdown  = $7,
-			trades_json   = $8::jsonb,
-			error_message = $9,
-			completed_at  = NOW()
-		WHERE id = $1`,
-		ent.ID, ent.Status, ent.NetPnl, ent.TotalTrades, ent.WinCount,
-		ent.LossCount, ent.MaxDrawdown, tradesJSON, ent.ErrorMessage,
-	)
-	return err
-}
-
 func toBacktestModel(e *entities.BacktestRun) *models.BacktestRun {
-	r := &models.BacktestRun{
+	return &models.BacktestRun{
 		ID:              e.ID,
 		StrategyID:      e.StrategyID,
 		InstrumentToken: e.InstrumentToken,
@@ -113,7 +125,6 @@ func toBacktestModel(e *entities.BacktestRun) *models.BacktestRun {
 		CompletedAt:     e.CompletedAt,
 		Trades:          json.RawMessage(e.TradesJSON),
 	}
-	return r
 }
 
 func toBacktestEntity(r *models.BacktestRun) *entities.BacktestRun {

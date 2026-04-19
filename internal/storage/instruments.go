@@ -11,13 +11,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/deependra191/algoedgefno-backend/internal/entities"
+	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
-type InstrumentFilter struct {
-	Exchange       *string
-	InstrumentType *string
-	Underlying     *string
-}
+var _ models.InstrumentRepository = (*InstrumentStore)(nil)
 
 type InstrumentStore struct {
 	pool *pgxpool.Pool
@@ -87,14 +84,18 @@ func (s *InstrumentStore) UpsertBatch(ctx context.Context, instruments []entitie
 	return nil
 }
 
-func (s *InstrumentStore) GetByID(ctx context.Context, id uuid.UUID) (*entities.Instrument, error) {
+func (s *InstrumentStore) GetByID(ctx context.Context, id uuid.UUID) (*models.Instrument, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, symbol, name, exchange, instrument_type, underlying, expiry, strike, option_type, lot_size, created_at, updated_at
 		FROM instruments WHERE id = $1`, id)
-	return scanInstrument(row)
+	ent, err := scanInstrument(row)
+	if err != nil {
+		return nil, err
+	}
+	return toInstrumentModel(ent), nil
 }
 
-func (s *InstrumentStore) List(ctx context.Context, filter InstrumentFilter) ([]entities.Instrument, error) {
+func (s *InstrumentStore) List(ctx context.Context, filter models.InstrumentFilter) ([]models.Instrument, error) {
 	q := `SELECT id, symbol, name, exchange, instrument_type, underlying, expiry, strike, option_type, lot_size, created_at, updated_at FROM instruments`
 	var conds []string
 	var args []any
@@ -115,7 +116,7 @@ func (s *InstrumentStore) List(ctx context.Context, filter InstrumentFilter) ([]
 		args = append(args, *filter.Underlying)
 		idx++
 	}
-	_ = idx // suppress unused warning if no filters
+	_ = idx
 	if len(conds) > 0 {
 		q += " WHERE " + strings.Join(conds, " AND ")
 	}
@@ -127,18 +128,34 @@ func (s *InstrumentStore) List(ctx context.Context, filter InstrumentFilter) ([]
 	}
 	defer rows.Close()
 
-	var result []entities.Instrument
+	var result []models.Instrument
 	for rows.Next() {
-		inst, err := scanInstrumentRow(rows)
+		ent, err := scanInstrumentRow(rows)
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, *inst)
+		result = append(result, *toInstrumentModel(ent))
 	}
 	return result, rows.Err()
 }
 
-// scanInstrument scans a single pgx.Row (QueryRow result).
+func toInstrumentModel(e *entities.Instrument) *models.Instrument {
+	return &models.Instrument{
+		ID:             e.ID,
+		Symbol:         e.Symbol,
+		Name:           e.Name,
+		Exchange:       e.Exchange,
+		InstrumentType: e.InstrumentType,
+		Underlying:     e.Underlying,
+		Expiry:         e.Expiry,
+		Strike:         e.Strike,
+		OptionType:     e.OptionType,
+		LotSize:        e.LotSize,
+		CreatedAt:      e.CreatedAt,
+		UpdatedAt:      e.UpdatedAt,
+	}
+}
+
 func scanInstrument(row pgx.Row) (*entities.Instrument, error) {
 	var inst entities.Instrument
 	var underlying *string
@@ -160,7 +177,6 @@ func scanInstrument(row pgx.Row) (*entities.Instrument, error) {
 	return &inst, nil
 }
 
-// scanInstrumentRow scans from pgx.Rows (Query result).
 func scanInstrumentRow(rows pgx.Rows) (*entities.Instrument, error) {
 	var inst entities.Instrument
 	var underlying *string

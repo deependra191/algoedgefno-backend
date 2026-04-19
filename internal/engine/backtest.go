@@ -15,6 +15,8 @@ const (
 	ExitReasonEndOfData      = "end_of_data"
 )
 
+var _ models.BacktestEngine = (*Backtester)(nil)
+
 type Backtester struct{}
 
 func NewBacktester() *Backtester {

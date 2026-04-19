@@ -9,22 +9,21 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/deependra191/algoedgefno-backend/internal/models"
-	"github.com/deependra191/algoedgefno-backend/internal/storage"
 )
 
 type BacktestService struct {
 	backtestStore   models.BacktestRepository
-	strategyStore   *storage.StrategyStore
-	candleStore     *storage.CandleStore
-	instrumentStore *storage.InstrumentStore
+	strategyStore   models.StrategyRepository
+	candleStore     models.CandleRepository
+	instrumentStore models.InstrumentRepository
 	engine          models.BacktestEngine
 }
 
 func NewBacktestService(
 	backtestStore models.BacktestRepository,
-	strategyStore *storage.StrategyStore,
-	candleStore *storage.CandleStore,
-	instrumentStore *storage.InstrumentStore,
+	strategyStore models.StrategyRepository,
+	candleStore models.CandleRepository,
+	instrumentStore models.InstrumentRepository,
 	engine models.BacktestEngine,
 ) *BacktestService {
 	return &BacktestService{
@@ -70,11 +69,11 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 	}
 
 	run.Status = models.BacktestRunning
-	if err := s.backtestStore.UpdateResult(ctx, run); err != nil {
+	if err := s.backtestStore.UpdateStatus(ctx, run); err != nil {
 		return nil, errors.New("failed to update backtest status")
 	}
 
-	candleEnts, err := s.candleStore.Query(ctx, storage.CandleFilter{
+	candles, err := s.candleStore.Query(ctx, models.CandleFilter{
 		InstrumentID: req.InstrumentID,
 		From:         req.From,
 		To:           req.To,
@@ -83,20 +82,14 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 	if err != nil {
 		return s.failRun(ctx, run, "failed to fetch candle data")
 	}
-	if len(candleEnts) == 0 {
+	if len(candles) == 0 {
 		return s.failRun(ctx, run, "no candle data available")
 	}
 
-	candles := make([]models.Candle, len(candleEnts))
-	for i := range candleEnts {
-		candles[i] = *models.FromCandleEntity(&candleEnts[i])
-	}
-
-	strategy, err := s.strategyStore.GetByID(ctx, req.StrategyID)
+	strat, err := s.strategyStore.GetByID(ctx, req.StrategyID)
 	if err != nil {
 		return s.failRun(ctx, run, "failed to reload strategy")
 	}
-	strat := models.FromStrategyEntity(strategy)
 
 	result, err := s.engine.RunBacktest(strat, candles)
 	if err != nil {

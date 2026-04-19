@@ -5,20 +5,15 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/deependra191/algoedgefno-backend/internal/entities"
+	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
-type CandleFilter struct {
-	InstrumentID uuid.UUID
-	From         time.Time
-	To           time.Time
-	Interval     string
-}
+var _ models.CandleRepository = (*CandleStore)(nil)
 
 type CandleStore struct {
 	pool *pgxpool.Pool
@@ -126,7 +121,7 @@ func (s *CandleStore) LastSyncedDate(ctx context.Context, provider string) (time
 }
 
 // Query returns candles for an instrument within a time range, ordered chronologically.
-func (s *CandleStore) Query(ctx context.Context, f CandleFilter) ([]entities.Candle, error) {
+func (s *CandleStore) Query(ctx context.Context, f models.CandleFilter) ([]models.Candle, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT instrument_id, ts, interval, open, high, low, close, volume, provider
 		FROM candles
@@ -139,14 +134,28 @@ func (s *CandleStore) Query(ctx context.Context, f CandleFilter) ([]entities.Can
 	}
 	defer rows.Close()
 
-	var result []entities.Candle
+	var result []models.Candle
 	for rows.Next() {
-		var c entities.Candle
-		if err := rows.Scan(&c.InstrumentID, &c.Timestamp, &c.Interval,
-			&c.Open, &c.High, &c.Low, &c.Close, &c.Volume, &c.Provider); err != nil {
+		var e entities.Candle
+		if err := rows.Scan(&e.InstrumentID, &e.Timestamp, &e.Interval,
+			&e.Open, &e.High, &e.Low, &e.Close, &e.Volume, &e.Provider); err != nil {
 			return nil, err
 		}
-		result = append(result, c)
+		result = append(result, toCandleModel(&e))
 	}
 	return result, rows.Err()
+}
+
+func toCandleModel(e *entities.Candle) models.Candle {
+	return models.Candle{
+		InstrumentID: e.InstrumentID,
+		Timestamp:    e.Timestamp,
+		Interval:     e.Interval,
+		Open:         e.Open,
+		High:         e.High,
+		Low:          e.Low,
+		Close:        e.Close,
+		Volume:       e.Volume,
+		Provider:     e.Provider,
+	}
 }

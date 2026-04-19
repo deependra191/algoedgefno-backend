@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/deependra191/algoedgefno-backend/internal/entities"
+	"github.com/deependra191/algoedgefno-backend/internal/models"
 	"github.com/deependra191/algoedgefno-backend/internal/providers"
 	"github.com/deependra191/algoedgefno-backend/internal/storage"
 )
@@ -153,7 +154,7 @@ func (p *EODProvider) SyncCandles(ctx context.Context) (int, error) {
 
 	// Load all NFO instruments into a symbol→ID map for FK lookup.
 	exchange := nseExchange
-	allInstr, err := p.instrumentStore.List(ctx, storage.InstrumentFilter{Exchange: &exchange})
+	allInstr, err := p.instrumentStore.List(ctx, models.InstrumentFilter{Exchange: &exchange})
 	if err != nil {
 		return 0, fmt.Errorf("list instruments: %w", err)
 	}

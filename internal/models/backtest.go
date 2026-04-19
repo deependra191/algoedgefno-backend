@@ -44,9 +44,12 @@ type BacktestEngine interface {
 // BacktestRepository is the contract every backtest storage implementation must satisfy.
 type BacktestRepository interface {
 	Create(ctx context.Context, run *BacktestRun) error
+	// UpdateStatus persists only the status field — used for PENDING→RUNNING transitions.
+	UpdateStatus(ctx context.Context, run *BacktestRun) error
+	// UpdateResult persists final metrics and stamps completed_at — used for COMPLETED/FAILED.
+	UpdateResult(ctx context.Context, run *BacktestRun) error
 	GetByID(ctx context.Context, id uuid.UUID) (*BacktestRun, error)
 	ListByStrategy(ctx context.Context, strategyID uuid.UUID) ([]BacktestRun, error)
-	UpdateResult(ctx context.Context, run *BacktestRun) error
 }
 
 type BacktestRun struct {

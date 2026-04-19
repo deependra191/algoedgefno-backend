@@ -7,18 +7,17 @@ import (
 
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 	"github.com/deependra191/algoedgefno-backend/internal/providers"
-	"github.com/deependra191/algoedgefno-backend/internal/storage"
 )
 
 type MarketService struct {
-	instrumentStore *storage.InstrumentStore
-	candleStore     *storage.CandleStore
+	instrumentStore models.InstrumentRepository
+	candleStore     models.CandleRepository
 	registry        *providers.Registry
 }
 
 func NewMarketService(
-	instrumentStore *storage.InstrumentStore,
-	candleStore *storage.CandleStore,
+	instrumentStore models.InstrumentRepository,
+	candleStore models.CandleRepository,
 	registry *providers.Registry,
 ) *MarketService {
 	return &MarketService{
@@ -28,36 +27,16 @@ func NewMarketService(
 	}
 }
 
-func (s *MarketService) ListInstruments(ctx context.Context, filter storage.InstrumentFilter) ([]models.Instrument, error) {
-	ents, err := s.instrumentStore.List(ctx, filter)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]models.Instrument, len(ents))
-	for i := range ents {
-		result[i] = *models.FromInstrumentEntity(&ents[i])
-	}
-	return result, nil
+func (s *MarketService) ListInstruments(ctx context.Context, filter models.InstrumentFilter) ([]models.Instrument, error) {
+	return s.instrumentStore.List(ctx, filter)
 }
 
 func (s *MarketService) GetInstrument(ctx context.Context, id uuid.UUID) (*models.Instrument, error) {
-	ent, err := s.instrumentStore.GetByID(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	return models.FromInstrumentEntity(ent), nil
+	return s.instrumentStore.GetByID(ctx, id)
 }
 
-func (s *MarketService) GetCandles(ctx context.Context, filter storage.CandleFilter) ([]models.Candle, error) {
-	ents, err := s.candleStore.Query(ctx, filter)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]models.Candle, len(ents))
-	for i := range ents {
-		result[i] = *models.FromCandleEntity(&ents[i])
-	}
-	return result, nil
+func (s *MarketService) GetCandles(ctx context.Context, filter models.CandleFilter) ([]models.Candle, error) {
+	return s.candleStore.Query(ctx, filter)
 }
 
 func (s *MarketService) ProviderStatuses(ctx context.Context) []providers.ProviderStatus {
