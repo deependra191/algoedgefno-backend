@@ -8,7 +8,7 @@ import (
 
 type Signal struct {
 	Timestamp time.Time
-	Side      models.TradeSide
+	Side      models.OrderSide
 	Price     float64
 	Reason    string
 }

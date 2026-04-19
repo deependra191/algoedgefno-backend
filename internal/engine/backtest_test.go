@@ -84,10 +84,10 @@ func TestEvaluateMACrossover(t *testing.T) {
 	hasBuy := false
 	hasSell := false
 	for _, sig := range signals {
-		if sig.Side == models.TradeSideBuy {
+		if sig.Side == models.OrderSideBuy {
 			hasBuy = true
 		}
-		if sig.Side == models.TradeSideSell {
+		if sig.Side == models.OrderSideSell {
 			hasSell = true
 		}
 	}
@@ -143,7 +143,7 @@ func TestEvaluateMomentum(t *testing.T) {
 	if len(signals) == 0 {
 		t.Fatal("expected at least one momentum signal")
 	}
-	if signals[0].Side != models.TradeSideBuy {
+	if signals[0].Side != models.OrderSideBuy {
 		t.Errorf("first momentum signal should be BUY, got %s", signals[0].Side)
 	}
 }

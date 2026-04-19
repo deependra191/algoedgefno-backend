@@ -8,17 +8,17 @@ import (
 	"github.com/google/uuid"
 )
 
-type TradeSide string
+type OrderSide string
 
 const (
-	TradeSideBuy  TradeSide = "BUY"
-	TradeSideSell TradeSide = "SELL"
+	OrderSideBuy  OrderSide = "BUY"
+	OrderSideSell OrderSide = "SELL"
 )
 
 type Trade struct {
 	EntryTimestamp time.Time
 	ExitTimestamp  time.Time
-	Side           TradeSide
+	Side           OrderSide
 	Quantity       int
 	EntryPrice     float64
 	ExitPrice      float64

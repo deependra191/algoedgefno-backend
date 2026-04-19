@@ -64,8 +64,8 @@ func (b *Backtester) RunBacktest(strategy *models.Strategy, candles []models.Can
 			sigIdx++
 
 			if openTrade != nil {
-				if (openTrade.Side == models.TradeSideBuy && sig.Side == models.TradeSideSell) ||
-					(openTrade.Side == models.TradeSideSell && sig.Side == models.TradeSideBuy) {
+				if (openTrade.Side == models.OrderSideBuy && sig.Side == models.OrderSideSell) ||
+					(openTrade.Side == models.OrderSideSell && sig.Side == models.OrderSideBuy) {
 					closeTrade(openTrade, sig.Price, sig.Timestamp, ExitReasonSignalReversal, qty)
 					result.Trades = append(result.Trades, *openTrade)
 					equity += openTrade.PnL
@@ -127,7 +127,7 @@ func (b *Backtester) RunBacktest(strategy *models.Strategy, candles []models.Can
 func checkExitConditions(trade *models.Trade, candle *models.Candle, strategy *models.Strategy) (string, float64) {
 	if strategy.TargetPct != nil {
 		target := *strategy.TargetPct / 100
-		if trade.Side == models.TradeSideBuy {
+		if trade.Side == models.OrderSideBuy {
 			if candle.High >= trade.EntryPrice*(1+target) {
 				return ExitReasonTarget, trade.EntryPrice * (1 + target)
 			}
@@ -140,7 +140,7 @@ func checkExitConditions(trade *models.Trade, candle *models.Candle, strategy *m
 
 	if strategy.StopLossPct != nil {
 		sl := *strategy.StopLossPct / 100
-		if trade.Side == models.TradeSideBuy {
+		if trade.Side == models.OrderSideBuy {
 			if candle.Low <= trade.EntryPrice*(1-sl) {
 				return ExitReasonStopLoss, trade.EntryPrice * (1 - sl)
 			}
@@ -165,7 +165,7 @@ func closeTrade(trade *models.Trade, exitPrice float64, exitTime time.Time, reas
 	trade.ExitTimestamp = exitTime
 	trade.ExitPrice = exitPrice
 	trade.ExitReason = reason
-	if trade.Side == models.TradeSideBuy {
+	if trade.Side == models.OrderSideBuy {
 		trade.PnL = (exitPrice - trade.EntryPrice) * float64(qty)
 	} else {
 		trade.PnL = (trade.EntryPrice - exitPrice) * float64(qty)

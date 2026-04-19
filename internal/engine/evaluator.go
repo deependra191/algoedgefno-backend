@@ -49,14 +49,14 @@ func evaluateMACrossover(candles []models.Candle) ([]Signal, error) {
 		if currShortAbove && !prevShortAbove {
 			signals = append(signals, Signal{
 				Timestamp: candles[i].Timestamp,
-				Side:      models.TradeSideBuy,
+				Side:      models.OrderSideBuy,
 				Price:     candles[i].Close,
 				Reason:    "MA crossover bullish",
 			})
 		} else if !currShortAbove && prevShortAbove {
 			signals = append(signals, Signal{
 				Timestamp: candles[i].Timestamp,
-				Side:      models.TradeSideSell,
+				Side:      models.OrderSideSell,
 				Price:     candles[i].Close,
 				Reason:    "MA crossover bearish",
 			})
@@ -73,14 +73,14 @@ func evaluateSupertrend(candles []models.Candle) ([]Signal, error) {
 		if dir[i] == 1 && dir[i-1] == -1 {
 			signals = append(signals, Signal{
 				Timestamp: candles[i].Timestamp,
-				Side:      models.TradeSideBuy,
+				Side:      models.OrderSideBuy,
 				Price:     candles[i].Close,
 				Reason:    "Supertrend bullish flip",
 			})
 		} else if dir[i] == -1 && dir[i-1] == 1 {
 			signals = append(signals, Signal{
 				Timestamp: candles[i].Timestamp,
-				Side:      models.TradeSideSell,
+				Side:      models.OrderSideSell,
 				Price:     candles[i].Close,
 				Reason:    "Supertrend bearish flip",
 			})
@@ -98,14 +98,14 @@ func evaluateRSI(candles []models.Candle) ([]Signal, error) {
 		if rsi[i] < defaultRSIOversold && rsi[i-1] >= defaultRSIOversold {
 			signals = append(signals, Signal{
 				Timestamp: candles[i].Timestamp,
-				Side:      models.TradeSideBuy,
+				Side:      models.OrderSideBuy,
 				Price:     candles[i].Close,
 				Reason:    "RSI crossed below oversold",
 			})
 		} else if rsi[i] > defaultRSIOverbought && rsi[i-1] <= defaultRSIOverbought {
 			signals = append(signals, Signal{
 				Timestamp: candles[i].Timestamp,
-				Side:      models.TradeSideSell,
+				Side:      models.OrderSideSell,
 				Price:     candles[i].Close,
 				Reason:    "RSI crossed above overbought",
 			})
@@ -134,7 +134,7 @@ func evaluateMomentum(candles []models.Candle) ([]Signal, error) {
 		if candles[i].Close > periodHigh && !inBreakout {
 			signals = append(signals, Signal{
 				Timestamp: candles[i].Timestamp,
-				Side:      models.TradeSideBuy,
+				Side:      models.OrderSideBuy,
 				Price:     candles[i].Close,
 				Reason:    fmt.Sprintf("Breakout above %d-period high", defaultMomentumLookback),
 			})
@@ -143,7 +143,7 @@ func evaluateMomentum(candles []models.Candle) ([]Signal, error) {
 			if inBreakout {
 				signals = append(signals, Signal{
 					Timestamp: candles[i].Timestamp,
-					Side:      models.TradeSideSell,
+					Side:      models.OrderSideSell,
 					Price:     candles[i].Close,
 					Reason:    fmt.Sprintf("Fell below %d-period high", defaultMomentumLookback),
 				})
