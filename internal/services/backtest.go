@@ -8,29 +8,31 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/deependra191/algoedgefno-backend/internal/engine"
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 	"github.com/deependra191/algoedgefno-backend/internal/storage"
 )
 
 type BacktestService struct {
-	backtestStore   *storage.BacktestStore
+	backtestStore   models.BacktestRepository
 	strategyStore   *storage.StrategyStore
 	candleStore     *storage.CandleStore
 	instrumentStore *storage.InstrumentStore
+	engine          models.BacktestEngine
 }
 
 func NewBacktestService(
-	backtestStore *storage.BacktestStore,
+	backtestStore models.BacktestRepository,
 	strategyStore *storage.StrategyStore,
 	candleStore *storage.CandleStore,
 	instrumentStore *storage.InstrumentStore,
+	engine models.BacktestEngine,
 ) *BacktestService {
 	return &BacktestService{
 		backtestStore:   backtestStore,
 		strategyStore:   strategyStore,
 		candleStore:     candleStore,
 		instrumentStore: instrumentStore,
+		engine:          engine,
 	}
 }
 
@@ -63,12 +65,12 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 		Status:          models.BacktestPending,
 	}
 
-	if err := s.backtestStore.Create(ctx, run.ToEntity()); err != nil {
+	if err := s.backtestStore.Create(ctx, run); err != nil {
 		return nil, errors.New("failed to create backtest run")
 	}
 
 	run.Status = models.BacktestRunning
-	if err := s.backtestStore.UpdateResult(ctx, run.ToEntity()); err != nil {
+	if err := s.backtestStore.UpdateResult(ctx, run); err != nil {
 		return nil, errors.New("failed to update backtest status")
 	}
 
@@ -96,7 +98,7 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 	}
 	strat := models.FromStrategyEntity(strategy)
 
-	result, err := engine.RunBacktest(strat, candles)
+	result, err := s.engine.RunBacktest(strat, candles)
 	if err != nil {
 		return s.failRun(ctx, run, err.Error())
 	}
@@ -113,37 +115,24 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 	run.MaxDrawdown = &result.MaxDrawdown
 	run.Trades = tradesJSON
 
-	ent := run.ToEntity()
-	if err := s.backtestStore.UpdateResult(ctx, ent); err != nil {
+	if err := s.backtestStore.UpdateResult(ctx, run); err != nil {
 		return nil, errors.New("failed to save backtest results")
 	}
 
-	return models.FromBacktestRunEntity(ent), nil
+	return run, nil
 }
 
 func (s *BacktestService) GetByID(ctx context.Context, id uuid.UUID) (*models.BacktestRun, error) {
-	ent, err := s.backtestStore.GetByID(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	return models.FromBacktestRunEntity(ent), nil
+	return s.backtestStore.GetByID(ctx, id)
 }
 
 func (s *BacktestService) ListByStrategy(ctx context.Context, strategyID uuid.UUID) ([]models.BacktestRun, error) {
-	ents, err := s.backtestStore.ListByStrategy(ctx, strategyID)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]models.BacktestRun, len(ents))
-	for i := range ents {
-		result[i] = *models.FromBacktestRunEntity(&ents[i])
-	}
-	return result, nil
+	return s.backtestStore.ListByStrategy(ctx, strategyID)
 }
 
 func (s *BacktestService) failRun(ctx context.Context, run *models.BacktestRun, errMsg string) (*models.BacktestRun, error) {
 	run.Status = models.BacktestFailed
 	run.ErrorMessage = &errMsg
-	_ = s.backtestStore.UpdateResult(ctx, run.ToEntity())
+	_ = s.backtestStore.UpdateResult(ctx, run)
 	return nil, errors.New(errMsg)
 }

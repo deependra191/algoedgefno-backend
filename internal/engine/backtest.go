@@ -15,28 +15,13 @@ const (
 	ExitReasonEndOfData      = "end_of_data"
 )
 
-type Trade struct {
-	EntryTimestamp time.Time
-	ExitTimestamp  time.Time
-	Side          SignalSide
-	Quantity      int
-	EntryPrice    float64
-	ExitPrice     float64
-	PnL           float64
-	Reason        string
-	ExitReason    string
+type Backtester struct{}
+
+func NewBacktester() *Backtester {
+	return &Backtester{}
 }
 
-type BacktestResult struct {
-	Trades      []Trade
-	NetPnL      float64
-	TotalTrades int
-	WinCount    int
-	LossCount   int
-	MaxDrawdown float64
-}
-
-func RunBacktest(strategy *models.Strategy, candles []models.Candle) (*BacktestResult, error) {
+func (b *Backtester) RunBacktest(strategy *models.Strategy, candles []models.Candle) (*models.BacktestResult, error) {
 	signals, err := Evaluate(strategy, candles)
 	if err != nil {
 		return nil, err
@@ -47,8 +32,8 @@ func RunBacktest(strategy *models.Strategy, candles []models.Candle) (*BacktestR
 		qty = 1
 	}
 
-	result := &BacktestResult{}
-	var openTrade *Trade
+	result := &models.BacktestResult{}
+	var openTrade *models.Trade
 	sigIdx := 0
 	equity := 0.0
 	peakEquity := 0.0
@@ -79,8 +64,8 @@ func RunBacktest(strategy *models.Strategy, candles []models.Candle) (*BacktestR
 			sigIdx++
 
 			if openTrade != nil {
-				if (openTrade.Side == SignalBuy && sig.Side == SignalSell) ||
-					(openTrade.Side == SignalSell && sig.Side == SignalBuy) {
+				if (openTrade.Side == models.TradeSideBuy && sig.Side == SignalSell) ||
+					(openTrade.Side == models.TradeSideSell && sig.Side == SignalBuy) {
 					closeTrade(openTrade, sig.Price, sig.Timestamp, ExitReasonSignalReversal, qty)
 					result.Trades = append(result.Trades, *openTrade)
 					equity += openTrade.PnL
@@ -99,12 +84,12 @@ func RunBacktest(strategy *models.Strategy, candles []models.Candle) (*BacktestR
 				}
 			}
 
-			openTrade = &Trade{
+			openTrade = &models.Trade{
 				EntryTimestamp: sig.Timestamp,
-				Side:          sig.Side,
-				Quantity:      qty,
-				EntryPrice:    sig.Price,
-				Reason:        sig.Reason,
+				Side:           models.TradeSide(sig.Side),
+				Quantity:       qty,
+				EntryPrice:     sig.Price,
+				Reason:         sig.Reason,
 			}
 		}
 	}
@@ -139,10 +124,10 @@ func RunBacktest(strategy *models.Strategy, candles []models.Candle) (*BacktestR
 	return result, nil
 }
 
-func checkExitConditions(trade *Trade, candle *models.Candle, strategy *models.Strategy) (string, float64) {
+func checkExitConditions(trade *models.Trade, candle *models.Candle, strategy *models.Strategy) (string, float64) {
 	if strategy.TargetPct != nil {
 		target := *strategy.TargetPct / 100
-		if trade.Side == SignalBuy {
+		if trade.Side == models.TradeSideBuy {
 			if candle.High >= trade.EntryPrice*(1+target) {
 				return ExitReasonTarget, trade.EntryPrice * (1 + target)
 			}
@@ -155,7 +140,7 @@ func checkExitConditions(trade *Trade, candle *models.Candle, strategy *models.S
 
 	if strategy.StopLossPct != nil {
 		sl := *strategy.StopLossPct / 100
-		if trade.Side == SignalBuy {
+		if trade.Side == models.TradeSideBuy {
 			if candle.Low <= trade.EntryPrice*(1-sl) {
 				return ExitReasonStopLoss, trade.EntryPrice * (1 - sl)
 			}
@@ -176,11 +161,11 @@ func checkExitConditions(trade *Trade, candle *models.Candle, strategy *models.S
 	return "", 0
 }
 
-func closeTrade(trade *Trade, exitPrice float64, exitTime time.Time, reason string, qty int) {
+func closeTrade(trade *models.Trade, exitPrice float64, exitTime time.Time, reason string, qty int) {
 	trade.ExitTimestamp = exitTime
 	trade.ExitPrice = exitPrice
 	trade.ExitReason = reason
-	if trade.Side == SignalBuy {
+	if trade.Side == models.TradeSideBuy {
 		trade.PnL = (exitPrice - trade.EntryPrice) * float64(qty)
 	} else {
 		trade.PnL = (trade.EntryPrice - exitPrice) * float64(qty)

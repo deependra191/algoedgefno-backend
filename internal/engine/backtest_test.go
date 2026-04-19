@@ -155,7 +155,7 @@ func TestRunBacktest_MACrossover(t *testing.T) {
 		LotSize:            1,
 	}
 
-	result, err := RunBacktest(s, candles)
+	result, err := NewBacktester().RunBacktest(s, candles)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestRunBacktest_TargetHit(t *testing.T) {
 		TargetPct:          ptrFloat(5.0),
 	}
 
-	result, err := RunBacktest(s, candles)
+	result, err := NewBacktester().RunBacktest(s, candles)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -252,7 +252,7 @@ func TestRunBacktest_StopLossHit(t *testing.T) {
 		StopLossPct:        ptrFloat(3.0),
 	}
 
-	result, err := RunBacktest(s, candles)
+	result, err := NewBacktester().RunBacktest(s, candles)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestRunBacktest_TimeExit(t *testing.T) {
 		TimeExitMinutes:    ptrInt(20),
 	}
 
-	result, err := RunBacktest(s, candles)
+	result, err := NewBacktester().RunBacktest(s, candles)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -315,7 +315,7 @@ func TestRunBacktest_MaxDrawdown(t *testing.T) {
 		LotSize:            1,
 	}
 
-	result, err := RunBacktest(s, candles)
+	result, err := NewBacktester().RunBacktest(s, candles)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -333,7 +333,7 @@ func TestRunBacktest_NoSignals(t *testing.T) {
 		LotSize:            1,
 	}
 
-	result, err := RunBacktest(s, candles)
+	result, err := NewBacktester().RunBacktest(s, candles)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -353,7 +353,7 @@ func TestRunBacktest_LotSizeApplied(t *testing.T) {
 		LotSize:            10,
 	}
 
-	result, err := RunBacktest(s, candles)
+	result, err := NewBacktester().RunBacktest(s, candles)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

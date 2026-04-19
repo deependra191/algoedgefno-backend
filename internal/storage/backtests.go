@@ -2,12 +2,14 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/deependra191/algoedgefno-backend/internal/entities"
+	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
 type BacktestStore struct {
@@ -18,30 +20,35 @@ func NewBacktestStore(pool *pgxpool.Pool) *BacktestStore {
 	return &BacktestStore{pool: pool}
 }
 
-func (s *BacktestStore) Create(ctx context.Context, run *entities.BacktestRun) error {
+func (s *BacktestStore) Create(ctx context.Context, run *models.BacktestRun) error {
 	if run.ID == uuid.Nil {
 		run.ID = uuid.New()
 	}
+	ent := toBacktestEntity(run)
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO backtest_runs
 			(id, strategy_id, instrument_token, from_ts, to_ts, candle_interval, status, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
-		run.ID, run.StrategyID, run.InstrumentToken,
-		run.FromTs, run.ToTs, run.CandleInterval, run.Status,
+		ent.ID, ent.StrategyID, ent.InstrumentToken,
+		ent.FromTs, ent.ToTs, ent.CandleInterval, ent.Status,
 	)
 	return err
 }
 
-func (s *BacktestStore) GetByID(ctx context.Context, id uuid.UUID) (*entities.BacktestRun, error) {
+func (s *BacktestStore) GetByID(ctx context.Context, id uuid.UUID) (*models.BacktestRun, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, strategy_id, instrument_token, from_ts, to_ts, candle_interval, status,
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
 		       trades_json, error_message, created_at, completed_at
 		FROM backtest_runs WHERE id = $1`, id)
-	return scanBacktestRun(row)
+	ent, err := scanBacktestRun(row)
+	if err != nil {
+		return nil, err
+	}
+	return toBacktestModel(ent), nil
 }
 
-func (s *BacktestStore) ListByStrategy(ctx context.Context, strategyID uuid.UUID) ([]entities.BacktestRun, error) {
+func (s *BacktestStore) ListByStrategy(ctx context.Context, strategyID uuid.UUID) ([]models.BacktestRun, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, strategy_id, instrument_token, from_ts, to_ts, candle_interval, status,
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
@@ -52,22 +59,22 @@ func (s *BacktestStore) ListByStrategy(ctx context.Context, strategyID uuid.UUID
 	}
 	defer rows.Close()
 
-	var result []entities.BacktestRun
+	var result []models.BacktestRun
 	for rows.Next() {
-		run, err := scanBacktestRunRow(rows)
+		ent, err := scanBacktestRunRow(rows)
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, *run)
+		result = append(result, *toBacktestModel(ent))
 	}
 	return result, rows.Err()
 }
 
-// UpdateResult persists final backtest results (status, metrics, trades, error).
-func (s *BacktestStore) UpdateResult(ctx context.Context, run *entities.BacktestRun) error {
+func (s *BacktestStore) UpdateResult(ctx context.Context, run *models.BacktestRun) error {
+	ent := toBacktestEntity(run)
 	var tradesJSON interface{}
-	if run.TradesJSON != nil {
-		tradesJSON = string(run.TradesJSON)
+	if ent.TradesJSON != nil {
+		tradesJSON = string(ent.TradesJSON)
 	}
 	_, err := s.pool.Exec(ctx, `
 		UPDATE backtest_runs SET
@@ -81,10 +88,53 @@ func (s *BacktestStore) UpdateResult(ctx context.Context, run *entities.Backtest
 			error_message = $9,
 			completed_at  = NOW()
 		WHERE id = $1`,
-		run.ID, run.Status, run.NetPnl, run.TotalTrades, run.WinCount,
-		run.LossCount, run.MaxDrawdown, tradesJSON, run.ErrorMessage,
+		ent.ID, ent.Status, ent.NetPnl, ent.TotalTrades, ent.WinCount,
+		ent.LossCount, ent.MaxDrawdown, tradesJSON, ent.ErrorMessage,
 	)
 	return err
+}
+
+func toBacktestModel(e *entities.BacktestRun) *models.BacktestRun {
+	r := &models.BacktestRun{
+		ID:              e.ID,
+		StrategyID:      e.StrategyID,
+		InstrumentToken: e.InstrumentToken,
+		FromTs:          e.FromTs,
+		ToTs:            e.ToTs,
+		CandleInterval:  e.CandleInterval,
+		Status:          e.Status,
+		NetPnl:          e.NetPnl,
+		TotalTrades:     e.TotalTrades,
+		WinCount:        e.WinCount,
+		LossCount:       e.LossCount,
+		MaxDrawdown:     e.MaxDrawdown,
+		ErrorMessage:    e.ErrorMessage,
+		CreatedAt:       e.CreatedAt,
+		CompletedAt:     e.CompletedAt,
+		Trades:          json.RawMessage(e.TradesJSON),
+	}
+	return r
+}
+
+func toBacktestEntity(r *models.BacktestRun) *entities.BacktestRun {
+	return &entities.BacktestRun{
+		ID:              r.ID,
+		StrategyID:      r.StrategyID,
+		InstrumentToken: r.InstrumentToken,
+		FromTs:          r.FromTs,
+		ToTs:            r.ToTs,
+		CandleInterval:  r.CandleInterval,
+		Status:          r.Status,
+		NetPnl:          r.NetPnl,
+		TotalTrades:     r.TotalTrades,
+		WinCount:        r.WinCount,
+		LossCount:       r.LossCount,
+		MaxDrawdown:     r.MaxDrawdown,
+		ErrorMessage:    r.ErrorMessage,
+		CreatedAt:       r.CreatedAt,
+		CompletedAt:     r.CompletedAt,
+		TradesJSON:      []byte(r.Trades),
+	}
 }
 
 func scanBacktestRun(row pgx.Row) (*entities.BacktestRun, error) {
