@@ -9,17 +9,16 @@ import (
 
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 	"github.com/deependra191/algoedgefno-backend/internal/providers"
-	"github.com/deependra191/algoedgefno-backend/internal/storage"
 )
 
 type SyncService struct {
-	syncRunStore *storage.SyncRunStore
-	registry     *providers.Registry
+	syncRunStore models.SyncRunRepository
+	registry     providers.ProviderLookup
 }
 
 func NewSyncService(
-	syncRunStore *storage.SyncRunStore,
-	registry *providers.Registry,
+	syncRunStore models.SyncRunRepository,
+	registry providers.ProviderLookup,
 ) *SyncService {
 	return &SyncService{
 		syncRunStore: syncRunStore,
@@ -41,7 +40,7 @@ func (s *SyncService) SyncProvider(ctx context.Context, providerName string) (*m
 		Status:   models.SyncRunRunning,
 	}
 
-	if err := s.syncRunStore.Create(ctx, run.ToEntity()); err != nil {
+	if err := s.syncRunStore.Create(ctx, run); err != nil {
 		return nil, errors.New("failed to create sync run")
 	}
 
