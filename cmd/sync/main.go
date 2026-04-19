@@ -15,6 +15,12 @@ import (
 	"github.com/deependra191/algoedgefno-backend/internal/storage"
 )
 
+const (
+	dateLayout   = "2006-01-02"
+	syncTimeout  = 5 * time.Minute
+	queryTimeout = 30 * time.Second
+)
+
 func main() {
 	dateStr := flag.String("date", "", "target date in YYYY-MM-DD format (default: latest trading day)")
 	fromStr := flag.String("from", "", "backfill start date in YYYY-MM-DD format")
@@ -32,33 +38,33 @@ func main() {
 	syncRunStore := storage.NewSyncRunStore(pool)
 
 	if *fromStr != "" {
-		from, err := time.Parse("2006-01-02", *fromStr)
+		from, err := time.Parse(dateLayout, *fromStr)
 		if err != nil {
 			log.Fatalf("invalid -from date %q: %v", *fromStr, err)
 		}
 		to := time.Now().UTC().Truncate(24 * time.Hour)
 		if *toStr != "" {
-			to, err = time.Parse("2006-01-02", *toStr)
+			to, err = time.Parse(dateLayout, *toStr)
 			if err != nil {
 				log.Fatalf("invalid -to date %q: %v", *toStr, err)
 			}
 		}
 
-		log.Printf("backfilling NSE EOD data from %s to %s...", from.Format("2006-01-02"), to.Format("2006-01-02"))
+		log.Printf("backfilling NSE EOD data from %s to %s...", from.Format(dateLayout), to.Format(dateLayout))
 		var totalRecords, succeeded, failed int
 		var failedDays []string
 		for day := from; !day.After(to); day = nextTradingDay(day) {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
 			run, err := syncForDate(ctx, instrumentStore, candleStore, syncRunStore, day)
 			cancel()
 			if err != nil {
 				failed++
-				failedDays = append(failedDays, day.Format("2006-01-02"))
-				log.Printf("[%s] failed: %v — skipping", day.Format("2006-01-02"), err)
+				failedDays = append(failedDays, day.Format(dateLayout))
+				log.Printf("[%s] failed: %v — skipping", day.Format(dateLayout), err)
 			} else {
 				succeeded++
 				totalRecords += run.RecordsProcessed
-				log.Printf("[%s] synced %d records (running total: %d)", day.Format("2006-01-02"), run.RecordsProcessed, totalRecords)
+				log.Printf("[%s] synced %d records (running total: %d)", day.Format(dateLayout), run.RecordsProcessed, totalRecords)
 			}
 			time.Sleep(time.Duration(*delaySec) * time.Second)
 		}
@@ -71,11 +77,11 @@ func main() {
 
 	if *dateStr != "" {
 		// Manual single-day override.
-		t, err := time.Parse("2006-01-02", *dateStr)
+		t, err := time.Parse(dateLayout, *dateStr)
 		if err != nil {
 			log.Fatalf("invalid date %q: %v", *dateStr, err)
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
 		defer cancel()
 		log.Printf("syncing NSE EOD data for %s...", *dateStr)
 		run, err := syncForDate(ctx, instrumentStore, candleStore, syncRunStore, t)
@@ -89,7 +95,7 @@ func main() {
 	// Daily catchup mode: sync every calendar day from the last synced date to today.
 	// Running on weekdays only (via cron); Monday naturally catches Saturday and Sunday.
 	// Weekends and holidays 404 and are skipped — no silent walk-back.
-	queryCtx, queryCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	queryCtx, queryCancel := context.WithTimeout(context.Background(), queryTimeout)
 	lastSynced, err := candleStore.LastSyncedDate(queryCtx, nse.ProviderName)
 	queryCancel()
 	if err != nil {
@@ -105,22 +111,23 @@ func main() {
 		return
 	}
 
-	log.Printf("daily catchup: last synced %s, syncing to %s...", lastSynced.Format("2006-01-02"), today.Format("2006-01-02"))
+	log.Printf("daily catchup: last synced %s, syncing to %s...", lastSynced.Format(dateLayout), today.Format(dateLayout))
 	var totalRecords, succeeded, failed int
 	var failedDays []string
 	for day := lastSynced.AddDate(0, 0, 1); !day.After(today); day = day.AddDate(0, 0, 1) {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
 		run, err := syncForDate(ctx, instrumentStore, candleStore, syncRunStore, day)
 		cancel()
 		if err != nil {
 			failed++
-			failedDays = append(failedDays, day.Format("2006-01-02"))
-			log.Printf("[%s] failed: %v — skipping", day.Format("2006-01-02"), err)
+			failedDays = append(failedDays, day.Format(dateLayout))
+			log.Printf("[%s] failed: %v — skipping", day.Format(dateLayout), err)
 		} else {
 			succeeded++
 			totalRecords += run.RecordsProcessed
-			log.Printf("[%s] synced %d records", day.Format("2006-01-02"), run.RecordsProcessed)
+			log.Printf("[%s] synced %d records", day.Format(dateLayout), run.RecordsProcessed)
 		}
+		time.Sleep(time.Duration(*delaySec) * time.Second)
 	}
 	log.Printf("daily catchup complete: %d days synced, %d days failed (holidays/weekends), %d total records", succeeded, failed, totalRecords)
 	if len(failedDays) > 0 {
