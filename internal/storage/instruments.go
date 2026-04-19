@@ -46,7 +46,7 @@ func (s *InstrumentStore) Upsert(ctx context.Context, inst *entities.Instrument)
 	return err
 }
 
-func (s *InstrumentStore) UpsertBatch(ctx context.Context, instruments []entities.Instrument) error {
+func (s *InstrumentStore) UpsertBatch(ctx context.Context, instruments []models.Instrument) error {
 	if len(instruments) == 0 {
 		return nil
 	}

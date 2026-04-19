@@ -16,6 +16,7 @@ type CandleFilter struct {
 
 type CandleRepository interface {
 	Query(ctx context.Context, f CandleFilter) ([]Candle, error)
+	InsertBatchIgnoreDuplicates(ctx context.Context, candles []Candle) (int64, error)
 }
 
 // Candle is the domain representation of an OHLCV bar.

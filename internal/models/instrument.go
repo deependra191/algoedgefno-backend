@@ -10,6 +10,7 @@ import (
 type InstrumentRepository interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*Instrument, error)
 	List(ctx context.Context, filter InstrumentFilter) ([]Instrument, error)
+	UpsertBatch(ctx context.Context, instruments []Instrument) error
 }
 
 type InstrumentFilter struct {

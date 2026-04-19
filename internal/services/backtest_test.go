@@ -69,6 +69,9 @@ type mockCandleRepo struct {
 func (m *mockCandleRepo) Query(_ context.Context, _ models.CandleFilter) ([]models.Candle, error) {
 	return m.result, m.err
 }
+func (m *mockCandleRepo) InsertBatchIgnoreDuplicates(_ context.Context, _ []models.Candle) (int64, error) {
+	return 0, nil
+}
 
 type mockInstrumentRepo struct {
 	result *models.Instrument
@@ -80,6 +83,9 @@ func (m *mockInstrumentRepo) GetByID(_ context.Context, _ uuid.UUID) (*models.In
 }
 func (m *mockInstrumentRepo) List(_ context.Context, _ models.InstrumentFilter) ([]models.Instrument, error) {
 	return nil, nil
+}
+func (m *mockInstrumentRepo) UpsertBatch(_ context.Context, _ []models.Instrument) error {
+	return nil
 }
 
 type mockEngine struct {
