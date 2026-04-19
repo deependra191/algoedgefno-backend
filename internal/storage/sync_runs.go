@@ -7,7 +7,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/deependra191/algoedgefno-backend/internal/entities"
+	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
+
+var _ models.SyncRunRepository = (*SyncRunStore)(nil)
 
 type SyncRunStore struct {
 	pool *pgxpool.Pool
@@ -17,7 +20,7 @@ func NewSyncRunStore(pool *pgxpool.Pool) *SyncRunStore {
 	return &SyncRunStore{pool: pool}
 }
 
-func (s *SyncRunStore) Create(ctx context.Context, run *entities.SyncRun) error {
+func (s *SyncRunStore) Create(ctx context.Context, run *models.SyncRun) error {
 	if run.ID == uuid.Nil {
 		run.ID = uuid.New()
 	}

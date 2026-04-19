@@ -5,6 +5,13 @@ import (
 	"fmt"
 )
 
+// ProviderLookup is the minimal registry contract the sync service depends on.
+type ProviderLookup interface {
+	Get(name string) (MarketDataProvider, bool)
+}
+
+var _ ProviderLookup = (*Registry)(nil)
+
 // Registry holds all registered MarketDataProviders.
 type Registry struct {
 	providers map[string]MarketDataProvider

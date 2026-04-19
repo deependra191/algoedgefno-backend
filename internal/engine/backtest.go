@@ -23,6 +23,12 @@ func NewBacktester() *Backtester {
 	return &Backtester{}
 }
 
+// RunBacktest simulates a strategy against historical candles.
+// Each candle is processed in order:
+//  1. Exit the open trade if target/stop-loss/time-exit is hit.
+//  2. Process any signals at the same timestamp — reversals close + reopen, same-direction signals are ignored.
+//
+// Any trade still open at end of data is closed at the last candle's close price.
 func (b *Backtester) RunBacktest(strategy *models.Strategy, candles []models.Candle) (*models.BacktestResult, error) {
 	signals, err := Evaluate(strategy, candles)
 	if err != nil {
@@ -37,53 +43,34 @@ func (b *Backtester) RunBacktest(strategy *models.Strategy, candles []models.Can
 	result := &models.BacktestResult{}
 	var openTrade *models.Trade
 	sigIdx := 0
-	equity := 0.0
-	peakEquity := 0.0
-	maxDrawdown := 0.0
+	equity, peakEquity, maxDrawdown := 0.0, 0.0, 0.0
 
 	for i := range candles {
+		candle := &candles[i]
+
+		// Exit takes priority: check before processing new signals at the same timestamp.
 		if openTrade != nil {
-			exitReason, exitPrice := checkExitConditions(openTrade, &candles[i], strategy)
-			if exitReason != "" {
-				closeTrade(openTrade, exitPrice, candles[i].Timestamp, exitReason, qty)
-				result.Trades = append(result.Trades, *openTrade)
-				equity += openTrade.PnL
-				if equity > peakEquity {
-					peakEquity = equity
-				}
-				if peakEquity > 0 {
-					dd := (peakEquity - equity) / peakEquity
-					if dd > maxDrawdown {
-						maxDrawdown = dd
-					}
-				}
+			if reason, price := checkExitConditions(openTrade, candle, strategy); reason != "" {
+				closeTrade(openTrade, price, candle.Timestamp, reason, qty)
+				recordTrade(result, *openTrade, &equity, &peakEquity, &maxDrawdown)
 				openTrade = nil
 			}
 		}
 
-		for sigIdx < len(signals) && signals[sigIdx].Timestamp.Equal(candles[i].Timestamp) {
+		// Walk signals that align to this candle's timestamp (there can be more than one).
+		for sigIdx < len(signals) && signals[sigIdx].Timestamp.Equal(candle.Timestamp) {
 			sig := signals[sigIdx]
 			sigIdx++
 
 			if openTrade != nil {
-				if (openTrade.Side == models.OrderSideBuy && sig.Side == models.OrderSideSell) ||
-					(openTrade.Side == models.OrderSideSell && sig.Side == models.OrderSideBuy) {
-					closeTrade(openTrade, sig.Price, sig.Timestamp, ExitReasonSignalReversal, qty)
-					result.Trades = append(result.Trades, *openTrade)
-					equity += openTrade.PnL
-					if equity > peakEquity {
-						peakEquity = equity
-					}
-					if peakEquity > 0 {
-						dd := (peakEquity - equity) / peakEquity
-						if dd > maxDrawdown {
-							maxDrawdown = dd
-						}
-					}
-					openTrade = nil
-				} else {
+				if !isReversal(openTrade.Side, sig.Side) {
+					// Same-direction signal while already in a trade — skip, no pyramiding.
 					continue
 				}
+				// Opposite-direction signal: close current trade then fall through to open a new one.
+				closeTrade(openTrade, sig.Price, sig.Timestamp, ExitReasonSignalReversal, qty)
+				recordTrade(result, *openTrade, &equity, &peakEquity, &maxDrawdown)
+				openTrade = nil
 			}
 
 			openTrade = &models.Trade{
@@ -96,20 +83,11 @@ func (b *Backtester) RunBacktest(strategy *models.Strategy, candles []models.Can
 		}
 	}
 
+	// Close any trade still open at end of data.
 	if openTrade != nil {
 		last := candles[len(candles)-1]
 		closeTrade(openTrade, last.Close, last.Timestamp, ExitReasonEndOfData, qty)
-		result.Trades = append(result.Trades, *openTrade)
-		equity += openTrade.PnL
-		if equity > peakEquity {
-			peakEquity = equity
-		}
-		if peakEquity > 0 {
-			dd := (peakEquity - equity) / peakEquity
-			if dd > maxDrawdown {
-				maxDrawdown = dd
-			}
-		}
+		recordTrade(result, *openTrade, &equity, &peakEquity, &maxDrawdown)
 	}
 
 	result.TotalTrades = len(result.Trades)
@@ -124,6 +102,27 @@ func (b *Backtester) RunBacktest(strategy *models.Strategy, candles []models.Can
 	result.MaxDrawdown = math.Round(maxDrawdown*10000) / 10000
 
 	return result, nil
+}
+
+// recordTrade appends a closed trade and updates the running equity and max-drawdown accumulators.
+func recordTrade(result *models.BacktestResult, trade models.Trade, equity, peakEquity, maxDrawdown *float64) {
+	result.Trades = append(result.Trades, trade)
+	*equity += trade.PnL
+	if *equity > *peakEquity {
+		*peakEquity = *equity
+	}
+	if *peakEquity > 0 {
+		dd := (*peakEquity - *equity) / *peakEquity
+		if dd > *maxDrawdown {
+			*maxDrawdown = dd
+		}
+	}
+}
+
+// isReversal reports whether sig is in the opposite direction of the open trade.
+func isReversal(openSide, sigSide models.OrderSide) bool {
+	return (openSide == models.OrderSideBuy && sigSide == models.OrderSideSell) ||
+		(openSide == models.OrderSideSell && sigSide == models.OrderSideBuy)
 }
 
 func checkExitConditions(trade *models.Trade, candle *models.Candle, strategy *models.Strategy) (string, float64) {
