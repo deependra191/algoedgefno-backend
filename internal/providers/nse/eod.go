@@ -17,10 +17,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/deependra191/algoedgefno-backend/internal/entities"
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 	"github.com/deependra191/algoedgefno-backend/internal/providers"
-	"github.com/deependra191/algoedgefno-backend/internal/storage"
 )
 
 // bhavURL is the NSE F&O bhavcopy URL pattern.
@@ -59,8 +57,8 @@ type colMap struct {
 }
 
 type EODProvider struct {
-	instrumentStore *storage.InstrumentStore
-	candleStore     *storage.CandleStore
+	instrumentStore models.InstrumentRepository
+	candleStore     models.CandleRepository
 	httpClient      *http.Client
 	targetDate      time.Time
 	// Cache to avoid downloading the same bhavcopy twice in one sync cycle.
@@ -78,7 +76,7 @@ func WithTargetDate(date time.Time) EODOption {
 	}
 }
 
-func NewEODProvider(instrumentStore *storage.InstrumentStore, candleStore *storage.CandleStore, opts ...EODOption) *EODProvider {
+func NewEODProvider(instrumentStore models.InstrumentRepository, candleStore models.CandleRepository, opts ...EODOption) *EODProvider {
 	jar, _ := cookiejar.New(nil)
 	p := &EODProvider{
 		instrumentStore: instrumentStore,
@@ -135,7 +133,7 @@ func (p *EODProvider) SyncInstruments(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("fetch bhavcopy: %w", err)
 	}
 
-	instruments := make([]entities.Instrument, 0, len(rows))
+	instruments := make([]models.Instrument, 0, len(rows))
 	for _, row := range rows {
 		instruments = append(instruments, bhavRowToInstrument(row))
 	}
@@ -163,13 +161,13 @@ func (p *EODProvider) SyncCandles(ctx context.Context) (int, error) {
 		instrMap[inst.Symbol] = inst.ID
 	}
 
-	candles := make([]entities.Candle, 0, len(rows))
+	candles := make([]models.Candle, 0, len(rows))
 	for _, row := range rows {
 		id, ok := instrMap[row.Symbol]
 		if !ok {
 			continue
 		}
-		candles = append(candles, entities.Candle{
+		candles = append(candles, models.Candle{
 			InstrumentID: id,
 			Timestamp:    row.Date,
 			Interval:     eodInterval,
@@ -399,13 +397,12 @@ func parseRow(rec []string, cols colMap, fallbackDate time.Time) (bhavRow, error
 	}, nil
 }
 
-func bhavRowToInstrument(row bhavRow) entities.Instrument {
+func bhavRowToInstrument(row bhavRow) models.Instrument {
 	lotSize := row.LotSize
 	if lotSize <= 0 {
 		lotSize = 1
 	}
-	inst := entities.Instrument{
-		ID:             uuid.New(),
+	inst := models.Instrument{
 		Symbol:         row.Symbol,
 		Name:           row.Symbol,
 		Exchange:       nseExchange,

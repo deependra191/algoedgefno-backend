@@ -46,7 +46,7 @@ func (s *CandleStore) InsertBatch(ctx context.Context, candles []entities.Candle
 // InsertBatchIgnoreDuplicates bulk-inserts candles, skipping any that already exist
 // (matching on the instrument_id, ts, interval primary key).
 // Uses COPY into a staging table + INSERT ... ON CONFLICT DO NOTHING for performance.
-func (s *CandleStore) InsertBatchIgnoreDuplicates(ctx context.Context, candles []entities.Candle) (int64, error) {
+func (s *CandleStore) InsertBatchIgnoreDuplicates(ctx context.Context, candles []models.Candle) (int64, error) {
 	if len(candles) == 0 {
 		return 0, nil
 	}
