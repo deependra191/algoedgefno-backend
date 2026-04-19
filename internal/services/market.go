@@ -12,13 +12,13 @@ import (
 type MarketService struct {
 	instrumentStore models.InstrumentRepository
 	candleStore     models.CandleRepository
-	registry        *providers.Registry
+	registry        providers.ProviderStatusProvider
 }
 
 func NewMarketService(
 	instrumentStore models.InstrumentRepository,
 	candleStore models.CandleRepository,
-	registry *providers.Registry,
+	registry providers.ProviderStatusProvider,
 ) *MarketService {
 	return &MarketService{
 		instrumentStore: instrumentStore,

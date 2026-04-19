@@ -8,51 +8,29 @@
 package models
 
 import (
+	"context"
 	"time"
 
 	"github.com/google/uuid"
-
-	"github.com/deependra191/algoedgefno-backend/internal/entities"
 )
 
+// UserRepository is the storage contract for user persistence.
+type UserRepository interface {
+	// FindByEmail returns the domain user and their password hash.
+	// The hash is returned separately so it never appears on models.User.
+	// Returns ErrNotFound if no user exists with that email.
+	FindByEmail(ctx context.Context, email string) (*User, string, error)
+	// Create persists a new user with the given bcrypt password hash.
+	Create(ctx context.Context, user *User, passwordHash string) error
+}
+
 // User is the domain representation of a user.
-// The password hash lives only on the entity layer — it has no place
-// in domain logic once authentication has completed.
+// PasswordHash is intentionally absent — it is returned separately by
+// UserRepository.FindByEmail and never stored on the domain object.
 type User struct {
 	ID        uuid.UUID
 	Email     string
 	Name      string
 	CreatedAt time.Time
 	UpdatedAt time.Time
-}
-
-// FromUserEntity converts a DB entity into a domain User.
-// The entity's PasswordHash is intentionally dropped.
-func FromUserEntity(e *entities.User) *User {
-	if e == nil {
-		return nil
-	}
-	return &User{
-		ID:        e.ID,
-		Email:     e.Email,
-		Name:      e.Name,
-		CreatedAt: e.CreatedAt,
-		UpdatedAt: e.UpdatedAt,
-	}
-}
-
-// ToEntity converts the domain User back into a DB entity.
-// PasswordHash is left blank — callers must set it explicitly when
-// persisting a new user.
-func (u *User) ToEntity() *entities.User {
-	if u == nil {
-		return nil
-	}
-	return &entities.User{
-		ID:        u.ID,
-		Email:     u.Email,
-		Name:      u.Name,
-		CreatedAt: u.CreatedAt,
-		UpdatedAt: u.UpdatedAt,
-	}
 }

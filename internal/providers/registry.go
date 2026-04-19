@@ -10,7 +10,13 @@ type ProviderLookup interface {
 	Get(name string) (MarketDataProvider, bool)
 }
 
+// ProviderStatusProvider is the registry contract for reporting provider health.
+type ProviderStatusProvider interface {
+	Statuses(ctx context.Context) []ProviderStatus
+}
+
 var _ ProviderLookup = (*Registry)(nil)
+var _ ProviderStatusProvider = (*Registry)(nil)
 
 // Registry holds all registered MarketDataProviders.
 type Registry struct {
