@@ -146,16 +146,3 @@ func (s *CandleStore) Query(ctx context.Context, f models.CandleFilter) ([]model
 	return result, rows.Err()
 }
 
-func toCandleModel(e *entities.Candle) models.Candle {
-	return models.Candle{
-		InstrumentID: e.InstrumentID,
-		Timestamp:    e.Timestamp,
-		Interval:     e.Interval,
-		Open:         e.Open,
-		High:         e.High,
-		Low:          e.Low,
-		Close:        e.Close,
-		Volume:       e.Volume,
-		Provider:     e.Provider,
-	}
-}
