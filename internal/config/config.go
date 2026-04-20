@@ -23,6 +23,12 @@ type Config struct {
 	AppSecretToken string
 	Env            string
 	MigrationsPath string
+
+	// NSE provider HTTP fingerprinting headers.
+	// NSE blocks requests that don't look like a real browser.
+	// Override via NSE_USER_AGENT / NSE_ACCEPT_HTML if NSE tightens their checks.
+	NSEUserAgent  string
+	NSEAcceptHTML string
 }
 
 func Load() *Config {
@@ -41,6 +47,8 @@ func Load() *Config {
 		AppSecretToken: getEnv("APP_SECRET_TOKEN", ""),
 		Env:            getEnv("ENV", "development"),
 		MigrationsPath: getEnv("MIGRATIONS_PATH", "file://migrations"),
+		NSEUserAgent:   getEnv("NSE_USER_AGENT", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"),
+		NSEAcceptHTML:  getEnv("NSE_ACCEPT_HTML", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"),
 	}
 
 	if cfg.Env == EnvProduction {

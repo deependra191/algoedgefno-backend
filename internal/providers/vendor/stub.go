@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/deependra191/algoedgefno-backend/internal/providers"
+	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
 // Stub is a placeholder for a future data vendor (TrueData / Global Datafeeds).
@@ -15,11 +15,11 @@ func NewStub() *Stub { return &Stub{} }
 
 func (s *Stub) Name() string { return "vendor" }
 
-func (s *Stub) Capabilities() []providers.Capability {
-	return []providers.Capability{
-		providers.CapIntradayActive,
-		providers.CapIntradayExpiredFO,
-		providers.CapLiveTicks,
+func (s *Stub) Capabilities() []models.Capability {
+	return []models.Capability{
+		models.CapIntradayActive,
+		models.CapIntradayExpiredFO,
+		models.CapLiveTicks,
 	}
 }
 

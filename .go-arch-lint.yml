@@ -1,0 +1,125 @@
+version: 3
+
+workdir: .
+
+allow:
+  depOnAnyVendor: false
+  # deepScan tracks concrete type flow through DI constructors — it fires on
+  # composition-root wiring (cmd/*, routes) where storage.X values are passed
+  # to service constructors that accept models.X interfaces. The import graph
+  # is enforced by the component rules; deep scan creates false positives here.
+  deepScan: false
+
+components:
+  models:
+    in: internal/models
+  entities:
+    in: internal/entities
+  engine:
+    in: internal/engine
+  storage:
+    in: internal/storage
+  providers:
+    in: internal/providers
+  nse:
+    in: internal/providers/nse
+  vendor_stub:
+    in: internal/providers/vendor
+  services:
+    in: internal/services
+  handlers:
+    in: internal/handlers
+  middleware:
+    in: internal/middleware
+  config:
+    in: internal/config
+  database:
+    in: internal/database
+  routes:
+    in: internal/routes
+  cmd_server:
+    in: cmd/server
+  cmd_sync:
+    in: cmd/sync
+
+deps:
+  models:
+    anyVendorDeps: true
+
+  entities:
+    anyVendorDeps: true
+
+  engine:
+    mayDependOn:
+      - models
+    anyVendorDeps: true
+
+  storage:
+    mayDependOn:
+      - models
+      - entities
+    anyVendorDeps: true
+
+  providers:
+    mayDependOn:
+      - models
+    anyVendorDeps: true
+
+  nse:
+    mayDependOn:
+      - models
+      - providers
+    anyVendorDeps: true
+
+  vendor_stub:
+    mayDependOn:
+      - models
+      - providers
+    anyVendorDeps: true
+
+  services:
+    mayDependOn:
+      - models
+    anyVendorDeps: true
+
+  handlers:
+    mayDependOn:
+      - models
+      - services
+    anyVendorDeps: true
+
+  middleware:
+    mayDependOn:
+      - models
+      - services
+    anyVendorDeps: true
+
+  config:
+    anyVendorDeps: true
+
+  database:
+    mayDependOn:
+      - config
+    anyVendorDeps: true
+
+  routes:
+    mayDependOn:
+      - config
+      - database
+      - models
+      - storage
+      - providers
+      - nse
+      - vendor_stub
+      - services
+      - handlers
+      - middleware
+    anyVendorDeps: true
+
+  cmd_server:
+    anyProjectDeps: true
+    anyVendorDeps: true
+
+  cmd_sync:
+    anyProjectDeps: true
+    anyVendorDeps: true
