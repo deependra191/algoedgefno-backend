@@ -38,11 +38,6 @@ const (
 
 	httpClientTimeout = 60 * time.Second
 
-	// nseUserAgent mimics a browser — NSE blocks headless requests without a recognisable UA.
-	nseUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-
-	// acceptHTML is sent on the session warm-up to trigger a full HTML response with cookies.
-	acceptHTML = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
 )
 
 // bhavRow holds one parsed row from the F&O bhavcopy CSV.
@@ -74,6 +69,8 @@ type EODProvider struct {
 	candleStore     models.CandleRepository
 	httpClient      *http.Client
 	targetDate      time.Time
+	userAgent       string
+	acceptHTML      string
 	// Cache to avoid downloading the same bhavcopy twice in one sync cycle.
 	// cacheMu protects cachedRows and cachedDate against concurrent sync calls.
 	cacheMu    sync.Mutex
@@ -92,14 +89,29 @@ func WithTargetDate(date time.Time) EODOption {
 	}
 }
 
+// WithUserAgent overrides the User-Agent header sent to NSE.
+// Use when NSE tightens their bot-detection and the default string starts getting blocked.
+func WithUserAgent(ua string) EODOption {
+	return func(p *EODProvider) { p.userAgent = ua }
+}
+
+// WithAcceptHTML overrides the Accept header sent during the session warm-up request.
+func WithAcceptHTML(accept string) EODOption {
+	return func(p *EODProvider) { p.acceptHTML = accept }
+}
+
 // NewEODProvider creates an EODProvider with a cookie-jar-enabled HTTP client.
 // The jar is required to pass NSE's session-cookie gate on nsearchives.nseindia.com.
+// Use WithUserAgent / WithAcceptHTML to override the default browser-fingerprinting
+// headers when NSE tightens bot detection — no recompile needed.
 func NewEODProvider(instrumentStore models.InstrumentRepository, candleStore models.CandleRepository, opts ...EODOption) *EODProvider {
 	jar, _ := cookiejar.New(nil)
 	p := &EODProvider{
 		instrumentStore: instrumentStore,
 		candleStore:     candleStore,
 		httpClient:      &http.Client{Timeout: httpClientTimeout, Jar: jar},
+		userAgent:       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+		acceptHTML:      "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -114,8 +126,8 @@ func (p *EODProvider) warmSession(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	req.Header.Set("User-Agent", nseUserAgent)
-	req.Header.Set("Accept", acceptHTML)
+	req.Header.Set("User-Agent", p.userAgent)
+	req.Header.Set("Accept", p.acceptHTML)
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -136,7 +148,7 @@ func (p *EODProvider) Healthy(ctx context.Context) bool {
 	if err != nil {
 		return false
 	}
-	req.Header.Set("User-Agent", nseUserAgent)
+	req.Header.Set("User-Agent", p.userAgent)
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
 		return false
@@ -260,7 +272,7 @@ func (p *EODProvider) downloadBhavcopy(ctx context.Context, date time.Time) ([]b
 		return nil, err
 	}
 	// NSE blocks requests without proper headers.
-	req.Header.Set("User-Agent", nseUserAgent)
+	req.Header.Set("User-Agent", p.userAgent)
 	req.Header.Set("Accept", "*/*")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 	req.Header.Set("Referer", nseMainURL+"/")
