@@ -110,8 +110,6 @@ func NewEODProvider(instrumentStore models.InstrumentRepository, candleStore mod
 		instrumentStore: instrumentStore,
 		candleStore:     candleStore,
 		httpClient:      &http.Client{Timeout: httpClientTimeout, Jar: jar},
-		userAgent:       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-		acceptHTML:      "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 	}
 	for _, opt := range opts {
 		opt(p)
