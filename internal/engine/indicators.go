@@ -240,6 +240,8 @@ func Supertrend(candles []models.Candle, period int, multiplier float64) ([]floa
 	return st, dir
 }
 
+// nanSlice returns a length-n slice filled with NaN. Used to mark positions
+// where an indicator has insufficient data rather than returning a misleading zero.
 func nanSlice(n int) []float64 {
 	out := make([]float64, n)
 	for i := range out {
