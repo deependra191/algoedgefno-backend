@@ -10,15 +10,11 @@ import (
 // The first (period-1) values are NaN (insufficient data).
 func SMA(closes []float64, period int) []float64 {
 	n := len(closes)
-	out := make([]float64, n)
-
 	if period <= 0 || n == 0 {
-		for i := range out {
-			out[i] = math.NaN()
-		}
-		return out
+		return nanSlice(n)
 	}
 
+	out := make([]float64, n)
 	for i := 0; i < period-1 && i < n; i++ {
 		out[i] = math.NaN()
 	}
@@ -46,15 +42,11 @@ func SMA(closes []float64, period int) []float64 {
 // The first (period-1) values are NaN.
 func EMA(closes []float64, period int) []float64 {
 	n := len(closes)
-	out := make([]float64, n)
-
 	if period <= 0 || n == 0 {
-		for i := range out {
-			out[i] = math.NaN()
-		}
-		return out
+		return nanSlice(n)
 	}
 
+	out := make([]float64, n)
 	for i := 0; i < period-1 && i < n; i++ {
 		out[i] = math.NaN()
 	}
@@ -83,15 +75,11 @@ func EMA(closes []float64, period int) []float64 {
 // RSI is clamped to 100 when average loss is zero.
 func RSI(closes []float64, period int) []float64 {
 	n := len(closes)
-	out := make([]float64, n)
-
 	if period <= 0 || n == 0 {
-		for i := range out {
-			out[i] = math.NaN()
-		}
-		return out
+		return nanSlice(n)
 	}
 
+	out := make([]float64, n)
 	for i := 0; i <= period && i < n; i++ {
 		out[i] = math.NaN()
 	}
@@ -120,23 +108,12 @@ func RSI(closes []float64, period int) []float64 {
 	avgGain := sumGain / float64(period)
 	avgLoss := sumLoss / float64(period)
 
-	if avgLoss == 0 {
-		out[period] = 100
-	} else {
-		rs := avgGain / avgLoss
-		out[period] = 100 - (100 / (1 + rs))
-	}
+	out[period] = rsiValue(avgGain, avgLoss)
 
 	for i := period + 1; i < n; i++ {
 		avgGain = (avgGain*float64(period-1) + gains[i]) / float64(period)
 		avgLoss = (avgLoss*float64(period-1) + losses[i]) / float64(period)
-
-		if avgLoss == 0 {
-			out[i] = 100
-		} else {
-			rs := avgGain / avgLoss
-			out[i] = 100 - (100 / (1 + rs))
-		}
+		out[i] = rsiValue(avgGain, avgLoss)
 	}
 
 	return out
@@ -147,13 +124,8 @@ func RSI(closes []float64, period int) []float64 {
 // The first (period-1) values are NaN.
 func ATR(candles []models.Candle, period int) []float64 {
 	n := len(candles)
-	out := make([]float64, n)
-
 	if period <= 0 || n == 0 {
-		for i := range out {
-			out[i] = math.NaN()
-		}
-		return out
+		return nanSlice(n)
 	}
 
 	tr := make([]float64, n)
@@ -165,6 +137,7 @@ func ATR(candles []models.Candle, period int) []float64 {
 		tr[i] = math.Max(hl, math.Max(hpc, lpc))
 	}
 
+	out := make([]float64, n)
 	for i := 0; i < period && i < n; i++ {
 		out[i] = math.NaN()
 	}
@@ -192,18 +165,14 @@ func ATR(candles []models.Candle, period int) []float64 {
 // The first (period-1) entries are NaN/zero while ATR seeds.
 func Supertrend(candles []models.Candle, period int, multiplier float64) ([]float64, []int) {
 	n := len(candles)
-	st := make([]float64, n)
-	dir := make([]int, n)
-
 	if period <= 0 || n == 0 {
-		for i := range st {
-			st[i] = math.NaN()
-		}
-		return st, dir
+		return nanSlice(n), make([]int, n)
 	}
 
 	atr := ATR(candles, period)
 
+	st := make([]float64, n)
+	dir := make([]int, n)
 	upperBand := make([]float64, n)
 	lowerBand := make([]float64, n)
 
@@ -269,4 +238,22 @@ func Supertrend(candles []models.Candle, period int, multiplier float64) ([]floa
 	}
 
 	return st, dir
+}
+
+func nanSlice(n int) []float64 {
+	out := make([]float64, n)
+	for i := range out {
+		out[i] = math.NaN()
+	}
+	return out
+}
+
+// rsiValue computes an RSI reading from pre-smoothed average gain and loss.
+// Returns 100 when avgLoss is zero (no losing periods in the window).
+func rsiValue(avgGain, avgLoss float64) float64 {
+	if avgLoss == 0 {
+		return 100
+	}
+	rs := avgGain / avgLoss
+	return 100 - (100 / (1 + rs))
 }
