@@ -6,19 +6,18 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/deependra191/algoedgefno-backend/internal/models"
-	"github.com/deependra191/algoedgefno-backend/internal/providers"
 )
 
 type MarketService struct {
 	instrumentStore models.InstrumentRepository
 	candleStore     models.CandleRepository
-	registry        providers.ProviderStatusProvider
+	registry        models.ProviderStatusProvider
 }
 
 func NewMarketService(
 	instrumentStore models.InstrumentRepository,
 	candleStore models.CandleRepository,
-	registry providers.ProviderStatusProvider,
+	registry models.ProviderStatusProvider,
 ) *MarketService {
 	return &MarketService{
 		instrumentStore: instrumentStore,
@@ -39,6 +38,6 @@ func (s *MarketService) GetCandles(ctx context.Context, filter models.CandleFilt
 	return s.candleStore.Query(ctx, filter)
 }
 
-func (s *MarketService) ProviderStatuses(ctx context.Context) []providers.ProviderStatus {
+func (s *MarketService) ProviderStatuses(ctx context.Context) []models.ProviderStatus {
 	return s.registry.Statuses(ctx)
 }
