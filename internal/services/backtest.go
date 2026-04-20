@@ -48,33 +48,14 @@ type BacktestRequest struct {
 // Submit validates the request, runs the backtest engine synchronously, and
 // persists the result. Returns the completed (or failed) BacktestRun.
 func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*models.BacktestRun, error) {
-	_, err := s.strategyStore.GetByID(ctx, req.StrategyID)
+	inst, strat, err := s.validateInputs(ctx, req)
 	if err != nil {
-		return nil, errors.New("strategy not found")
+		return nil, err
 	}
 
-	inst, err := s.instrumentStore.GetByID(ctx, req.InstrumentID)
+	run, err := s.createAndStartRun(ctx, inst, req)
 	if err != nil {
-		return nil, errors.New("instrument not found")
-	}
-
-	run := &models.BacktestRun{
-		ID:              uuid.New(),
-		StrategyID:      req.StrategyID,
-		InstrumentToken: inst.Symbol,
-		FromTs:          req.From,
-		ToTs:            req.To,
-		CandleInterval:  req.Interval,
-		Status:          models.BacktestPending,
-	}
-
-	if err := s.backtestStore.Create(ctx, run); err != nil {
-		return nil, errors.New("failed to create backtest run")
-	}
-
-	run.Status = models.BacktestRunning
-	if err := s.backtestStore.UpdateStatus(ctx, run); err != nil {
-		return nil, errors.New("failed to update backtest status")
+		return nil, err
 	}
 
 	candles, err := s.candleStore.Query(ctx, models.CandleFilter{
@@ -90,16 +71,61 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 		return s.failRun(ctx, run, "no candle data available")
 	}
 
-	strat, err := s.strategyStore.GetByID(ctx, req.StrategyID)
-	if err != nil {
-		return s.failRun(ctx, run, "failed to reload strategy")
-	}
-
 	result, err := s.engine.RunBacktest(strat, candles)
 	if err != nil {
 		return s.failRun(ctx, run, err.Error())
 	}
 
+	return s.applyResult(ctx, run, result)
+}
+
+func (s *BacktestService) GetByID(ctx context.Context, id uuid.UUID) (*models.BacktestRun, error) {
+	return s.backtestStore.GetByID(ctx, id)
+}
+
+func (s *BacktestService) ListByStrategy(ctx context.Context, strategyID uuid.UUID) ([]models.BacktestRun, error) {
+	return s.backtestStore.ListByStrategy(ctx, strategyID)
+}
+
+// validateInputs loads and validates both the strategy and instrument.
+// Returns both to avoid a second fetch later in the lifecycle.
+func (s *BacktestService) validateInputs(ctx context.Context, req BacktestRequest) (*models.Instrument, *models.Strategy, error) {
+	strat, err := s.strategyStore.GetByID(ctx, req.StrategyID)
+	if err != nil {
+		return nil, nil, errors.New("strategy not found")
+	}
+	inst, err := s.instrumentStore.GetByID(ctx, req.InstrumentID)
+	if err != nil {
+		return nil, nil, errors.New("instrument not found")
+	}
+	return inst, strat, nil
+}
+
+// createAndStartRun builds the BacktestRun record, persists it, and transitions
+// it to RUNNING. Returns the persisted run ready for candle fetching.
+func (s *BacktestService) createAndStartRun(ctx context.Context, inst *models.Instrument, req BacktestRequest) (*models.BacktestRun, error) {
+	run := &models.BacktestRun{
+		ID:              uuid.New(),
+		StrategyID:      req.StrategyID,
+		InstrumentToken: inst.Symbol,
+		FromTs:          req.From,
+		ToTs:            req.To,
+		CandleInterval:  req.Interval,
+		Status:          models.BacktestPending,
+	}
+	if err := s.backtestStore.Create(ctx, run); err != nil {
+		return nil, errors.New("failed to create backtest run")
+	}
+	run.Status = models.BacktestRunning
+	if err := s.backtestStore.UpdateStatus(ctx, run); err != nil {
+		return nil, errors.New("failed to update backtest status")
+	}
+	return run, nil
+}
+
+// applyResult marshals trade data, stamps all result metrics onto the run,
+// and persists the final COMPLETED state.
+func (s *BacktestService) applyResult(ctx context.Context, run *models.BacktestRun, result *models.BacktestResult) (*models.BacktestRun, error) {
 	tradesJSON, err := json.Marshal(result.Trades)
 	if err != nil {
 		return s.failRun(ctx, run, "failed to marshal trade results")
@@ -111,20 +137,10 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 	run.LossCount = &result.LossCount
 	run.MaxDrawdown = &result.MaxDrawdown
 	run.Trades = tradesJSON
-
 	if err := s.backtestStore.UpdateResult(ctx, run); err != nil {
 		return nil, errors.New("failed to save backtest results")
 	}
-
 	return run, nil
-}
-
-func (s *BacktestService) GetByID(ctx context.Context, id uuid.UUID) (*models.BacktestRun, error) {
-	return s.backtestStore.GetByID(ctx, id)
-}
-
-func (s *BacktestService) ListByStrategy(ctx context.Context, strategyID uuid.UUID) ([]models.BacktestRun, error) {
-	return s.backtestStore.ListByStrategy(ctx, strategyID)
 }
 
 // failRun marks the run as FAILED and attempts to persist the state.
