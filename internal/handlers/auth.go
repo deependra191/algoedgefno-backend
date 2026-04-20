@@ -22,6 +22,7 @@ type loginRequest struct {
 
 // --- handler ---
 
+// AuthHandler handles HTTP requests for user registration and login.
 type AuthHandler struct {
 	authSvc *services.AuthService
 }

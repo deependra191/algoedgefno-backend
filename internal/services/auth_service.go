@@ -12,6 +12,7 @@ import (
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
+// AuthService handles user registration, login, and JWT token validation.
 type AuthService struct {
 	userRepo  models.UserRepository
 	jwtSecret []byte
@@ -120,7 +121,7 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (*AuthResult,
 }
 
 func (s *AuthService) ValidateToken(tokenStr string) (string, error) {
-	token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
+	token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, errors.New("unexpected signing method")
 		}

@@ -6,6 +6,8 @@ import (
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
+// SMA returns a slice of Simple Moving Average values aligned to closes.
+// The first (period-1) values are NaN (insufficient data).
 func SMA(closes []float64, period int) []float64 {
 	n := len(closes)
 	out := make([]float64, n)
@@ -26,7 +28,7 @@ func SMA(closes []float64, period int) []float64 {
 	}
 
 	sum := 0.0
-	for i := 0; i < period; i++ {
+	for i := range period {
 		sum += closes[i]
 	}
 	out[period-1] = sum / float64(period)
@@ -39,6 +41,9 @@ func SMA(closes []float64, period int) []float64 {
 	return out
 }
 
+// EMA returns a slice of Exponential Moving Average values aligned to closes.
+// Seeded from the first SMA(period), then applies the standard 2/(period+1) smoothing factor.
+// The first (period-1) values are NaN.
 func EMA(closes []float64, period int) []float64 {
 	n := len(closes)
 	out := make([]float64, n)
@@ -59,7 +64,7 @@ func EMA(closes []float64, period int) []float64 {
 	}
 
 	sum := 0.0
-	for i := 0; i < period; i++ {
+	for i := range period {
 		sum += closes[i]
 	}
 	seed := sum / float64(period)
@@ -73,6 +78,9 @@ func EMA(closes []float64, period int) []float64 {
 	return out
 }
 
+// RSI returns a slice of Relative Strength Index values aligned to closes.
+// Uses Wilder's smoothed moving average. The first (period) values are NaN.
+// RSI is clamped to 100 when average loss is zero.
 func RSI(closes []float64, period int) []float64 {
 	n := len(closes)
 	out := make([]float64, n)
@@ -134,6 +142,9 @@ func RSI(closes []float64, period int) []float64 {
 	return out
 }
 
+// ATR returns a slice of Average True Range values aligned to candles.
+// True range is max(H-L, |H-prevC|, |L-prevC|). Smoothed with Wilder's method.
+// The first (period-1) values are NaN.
 func ATR(candles []models.Candle, period int) []float64 {
 	n := len(candles)
 	out := make([]float64, n)
@@ -163,7 +174,7 @@ func ATR(candles []models.Candle, period int) []float64 {
 	}
 
 	sum := 0.0
-	for i := 0; i < period; i++ {
+	for i := range period {
 		sum += tr[i]
 	}
 	out[period-1] = sum / float64(period)
@@ -175,6 +186,10 @@ func ATR(candles []models.Candle, period int) []float64 {
 	return out
 }
 
+// Supertrend returns (st, dir) slices aligned to candles.
+// st is the Supertrend line value; dir is +1 (bullish) or -1 (bearish).
+// Band values are computed from ATR(period)*multiplier around the HL/2 midpoint.
+// The first (period-1) entries are NaN/zero while ATR seeds.
 func Supertrend(candles []models.Candle, period int, multiplier float64) ([]float64, []int) {
 	n := len(candles)
 	st := make([]float64, n)
@@ -192,7 +207,7 @@ func Supertrend(candles []models.Candle, period int, multiplier float64) ([]floa
 	upperBand := make([]float64, n)
 	lowerBand := make([]float64, n)
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if math.IsNaN(atr[i]) {
 			upperBand[i] = math.NaN()
 			lowerBand[i] = math.NaN()

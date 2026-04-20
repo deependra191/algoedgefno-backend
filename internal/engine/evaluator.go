@@ -17,6 +17,9 @@ const (
 	defaultMomentumLookback = 20
 )
 
+// Evaluate generates entry signals for the given strategy by dispatching to the
+// appropriate indicator-based evaluator. Candles must be in chronological order.
+// Returns nil, nil for an empty candle slice.
 func Evaluate(strategy *models.Strategy, candles []models.Candle) ([]Signal, error) {
 	if len(candles) == 0 {
 		return nil, nil
@@ -36,6 +39,8 @@ func Evaluate(strategy *models.Strategy, candles []models.Candle) ([]Signal, err
 	}
 }
 
+// evaluateMACrossover emits a BUY when the short MA crosses above the long MA,
+// and a SELL on the reverse crossover.
 func evaluateMACrossover(candles []models.Candle) ([]Signal, error) {
 	closes := extractCloses(candles)
 	shortMA := SMA(closes, defaultShortMA)
@@ -65,6 +70,7 @@ func evaluateMACrossover(candles []models.Candle) ([]Signal, error) {
 	return signals, nil
 }
 
+// evaluateSupertrend emits a BUY on a bearish→bullish Supertrend flip and a SELL on the reverse.
 func evaluateSupertrend(candles []models.Candle) ([]Signal, error) {
 	_, dir := Supertrend(candles, defaultSupertrendPer, defaultSupertrendMult)
 
@@ -89,6 +95,8 @@ func evaluateSupertrend(candles []models.Candle) ([]Signal, error) {
 	return signals, nil
 }
 
+// evaluateRSI emits a BUY when RSI crosses below the oversold threshold
+// and a SELL when it crosses above the overbought threshold.
 func evaluateRSI(candles []models.Candle) ([]Signal, error) {
 	closes := extractCloses(candles)
 	rsi := RSI(closes, defaultRSIPeriod)
@@ -114,6 +122,9 @@ func evaluateRSI(candles []models.Candle) ([]Signal, error) {
 	return signals, nil
 }
 
+// evaluateMomentum emits a BUY when price closes above the N-period high (breakout)
+// and a SELL when it falls back below. Only one position at a time — re-entry requires
+// price to drop below the high and break out again.
 func evaluateMomentum(candles []models.Candle) ([]Signal, error) {
 	n := len(candles)
 	if n <= defaultMomentumLookback {

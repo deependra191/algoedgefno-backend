@@ -10,6 +10,7 @@ import (
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
+// SyncService triggers a full data sync for a named provider and records the run outcome.
 type SyncService struct {
 	syncRunStore models.SyncRunRepository
 	registry     models.ProviderLookup

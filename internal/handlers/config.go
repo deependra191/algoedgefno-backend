@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// NavTab is a single bottom-navigation entry delivered to the Android client.
 type NavTab struct {
 	Route   string `json:"route"`
 	IconKey string `json:"iconKey"`

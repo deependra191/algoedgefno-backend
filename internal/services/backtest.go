@@ -11,6 +11,8 @@ import (
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
+// BacktestService orchestrates the full backtest lifecycle: create a run record,
+// fetch candles, invoke the engine, and persist results.
 type BacktestService struct {
 	backtestStore   models.BacktestRepository
 	strategyStore   models.StrategyRepository
@@ -43,6 +45,8 @@ type BacktestRequest struct {
 	Interval     string
 }
 
+// Submit validates the request, runs the backtest engine synchronously, and
+// persists the result. Returns the completed (or failed) BacktestRun.
 func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*models.BacktestRun, error) {
 	_, err := s.strategyStore.GetByID(ctx, req.StrategyID)
 	if err != nil {
@@ -123,6 +127,9 @@ func (s *BacktestService) ListByStrategy(ctx context.Context, strategyID uuid.UU
 	return s.backtestStore.ListByStrategy(ctx, strategyID)
 }
 
+// failRun marks the run as FAILED and attempts to persist the state.
+// The UpdateResult error is intentionally swallowed — the original errMsg is
+// always returned to the caller regardless of persistence success.
 func (s *BacktestService) failRun(ctx context.Context, run *models.BacktestRun, errMsg string) (*models.BacktestRun, error) {
 	run.Status = models.BacktestFailed
 	run.ErrorMessage = &errMsg
