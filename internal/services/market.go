@@ -8,6 +8,7 @@ import (
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
+// MarketService provides read access to instruments and candles, and reports provider health.
 type MarketService struct {
 	instrumentStore models.InstrumentRepository
 	candleStore     models.CandleRepository

@@ -8,11 +8,17 @@ import (
 	"github.com/google/uuid"
 )
 
+// StrategyRepository is the storage contract for user-defined trading strategies.
 type StrategyRepository interface {
+	// GetByID returns the strategy with the given ID, or models.ErrNotFound.
 	GetByID(ctx context.Context, id uuid.UUID) (*Strategy, error)
+	// List returns all strategies ordered by last-updated descending.
 	List(ctx context.Context) ([]Strategy, error)
+	// Create persists a new strategy, assigning a UUID if the ID is zero.
 	Create(ctx context.Context, strategy *Strategy) error
+	// Update overwrites all mutable fields of an existing strategy.
 	Update(ctx context.Context, strategy *Strategy) error
+	// Delete removes the strategy with the given ID.
 	Delete(ctx context.Context, id uuid.UUID) error
 }
 

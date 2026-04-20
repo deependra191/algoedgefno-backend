@@ -17,6 +17,7 @@ const (
 
 var _ models.BacktestEngine = (*Backtester)(nil)
 
+// Backtester is the standard implementation of models.BacktestEngine.
 type Backtester struct{}
 
 func NewBacktester() *Backtester {
@@ -125,6 +126,9 @@ func isReversal(openSide, sigSide models.OrderSide) bool {
 		(openSide == models.OrderSideSell && sigSide == models.OrderSideBuy)
 }
 
+// checkExitConditions tests target, stop-loss, and time-exit rules in that order.
+// Returns the exit reason string and the exact exit price, or ("", 0) if no condition is met.
+// For longs, target/SL are checked against candle High/Low; shorts use the inverse.
 func checkExitConditions(trade *models.Trade, candle *models.Candle, strategy *models.Strategy) (string, float64) {
 	if strategy.TargetPct != nil {
 		target := *strategy.TargetPct / 100
@@ -162,6 +166,9 @@ func checkExitConditions(trade *models.Trade, candle *models.Candle, strategy *m
 	return "", 0
 }
 
+// closeTrade mutates trade in place with exit fields and computes PnL.
+// PnL is positive for a profitable long (exitPrice > entryPrice) and
+// for a profitable short (entryPrice > exitPrice).
 func closeTrade(trade *models.Trade, exitPrice float64, exitTime time.Time, reason string, qty int) {
 	trade.ExitTimestamp = exitTime
 	trade.ExitPrice = exitPrice

@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 )
 
+// OrderSide represents the direction of a trade entry.
 type OrderSide string
 
 const (
@@ -15,6 +16,7 @@ const (
 	OrderSideSell OrderSide = "SELL"
 )
 
+// Trade is a single completed round-trip entry+exit produced by the backtest engine.
 type Trade struct {
 	EntryTimestamp time.Time
 	ExitTimestamp  time.Time
@@ -27,6 +29,7 @@ type Trade struct {
 	ExitReason     string
 }
 
+// BacktestResult aggregates the outcome of a full backtest run.
 type BacktestResult struct {
 	Trades      []Trade
 	NetPnL      float64
@@ -38,20 +41,27 @@ type BacktestResult struct {
 
 // BacktestEngine is the contract every backtest engine implementation must satisfy.
 type BacktestEngine interface {
+	// RunBacktest simulates strategy against the provided candle series and returns
+	// aggregated trade results. Candles must be in chronological order.
+	// Returns an error only if the strategy configuration is invalid.
 	RunBacktest(strategy *Strategy, candles []Candle) (*BacktestResult, error)
 }
 
-// BacktestRepository is the contract every backtest storage implementation must satisfy.
+// BacktestRepository is the storage contract for persisting backtest run records.
 type BacktestRepository interface {
+	// Create inserts a new BacktestRun record with PENDING status.
 	Create(ctx context.Context, run *BacktestRun) error
 	// UpdateStatus persists only the status field — used for PENDING→RUNNING transitions.
 	UpdateStatus(ctx context.Context, run *BacktestRun) error
 	// UpdateResult persists final metrics and stamps completed_at — used for COMPLETED/FAILED.
 	UpdateResult(ctx context.Context, run *BacktestRun) error
+	// GetByID returns the run with the given ID, or models.ErrNotFound.
 	GetByID(ctx context.Context, id uuid.UUID) (*BacktestRun, error)
+	// ListByStrategy returns all runs for a strategy, newest first.
 	ListByStrategy(ctx context.Context, strategyID uuid.UUID) ([]BacktestRun, error)
 }
 
+// BacktestRun is the domain representation of a single backtest execution.
 type BacktestRun struct {
 	ID              uuid.UUID
 	StrategyID      uuid.UUID

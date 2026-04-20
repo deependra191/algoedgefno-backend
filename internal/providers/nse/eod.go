@@ -30,6 +30,14 @@ const (
 	eodInterval  = "1d"
 	ProviderName = "nse_eod"
 	maxBhavSize  = 50 << 20
+
+	// bhavDateFormat is the date layout used to format the bhavcopy URL and filename.
+	// Kept separate from the date formats in parseDate — those parse incoming CSV values,
+	// this one is for generating outbound URLs.
+	bhavDateFormat = "20060102"
+
+	httpClientTimeout = 60 * time.Second
+
 )
 
 // bhavRow holds one parsed row from the F&O bhavcopy CSV.
@@ -55,11 +63,14 @@ type colMap struct {
 	open, high, low, close_, vol, ts, lotSize              int
 }
 
+// EODProvider fetches NSE F&O end-of-day bhavcopy data and syncs it into the local store.
 type EODProvider struct {
 	instrumentStore models.InstrumentRepository
 	candleStore     models.CandleRepository
 	httpClient      *http.Client
 	targetDate      time.Time
+	userAgent       string
+	acceptHTML      string
 	// Cache to avoid downloading the same bhavcopy twice in one sync cycle.
 	// cacheMu protects cachedRows and cachedDate against concurrent sync calls.
 	cacheMu    sync.Mutex
@@ -67,20 +78,38 @@ type EODProvider struct {
 	cachedDate time.Time
 }
 
+// EODOption is a functional option for configuring an EODProvider.
 type EODOption func(*EODProvider)
 
+// WithTargetDate overrides the default "latest trading day" anchor so the provider
+// syncs a specific date. Primarily used in tests and backfill runs.
 func WithTargetDate(date time.Time) EODOption {
 	return func(p *EODProvider) {
 		p.targetDate = date
 	}
 }
 
+// WithUserAgent overrides the User-Agent header sent to NSE.
+// Use when NSE tightens their bot-detection and the default string starts getting blocked.
+func WithUserAgent(ua string) EODOption {
+	return func(p *EODProvider) { p.userAgent = ua }
+}
+
+// WithAcceptHTML overrides the Accept header sent during the session warm-up request.
+func WithAcceptHTML(accept string) EODOption {
+	return func(p *EODProvider) { p.acceptHTML = accept }
+}
+
+// NewEODProvider creates an EODProvider with a cookie-jar-enabled HTTP client.
+// The jar is required to pass NSE's session-cookie gate on nsearchives.nseindia.com.
+// Use WithUserAgent / WithAcceptHTML to override the default browser-fingerprinting
+// headers when NSE tightens bot detection — no recompile needed.
 func NewEODProvider(instrumentStore models.InstrumentRepository, candleStore models.CandleRepository, opts ...EODOption) *EODProvider {
 	jar, _ := cookiejar.New(nil)
 	p := &EODProvider{
 		instrumentStore: instrumentStore,
 		candleStore:     candleStore,
-		httpClient:      &http.Client{Timeout: 60 * time.Second, Jar: jar},
+		httpClient:      &http.Client{Timeout: httpClientTimeout, Jar: jar},
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -95,8 +124,8 @@ func (p *EODProvider) warmSession(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("User-Agent", p.userAgent)
+	req.Header.Set("Accept", p.acceptHTML)
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -117,7 +146,7 @@ func (p *EODProvider) Healthy(ctx context.Context) bool {
 	if err != nil {
 		return false
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set("User-Agent", p.userAgent)
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
 		return false
@@ -230,18 +259,21 @@ func (p *EODProvider) fetchLatestBhavcopy(ctx context.Context) ([]bhavRow, error
 	return nil, fmt.Errorf("no bhavcopy available in the last 7 trading days")
 }
 
+// downloadBhavcopy fetches and unzips the bhavcopy archive for the given date,
+// returning the parsed rows. Returns an error if the file is unavailable (HTTP non-200)
+// or the zip contains no CSV — callers use this to step back to the previous trading day.
 func (p *EODProvider) downloadBhavcopy(ctx context.Context, date time.Time) ([]bhavRow, error) {
-	url := fmt.Sprintf(bhavURL, date.Format("20060102"))
+	url := fmt.Sprintf(bhavURL, date.Format(bhavDateFormat))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
 	// NSE blocks requests without proper headers.
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set("User-Agent", p.userAgent)
 	req.Header.Set("Accept", "*/*")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
-	req.Header.Set("Referer", "https://www.nseindia.com/")
+	req.Header.Set("Referer", nseMainURL+"/")
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -335,6 +367,10 @@ func parseBhavCSV(r io.Reader, date time.Time) ([]bhavRow, error) {
 	return rows, nil
 }
 
+// parseRow converts a single CSV record into a bhavRow using pre-resolved column indices.
+// fallbackDate is used when the record's timestamp column is absent or unparseable.
+// Returns an error only for fatal fields (missing symbol, unparseable OHLC); non-fatal
+// fields (volume, lot size, strike) default to zero silently.
 func parseRow(rec []string, cols colMap, fallbackDate time.Time) (bhavRow, error) {
 	get := func(i int) string {
 		if i < 0 || i >= len(rec) {
@@ -396,6 +432,8 @@ func parseRow(rec []string, cols colMap, fallbackDate time.Time) (bhavRow, error
 	}, nil
 }
 
+// bhavRowToInstrument maps a parsed bhavcopy row to a domain Instrument.
+// LotSize defaults to 1 when the CSV value is absent or zero.
 func bhavRowToInstrument(row bhavRow) models.Instrument {
 	lotSize := row.LotSize
 	if lotSize <= 0 {
@@ -432,6 +470,8 @@ func latestTradingDate() time.Time {
 	return prevTradingDayOrToday(t)
 }
 
+// prevTradingDayOrToday returns t itself unless it falls on a weekend,
+// in which case it rolls back to the preceding Friday.
 func prevTradingDayOrToday(t time.Time) time.Time {
 	switch t.Weekday() {
 	case time.Sunday:
@@ -442,6 +482,7 @@ func prevTradingDayOrToday(t time.Time) time.Time {
 	return t
 }
 
+// prevTradingDay returns the trading day immediately before t, skipping weekends.
 func prevTradingDay(t time.Time) time.Time {
 	t = t.AddDate(0, 0, -1)
 	return prevTradingDayOrToday(t)
@@ -471,6 +512,8 @@ func parseInt64(s string) (int64, error) {
 	return strconv.ParseInt(s, 10, 64)
 }
 
+// parseExpiry parses a contract expiry date string, trying multiple NSE-observed formats.
+// Returns a zero time.Time for empty, missing, or unrecognised values — callers treat zero as "no expiry".
 func parseExpiry(s string) time.Time {
 	if s == "" || s == "-" {
 		return time.Time{}
@@ -485,6 +528,8 @@ func parseExpiry(s string) time.Time {
 	return time.Time{}
 }
 
+// parseDate parses a date string from a bhavcopy timestamp column,
+// trying multiple NSE-observed formats. Returns an error if none match.
 func parseDate(s string) (time.Time, error) {
 	formats := []string{"02-Jan-2006", "2006-01-02", "20060102", "01/02/2006"}
 	for _, f := range formats {

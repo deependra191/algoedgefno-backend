@@ -8,6 +8,7 @@ import (
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
+// StrategyService manages CRUD operations for user-defined trading strategies.
 type StrategyService struct {
 	strategyStore models.StrategyRepository
 }

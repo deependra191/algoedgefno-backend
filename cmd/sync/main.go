@@ -55,7 +55,7 @@ func main() {
 		var failedDays []string
 		for day := from; !day.After(to); day = nextTradingDay(day) {
 			ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
-			run, err := syncForDate(ctx, instrumentStore, candleStore, syncRunStore, day)
+			run, err := syncForDate(ctx, instrumentStore, candleStore, syncRunStore, cfg, day)
 			cancel()
 			if err != nil {
 				failed++
@@ -84,7 +84,7 @@ func main() {
 		ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
 		defer cancel()
 		log.Printf("syncing NSE EOD data for %s...", *dateStr)
-		run, err := syncForDate(ctx, instrumentStore, candleStore, syncRunStore, t)
+		run, err := syncForDate(ctx, instrumentStore, candleStore, syncRunStore, cfg, t)
 		if err != nil {
 			log.Fatalf("sync failed: %v", err)
 		}
@@ -116,7 +116,7 @@ func main() {
 	var failedDays []string
 	for day := lastSynced.AddDate(0, 0, 1); !day.After(today); day = day.AddDate(0, 0, 1) {
 		ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
-		run, err := syncForDate(ctx, instrumentStore, candleStore, syncRunStore, day)
+		run, err := syncForDate(ctx, instrumentStore, candleStore, syncRunStore, cfg, day)
 		cancel()
 		if err != nil {
 			failed++
@@ -141,13 +141,18 @@ func syncForDate(
 	instrumentStore *storage.InstrumentStore,
 	candleStore *storage.CandleStore,
 	syncRunStore *storage.SyncRunStore,
+	cfg *config.Config,
 	date time.Time,
 	extraOpts ...nse.EODOption,
 ) (*models.SyncRun, error) {
-	opts := extraOpts
-	if !date.IsZero() {
-		opts = append([]nse.EODOption{nse.WithTargetDate(date)}, extraOpts...)
+	opts := []nse.EODOption{
+		nse.WithUserAgent(cfg.NSEUserAgent),
+		nse.WithAcceptHTML(cfg.NSEAcceptHTML),
 	}
+	if !date.IsZero() {
+		opts = append(opts, nse.WithTargetDate(date))
+	}
+	opts = append(opts, extraOpts...)
 	registry := providers.NewRegistry()
 	registry.Register(nse.NewEODProvider(instrumentStore, candleStore, opts...))
 	svc := services.NewSyncService(syncRunStore, registry)
