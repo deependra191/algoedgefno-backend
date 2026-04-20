@@ -1,17 +1,67 @@
 package models
 
 import (
+	"context"
 	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
-
-	"github.com/deependra191/algoedgefno-backend/internal/entities"
 )
 
-// BacktestRun is the domain representation of a backtest execution.
-// Trades is a temporary opaque JSON blob until B09 defines engine.Trade;
-// at that point Trades is replaced by []engine.Trade.
+// OrderSide represents the direction of a trade entry.
+type OrderSide string
+
+const (
+	OrderSideBuy  OrderSide = "BUY"
+	OrderSideSell OrderSide = "SELL"
+)
+
+// Trade is a single completed round-trip entry+exit produced by the backtest engine.
+type Trade struct {
+	EntryTimestamp time.Time
+	ExitTimestamp  time.Time
+	Side           OrderSide
+	Quantity       int
+	EntryPrice     float64
+	ExitPrice      float64
+	PnL            float64
+	Reason         string
+	ExitReason     string
+}
+
+// BacktestResult aggregates the outcome of a full backtest run.
+type BacktestResult struct {
+	Trades      []Trade
+	NetPnL      float64
+	TotalTrades int
+	WinCount    int
+	LossCount   int
+	MaxDrawdown float64
+}
+
+// BacktestEngine is the contract every backtest engine implementation must satisfy.
+type BacktestEngine interface {
+	// RunBacktest simulates strategy against the provided candle series and returns
+	// aggregated trade results. Candles must be in chronological order.
+	// Returns an error only if the strategy configuration is invalid.
+	RunBacktest(strategy *Strategy, candles []Candle) (*BacktestResult, error)
+}
+
+// BacktestRepository is the storage contract for persisting backtest run records.
+type BacktestRepository interface {
+	// Create inserts a new BacktestRun record with PENDING status.
+	Create(ctx context.Context, run *BacktestRun) error
+	// UpdateStatus persists only the status field — used for PENDING→RUNNING transitions.
+	UpdateStatus(ctx context.Context, run *BacktestRun) error
+	// UpdateResult persists final metrics and stamps completed_at — used for COMPLETED/FAILED.
+	UpdateResult(ctx context.Context, run *BacktestRun) error
+	// GetByID returns the run with the given ID, or models.ErrNotFound.
+	GetByID(ctx context.Context, id uuid.UUID) (*BacktestRun, error)
+	// ListByStrategy returns all runs for a strategy, newest first.
+	ListByStrategy(ctx context.Context, strategyID uuid.UUID) ([]BacktestRun, error)
+}
+
+// BacktestRun is the domain representation of a single backtest execution.
 type BacktestRun struct {
 	ID              uuid.UUID
 	StrategyID      uuid.UUID
@@ -37,53 +87,3 @@ const (
 	BacktestCompleted = "COMPLETED"
 	BacktestFailed    = "FAILED"
 )
-
-func FromBacktestRunEntity(e *entities.BacktestRun) *BacktestRun {
-	if e == nil {
-		return nil
-	}
-	r := &BacktestRun{
-		ID:              e.ID,
-		StrategyID:      e.StrategyID,
-		InstrumentToken: e.InstrumentToken,
-		FromTs:          e.FromTs,
-		ToTs:            e.ToTs,
-		CandleInterval:  e.CandleInterval,
-		Status:          e.Status,
-		NetPnl:          e.NetPnl,
-		TotalTrades:     e.TotalTrades,
-		WinCount:        e.WinCount,
-		LossCount:       e.LossCount,
-		MaxDrawdown:     e.MaxDrawdown,
-		ErrorMessage:    e.ErrorMessage,
-		CreatedAt:       e.CreatedAt,
-		CompletedAt:     e.CompletedAt,
-	}
-	r.Trades = json.RawMessage(e.TradesJSON)
-	return r
-}
-
-func (r *BacktestRun) ToEntity() *entities.BacktestRun {
-	if r == nil {
-		return nil
-	}
-	e := &entities.BacktestRun{
-		ID:              r.ID,
-		StrategyID:      r.StrategyID,
-		InstrumentToken: r.InstrumentToken,
-		FromTs:          r.FromTs,
-		ToTs:            r.ToTs,
-		CandleInterval:  r.CandleInterval,
-		Status:          r.Status,
-		NetPnl:          r.NetPnl,
-		TotalTrades:     r.TotalTrades,
-		WinCount:        r.WinCount,
-		LossCount:       r.LossCount,
-		MaxDrawdown:     r.MaxDrawdown,
-		ErrorMessage:    r.ErrorMessage,
-		CreatedAt:       r.CreatedAt,
-		CompletedAt:     r.CompletedAt,
-	}
-	e.TradesJSON = []byte(r.Trades)
-	return e
-}

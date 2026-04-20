@@ -25,7 +25,10 @@ func main() {
 	candleStore := storage.NewCandleStore(pool)
 
 	registry := providers.NewRegistry()
-	registry.Register(nse.NewEODProvider(instrumentStore, candleStore))
+	registry.Register(nse.NewEODProvider(instrumentStore, candleStore,
+		nse.WithUserAgent(cfg.NSEUserAgent),
+		nse.WithAcceptHTML(cfg.NSEAcceptHTML),
+	))
 	registry.Register(vendor.NewStub())
 
 	if cfg.Env == config.EnvProduction {

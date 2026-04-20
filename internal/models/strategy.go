@@ -1,17 +1,28 @@
 package models
 
 import (
+	"context"
 	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
-
-	"github.com/deependra191/algoedgefno-backend/internal/entities"
 )
 
+// StrategyRepository is the storage contract for user-defined trading strategies.
+type StrategyRepository interface {
+	// GetByID returns the strategy with the given ID, or models.ErrNotFound.
+	GetByID(ctx context.Context, id uuid.UUID) (*Strategy, error)
+	// List returns all strategies ordered by last-updated descending.
+	List(ctx context.Context) ([]Strategy, error)
+	// Create persists a new strategy, assigning a UUID if the ID is zero.
+	Create(ctx context.Context, strategy *Strategy) error
+	// Update overwrites all mutable fields of an existing strategy.
+	Update(ctx context.Context, strategy *Strategy) error
+	// Delete removes the strategy with the given ID.
+	Delete(ctx context.Context, id uuid.UUID) error
+}
+
 // Strategy is the domain representation of a user-defined trading strategy.
-// OptionLeg is left as an opaque raw JSON message; typed parsing is deferred
-// to the engine evaluator (B09).
 type Strategy struct {
 	ID                 uuid.UUID
 	Name               string
@@ -32,54 +43,9 @@ type Strategy struct {
 	UpdatedAt          time.Time
 }
 
-func FromStrategyEntity(e *entities.Strategy) *Strategy {
-	if e == nil {
-		return nil
-	}
-	s := &Strategy{
-		ID:                 e.ID,
-		Name:               e.Name,
-		Description:        e.Description,
-		Underlying:         e.Underlying,
-		InstrumentType:     e.InstrumentType,
-		ExpiryRule:         e.ExpiryRule,
-		EntryConditionType: e.EntryConditionType,
-		TargetPct:          e.TargetPct,
-		StopLossPct:        e.StopLossPct,
-		TimeExitMinutes:    e.TimeExitMinutes,
-		LotSize:            e.LotSize,
-		CapitalPerTrade:    e.CapitalPerTrade,
-		Mode:               e.Mode,
-		IsReadyForRun:      e.IsReadyForRun,
-		CreatedAt:          e.CreatedAt,
-		UpdatedAt:          e.UpdatedAt,
-	}
-	s.OptionLeg = json.RawMessage(e.OptionLegJSON)
-	return s
-}
-
-func (s *Strategy) ToEntity() *entities.Strategy {
-	if s == nil {
-		return nil
-	}
-	e := &entities.Strategy{
-		ID:                 s.ID,
-		Name:               s.Name,
-		Description:        s.Description,
-		Underlying:         s.Underlying,
-		InstrumentType:     s.InstrumentType,
-		ExpiryRule:         s.ExpiryRule,
-		EntryConditionType: s.EntryConditionType,
-		TargetPct:          s.TargetPct,
-		StopLossPct:        s.StopLossPct,
-		TimeExitMinutes:    s.TimeExitMinutes,
-		LotSize:            s.LotSize,
-		CapitalPerTrade:    s.CapitalPerTrade,
-		Mode:               s.Mode,
-		IsReadyForRun:      s.IsReadyForRun,
-		CreatedAt:          s.CreatedAt,
-		UpdatedAt:          s.UpdatedAt,
-	}
-	e.OptionLegJSON = []byte(s.OptionLeg)
-	return e
-}
+const (
+	EntryConditionMACrossover = "MA_CROSSOVER"
+	EntryConditionSupertrend  = "SUPERTREND"
+	EntryConditionRSIOversold = "RSI_OVERSOLD"
+	EntryConditionMomentum    = "MOMENTUM"
+)

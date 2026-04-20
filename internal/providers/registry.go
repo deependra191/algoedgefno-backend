@@ -3,28 +3,37 @@ package providers
 import (
 	"context"
 	"fmt"
+
+	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
+
+var _ models.ProviderLookup = (*Registry)(nil)
+var _ models.ProviderStatusProvider = (*Registry)(nil)
 
 // Registry holds all registered MarketDataProviders.
 type Registry struct {
-	providers map[string]MarketDataProvider
+	providers map[string]models.MarketDataProvider
 }
 
+// NewRegistry creates an empty Registry.
 func NewRegistry() *Registry {
-	return &Registry{providers: make(map[string]MarketDataProvider)}
+	return &Registry{providers: make(map[string]models.MarketDataProvider)}
 }
 
-func (r *Registry) Register(p MarketDataProvider) {
+// Register adds a provider to the registry, keyed by its Name().
+func (r *Registry) Register(p models.MarketDataProvider) {
 	r.providers[p.Name()] = p
 }
 
-func (r *Registry) Get(name string) (MarketDataProvider, bool) {
+// Get returns the provider with the given name, if registered.
+func (r *Registry) Get(name string) (models.MarketDataProvider, bool) {
 	p, ok := r.providers[name]
 	return p, ok
 }
 
-func (r *Registry) All() []MarketDataProvider {
-	result := make([]MarketDataProvider, 0, len(r.providers))
+// All returns every registered provider.
+func (r *Registry) All() []models.MarketDataProvider {
+	result := make([]models.MarketDataProvider, 0, len(r.providers))
 	for _, p := range r.providers {
 		result = append(result, p)
 	}
@@ -32,9 +41,9 @@ func (r *Registry) All() []MarketDataProvider {
 }
 
 // GetWithCapability returns the first provider that has the given capability.
-func (r *Registry) GetWithCapability(cap Capability) (MarketDataProvider, error) {
+func (r *Registry) GetWithCapability(cap models.Capability) (models.MarketDataProvider, error) {
 	for _, p := range r.providers {
-		if HasCapability(p, cap) {
+		if models.HasCapability(p, cap) {
 			return p, nil
 		}
 	}
@@ -42,10 +51,10 @@ func (r *Registry) GetWithCapability(cap Capability) (MarketDataProvider, error)
 }
 
 // Statuses returns ProviderStatus for all registered providers.
-func (r *Registry) Statuses(ctx context.Context) []ProviderStatus {
-	var statuses []ProviderStatus
+func (r *Registry) Statuses(ctx context.Context) []models.ProviderStatus {
+	var statuses []models.ProviderStatus
 	for _, p := range r.providers {
-		statuses = append(statuses, ProviderStatus{
+		statuses = append(statuses, models.ProviderStatus{
 			Name:         p.Name(),
 			Capabilities: p.Capabilities(),
 			Healthy:      p.Healthy(ctx),
