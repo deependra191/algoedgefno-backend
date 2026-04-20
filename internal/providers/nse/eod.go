@@ -38,6 +38,33 @@ const (
 
 	httpClientTimeout = 60 * time.Second
 
+	// NSE bhavcopy CSV column names. NSE uses cryptic abbreviations; constants
+	// bridge the gap and make updates easy if NSE changes their column names.
+	csvColInstrumentType = "FinInstrmTp"
+	csvColInstrumentName = "FinInstrmNm"
+	csvColUnderlying     = "TckrSymb"
+	csvColExpiry         = "XpryDt"
+	csvColStrike         = "StrkPric"
+	csvColOptionType     = "OptnTp"
+	csvColOpen           = "OpnPric"
+	csvColHigh           = "HghPric"
+	csvColLow            = "LwPric"
+	csvColClose          = "ClsPric"
+	csvColVolume         = "TtlTradgVol"
+	csvColTimestamp      = "TmStmp"
+	csvColLotSize        = "NewBrdLotQty"
+
+	// Fallback column names from the older NSE bhavcopy format.
+	csvColInstrumentTypeLegacy = "INSTRUMENT"
+	csvColExpiryLegacy         = "EXPIRY_DT"
+	csvColStrikeLegacy         = "STRIKE_PR"
+	csvColOptionTypeLegacy     = "OPTION_TYP"
+	csvColOpenLegacy           = "OPEN"
+	csvColHighLegacy           = "HIGH"
+	csvColLowLegacy            = "LOW"
+	csvColCloseLegacy          = "CLOSE"
+	csvColVolumeLegacy         = "CONTRACTS"
+	csvColTimestampLegacy      = "TIMESTAMP"
 )
 
 // bhavRow holds one parsed row from the F&O bhavcopy CSV.
@@ -328,25 +355,25 @@ func parseBhavCSV(r io.Reader, date time.Time) ([]bhavRow, error) {
 
 	// FinInstrmNm is the unique per-contract name (e.g. "NIFTY26APR22500CE").
 	// TckrSymb holds only the underlying (e.g. "NIFTY"), not unique per contract.
-	symbolIdx := col(idx, "FinInstrmNm")
+	symbolIdx := col(idx, csvColInstrumentName)
 	if symbolIdx < 0 {
-		return nil, fmt.Errorf("required column FinInstrmNm not found in CSV header: %v", header)
+		return nil, fmt.Errorf("required column %s not found in CSV header: %v", csvColInstrumentName, header)
 	}
 
 	cols := colMap{
-		instrType:  col(idx, "FinInstrmTp", "INSTRUMENT"),
+		instrType:  col(idx, csvColInstrumentType, csvColInstrumentTypeLegacy),
 		symbol:     symbolIdx,
-		underlying: col(idx, "TckrSymb"),
-		expiry:     col(idx, "XpryDt", "EXPIRY_DT"),
-		strike:     col(idx, "StrkPric", "STRIKE_PR"),
-		optType:    col(idx, "OptnTp", "OPTION_TYP"),
-		open:       col(idx, "OpnPric", "OPEN"),
-		high:       col(idx, "HghPric", "HIGH"),
-		low:        col(idx, "LwPric", "LOW"),
-		close_:     col(idx, "ClsPric", "CLOSE"),
-		vol:        col(idx, "TtlTradgVol", "CONTRACTS"),
-		ts:         col(idx, "TmStmp", "TIMESTAMP"),
-		lotSize:    col(idx, "NewBrdLotQty"),
+		underlying: col(idx, csvColUnderlying),
+		expiry:     col(idx, csvColExpiry, csvColExpiryLegacy),
+		strike:     col(idx, csvColStrike, csvColStrikeLegacy),
+		optType:    col(idx, csvColOptionType, csvColOptionTypeLegacy),
+		open:       col(idx, csvColOpen, csvColOpenLegacy),
+		high:       col(idx, csvColHigh, csvColHighLegacy),
+		low:        col(idx, csvColLow, csvColLowLegacy),
+		close_:     col(idx, csvColClose, csvColCloseLegacy),
+		vol:        col(idx, csvColVolume, csvColVolumeLegacy),
+		ts:         col(idx, csvColTimestamp, csvColTimestampLegacy),
+		lotSize:    col(idx, csvColLotSize),
 	}
 
 	var rows []bhavRow
