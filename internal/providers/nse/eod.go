@@ -18,7 +18,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/deependra191/algoedgefno-backend/internal/models"
-	"github.com/deependra191/algoedgefno-backend/internal/providers"
 )
 
 // bhavURL is the NSE F&O bhavcopy URL pattern.
@@ -109,8 +108,8 @@ func (p *EODProvider) warmSession(ctx context.Context) {
 
 func (p *EODProvider) Name() string { return ProviderName }
 
-func (p *EODProvider) Capabilities() []providers.Capability {
-	return []providers.Capability{providers.CapEODHistory}
+func (p *EODProvider) Capabilities() []models.Capability {
+	return []models.Capability{models.CapEODHistory}
 }
 
 func (p *EODProvider) Healthy(ctx context.Context) bool {
@@ -218,7 +217,7 @@ func (p *EODProvider) fetchLatestBhavcopy(ctx context.Context) ([]bhavRow, error
 	}
 
 	date := anchor
-	for i := 0; i < 7; i++ {
+	for range 7 {
 		rows, err := p.downloadBhavcopy(ctx, date)
 		if err == nil {
 			p.cachedRows = rows

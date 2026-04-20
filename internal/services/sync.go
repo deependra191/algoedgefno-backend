@@ -8,17 +8,16 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/deependra191/algoedgefno-backend/internal/models"
-	"github.com/deependra191/algoedgefno-backend/internal/providers"
 )
 
 type SyncService struct {
 	syncRunStore models.SyncRunRepository
-	registry     providers.ProviderLookup
+	registry     models.ProviderLookup
 }
 
 func NewSyncService(
 	syncRunStore models.SyncRunRepository,
-	registry providers.ProviderLookup,
+	registry models.ProviderLookup,
 ) *SyncService {
 	return &SyncService{
 		syncRunStore: syncRunStore,

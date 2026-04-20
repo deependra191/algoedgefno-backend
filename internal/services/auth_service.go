@@ -5,21 +5,19 @@ import (
 	"errors"
 	"time"
 
-	"github.com/deependra191/algoedgefno-backend/internal/entities"
-	"github.com/deependra191/algoedgefno-backend/internal/models"
-	"github.com/deependra191/algoedgefno-backend/internal/storage"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
 type AuthService struct {
-	userRepo  *storage.UserStore
+	userRepo  models.UserRepository
 	jwtSecret []byte
 }
 
-func NewAuthService(userRepo *storage.UserStore, jwtSecret string) *AuthService {
+func NewAuthService(userRepo models.UserRepository, jwtSecret string) *AuthService {
 	return &AuthService{
 		userRepo:  userRepo,
 		jwtSecret: []byte(jwtSecret),
@@ -43,11 +41,11 @@ type AuthResult struct {
 }
 
 func (s *AuthService) Register(ctx context.Context, input RegisterInput) (*AuthResult, error) {
-	_, err := s.userRepo.FindByEmail(ctx, input.Email)
+	_, _, err := s.userRepo.FindByEmail(ctx, input.Email)
 	if err == nil {
 		return nil, errors.New("email already registered")
 	}
-	if !errors.Is(err, pgx.ErrNoRows) {
+	if !errors.Is(err, models.ErrNotFound) {
 		return nil, errors.New("failed to check existing user")
 	}
 
@@ -56,23 +54,22 @@ func (s *AuthService) Register(ctx context.Context, input RegisterInput) (*AuthR
 		return nil, errors.New("failed to process password")
 	}
 
-	ent := &entities.User{
-		ID:           uuid.New(),
-		Email:        input.Email,
-		Name:         input.Name,
-		PasswordHash: string(hash),
+	newUser := &models.User{
+		ID:    uuid.New(),
+		Email: input.Email,
+		Name:  input.Name,
 	}
 
-	if err := s.userRepo.Create(ctx, ent); err != nil {
+	if err := s.userRepo.Create(ctx, newUser, string(hash)); err != nil {
 		return nil, errors.New("failed to create user")
 	}
 
-	token, err := s.generateToken(ent.ID.String())
+	token, err := s.generateToken(newUser.ID.String())
 	if err != nil {
 		return nil, errors.New("failed to generate token")
 	}
 
-	return &AuthResult{Token: token, User: models.FromUserEntity(ent)}, nil
+	return &AuthResult{Token: token, User: newUser}, nil
 }
 
 const (
@@ -93,19 +90,19 @@ const (
 )
 
 func (s *AuthService) Login(ctx context.Context, input LoginInput) (*AuthResult, error) {
-	user, lookupErr := s.userRepo.FindByEmail(ctx, input.Email)
+	user, hash, lookupErr := s.userRepo.FindByEmail(ctx, input.Email)
 
 	// Always run bcrypt regardless of whether the user exists.
 	// This prevents an attacker from enumerating valid emails by measuring
 	// response time — bcrypt without this check returns instantly for unknown emails.
 	hashToCheck := dummyHash
 	if lookupErr == nil {
-		hashToCheck = user.PasswordHash
+		hashToCheck = hash
 	}
 	bcryptErr := bcrypt.CompareHashAndPassword([]byte(hashToCheck), []byte(input.Password))
 
 	if lookupErr != nil {
-		if errors.Is(lookupErr, pgx.ErrNoRows) {
+		if errors.Is(lookupErr, models.ErrNotFound) {
 			return nil, errors.New("invalid credentials")
 		}
 		return nil, errors.New("failed to find user")
@@ -119,7 +116,7 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (*AuthResult,
 		return nil, errors.New("failed to generate token")
 	}
 
-	return &AuthResult{Token: token, User: models.FromUserEntity(user)}, nil
+	return &AuthResult{Token: token, User: user}, nil
 }
 
 func (s *AuthService) ValidateToken(tokenStr string) (string, error) {
