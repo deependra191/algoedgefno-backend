@@ -55,11 +55,13 @@ func (h *BacktestHandler) Submit(c *gin.Context) {
 		Capital:      req.Capital,
 	})
 	if err != nil {
-		switch err.Error() {
-		case "strategy not found", "no instrument found for underlying":
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-		case "no candle data available":
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		switch {
+		case errors.Is(err, services.ErrStrategyNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "strategy not found"})
+		case errors.Is(err, services.ErrNoInstrument):
+			c.JSON(http.StatusNotFound, gin.H{"error": "no instrument found for underlying"})
+		case errors.Is(err, services.ErrNoCandleData):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "no candle data available"})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "backtest failed"})
 		}

@@ -8,6 +8,12 @@ import (
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
+// Section key constants for the strategies list response.
+const (
+	SectionKeyBuiltin = "BUILTIN"
+	SectionKeyCustom  = "CUSTOM"
+)
+
 // StrategySection is a grouping of strategies for the list endpoint.
 type StrategySection struct {
 	Key         string
@@ -74,12 +80,12 @@ func (s *StrategyService) ListSections(ctx context.Context) ([]StrategySection, 
 
 	return []StrategySection{
 		{
-			Key:        "BUILTIN",
+			Key:        SectionKeyBuiltin,
 			Label:      "Strategies",
 			Strategies: items,
 		},
 		{
-			Key:   "CUSTOM",
+			Key:   SectionKeyCustom,
 			Label: "My Strategies",
 			Placeholder: &SectionPlaceholder{
 				Title:       "Coming soon",

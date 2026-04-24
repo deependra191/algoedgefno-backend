@@ -74,11 +74,11 @@ func TestListSections_ReturnsBothSections(t *testing.T) {
 	if len(sections) != 2 {
 		t.Fatalf("expected 2 sections, got %d", len(sections))
 	}
-	if sections[0].Key != "BUILTIN" {
-		t.Errorf("expected first section key BUILTIN, got %s", sections[0].Key)
+	if sections[0].Key != SectionKeyBuiltin {
+		t.Errorf("expected first section key %s, got %s", SectionKeyBuiltin, sections[0].Key)
 	}
-	if sections[1].Key != "CUSTOM" {
-		t.Errorf("expected second section key CUSTOM, got %s", sections[1].Key)
+	if sections[1].Key != SectionKeyCustom {
+		t.Errorf("expected second section key %s, got %s", SectionKeyCustom, sections[1].Key)
 	}
 }
 

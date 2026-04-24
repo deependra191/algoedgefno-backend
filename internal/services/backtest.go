@@ -4,11 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/deependra191/algoedgefno-backend/internal/models"
+)
+
+var (
+	ErrStrategyNotFound = errors.New("strategy not found")
+	ErrNoInstrument     = errors.New("no instrument found for underlying")
+	ErrNoCandleData     = errors.New("no candle data available")
 )
 
 // BacktestService orchestrates the full backtest lifecycle: create a run record,
@@ -53,7 +60,7 @@ type BacktestRequest struct {
 func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*models.BacktestRun, error) {
 	builtin, ok := s.builtins.Get(req.StrategySlug)
 	if !ok {
-		return nil, errors.New("strategy not found")
+		return nil, ErrStrategyNotFound
 	}
 
 	inst, err := s.resolveInstrument(ctx, builtin.InstrumentType, req.Underlying)
@@ -87,15 +94,15 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 		Interval:     builtin.CandleInterval,
 	})
 	if err != nil {
-		return s.failRun(ctx, run, "failed to fetch candle data")
+		return s.failRun(ctx, run, fmt.Errorf("failed to fetch candle data: %w", err))
 	}
 	if len(candles) == 0 {
-		return s.failRun(ctx, run, "no candle data available")
+		return s.failRun(ctx, run, ErrNoCandleData)
 	}
 
 	result, err := s.engine.RunBacktest(engineStrategy, candles)
 	if err != nil {
-		return s.failRun(ctx, run, err.Error())
+		return s.failRun(ctx, run, fmt.Errorf("engine error: %w", err))
 	}
 
 	return s.applyResult(ctx, run, result)
@@ -113,10 +120,10 @@ func (s *BacktestService) resolveInstrument(ctx context.Context, instrumentType,
 		Underlying:     &underlying,
 	})
 	if err != nil {
-		return nil, errors.New("failed to resolve instrument")
+		return nil, fmt.Errorf("failed to resolve instrument: %w", err)
 	}
 	if len(instruments) == 0 {
-		return nil, errors.New("no instrument found for underlying")
+		return nil, ErrNoInstrument
 	}
 	return &instruments[0], nil
 }
@@ -137,11 +144,11 @@ func (s *BacktestService) createAndStartRun(ctx context.Context, inst *models.In
 		Underlying:      &req.Underlying,
 	}
 	if err := s.backtestStore.Create(ctx, run); err != nil {
-		return nil, errors.New("failed to create backtest run")
+		return nil, fmt.Errorf("failed to create backtest run: %w", err)
 	}
 	run.Status = models.BacktestRunning
 	if err := s.backtestStore.UpdateStatus(ctx, run); err != nil {
-		return nil, errors.New("failed to update backtest status")
+		return nil, fmt.Errorf("failed to update backtest status: %w", err)
 	}
 	return run, nil
 }
@@ -151,7 +158,7 @@ func (s *BacktestService) createAndStartRun(ctx context.Context, inst *models.In
 func (s *BacktestService) applyResult(ctx context.Context, run *models.BacktestRun, result *models.BacktestResult) (*models.BacktestRun, error) {
 	tradesJSON, err := json.Marshal(result.Trades)
 	if err != nil {
-		return s.failRun(ctx, run, "failed to marshal trade results")
+		return s.failRun(ctx, run, fmt.Errorf("failed to marshal trade results: %w", err))
 	}
 	run.Status = models.BacktestCompleted
 	run.NetPnl = &result.NetPnL
@@ -161,17 +168,18 @@ func (s *BacktestService) applyResult(ctx context.Context, run *models.BacktestR
 	run.MaxDrawdown = &result.MaxDrawdown
 	run.Trades = tradesJSON
 	if err := s.backtestStore.UpdateResult(ctx, run); err != nil {
-		return nil, errors.New("failed to save backtest results")
+		return nil, fmt.Errorf("failed to save backtest results: %w", err)
 	}
 	return run, nil
 }
 
 // failRun marks the run as FAILED and attempts to persist the state.
-// The UpdateResult error is intentionally swallowed — the original errMsg is
+// The UpdateResult error is intentionally swallowed — the original cause is
 // always returned to the caller regardless of persistence success.
-func (s *BacktestService) failRun(ctx context.Context, run *models.BacktestRun, errMsg string) (*models.BacktestRun, error) {
+func (s *BacktestService) failRun(ctx context.Context, run *models.BacktestRun, cause error) (*models.BacktestRun, error) {
+	msg := cause.Error()
 	run.Status = models.BacktestFailed
-	run.ErrorMessage = &errMsg
+	run.ErrorMessage = &msg
 	_ = s.backtestStore.UpdateResult(ctx, run)
-	return nil, errors.New(errMsg)
+	return nil, cause
 }

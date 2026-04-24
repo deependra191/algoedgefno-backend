@@ -11,7 +11,7 @@ const dateFormat = "2006-01-02"
 
 type backtestSubmitRequest struct {
 	StrategyID string  `json:"strategyId" binding:"required"`
-	Underlying string  `json:"underlying" binding:"required"`
+	Underlying string  `json:"underlying" binding:"required,oneof=NIFTY BANKNIFTY FINNIFTY"`
 	From       string  `json:"from"       binding:"required"`
 	To         string  `json:"to"         binding:"required"`
 	Lots       int     `json:"lots"       binding:"required,min=1,max=50"`

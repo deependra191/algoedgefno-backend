@@ -156,7 +156,7 @@ func toStrategyInputResponses(inputs []models.StrategyInput, maxDate time.Time) 
 		constraints := inp.Constraints
 		if inp.Type == models.InputTypeDateRange && !maxDate.IsZero() {
 			constraints = copyConstraints(constraints)
-			constraints[constraintMaxDate] = maxDate.Format("2006-01-02")
+			constraints[constraintMaxDate] = maxDate.Format(dateFormat)
 		}
 		result[i] = strategyInputResponse{
 			Key:          inp.Key,

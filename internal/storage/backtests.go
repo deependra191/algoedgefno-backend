@@ -80,6 +80,9 @@ func (s *BacktestStore) GetByID(ctx context.Context, id uuid.UUID) (*models.Back
 		       strategy_slug, capital, lots, underlying
 		FROM backtest_runs WHERE id = $1`, id)
 	ent, err := scanBacktestRun(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, models.ErrNotFound
+	}
 	if err != nil {
 		return nil, err
 	}

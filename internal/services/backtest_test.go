@@ -196,8 +196,8 @@ func TestSubmit_StrategyNotFound(t *testing.T) {
 	req := defaultRequest()
 	req.StrategySlug = "nonexistent"
 	_, err := svc.Submit(context.Background(), req)
-	if err == nil || err.Error() != "strategy not found" {
-		t.Fatalf("expected strategy not found, got %v", err)
+	if !errors.Is(err, ErrStrategyNotFound) {
+		t.Fatalf("expected ErrStrategyNotFound, got %v", err)
 	}
 }
 
@@ -211,8 +211,8 @@ func TestSubmit_InstrumentNotFound(t *testing.T) {
 	)
 
 	_, err := svc.Submit(context.Background(), defaultRequest())
-	if err == nil || err.Error() != "no instrument found for underlying" {
-		t.Fatalf("expected no instrument found, got %v", err)
+	if !errors.Is(err, ErrNoInstrument) {
+		t.Fatalf("expected ErrNoInstrument, got %v", err)
 	}
 }
 
@@ -242,8 +242,8 @@ func TestSubmit_NoCandleData(t *testing.T) {
 	)
 
 	_, err := svc.Submit(context.Background(), defaultRequest())
-	if err == nil || err.Error() != "no candle data available" {
-		t.Fatalf("expected no candle data available, got %v", err)
+	if !errors.Is(err, ErrNoCandleData) {
+		t.Fatalf("expected ErrNoCandleData, got %v", err)
 	}
 	if len(br.capturedUpdateResult) == 0 {
 		t.Fatal("expected UpdateResult to be called on failure")
