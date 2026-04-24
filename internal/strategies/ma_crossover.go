@@ -3,7 +3,8 @@ package strategies
 import "github.com/deependra191/algoedgefno-backend/internal/models"
 
 const (
-	slugMACrossover = "ma_crossover"
+	slugMACrossover    = "ma_crossover"
+	historicalDataStart = "2022-01-01"
 )
 
 // MACrossover returns the built-in MA Crossover strategy definition.
@@ -23,16 +24,16 @@ func MACrossover() *models.BuiltinStrategy {
 			{
 				Key:          "underlying",
 				Label:        "Underlying",
-				Type:         "SELECT",
-				Options:      []string{"NIFTY", "BANKNIFTY", "FINNIFTY"},
-				DefaultValue: "NIFTY",
+				Type:         models.InputTypeSelect,
+				Options:      []string{models.UnderlyingNifty, models.UnderlyingBankNifty, models.UnderlyingFinNifty},
+				DefaultValue: models.UnderlyingNifty,
 			},
 			{
 				Key:   "dateRange",
 				Label: "Date range",
-				Type:  "DATE_RANGE",
+				Type:  models.InputTypeDateRange,
 				Constraints: map[string]any{
-					"minDate": "2022-01-01",
+					models.ConstraintMinDate: historicalDataStart,
 					// maxDate is filled dynamically by the service at request time
 				},
 				DefaultFrom: "2025-01-01",
@@ -41,21 +42,21 @@ func MACrossover() *models.BuiltinStrategy {
 			{
 				Key:          "lots",
 				Label:        "Lots",
-				Type:         "NUMBER",
-				Constraints:  map[string]any{"min": 1, "max": 50},
+				Type:         models.InputTypeNumber,
+				Constraints:  map[string]any{models.ConstraintMin: 1, models.ConstraintMax: 50},
 				DefaultValue: 1,
 			},
 			{
 				Key:          "capital",
 				Label:        "Capital",
-				Type:         "CURRENCY",
-				Constraints:  map[string]any{"min": 10000, "max": 10000000},
+				Type:         models.InputTypeCurrency,
+				Constraints:  map[string]any{models.ConstraintMin: 10000, models.ConstraintMax: 10000000},
 				DefaultValue: 200000,
 			},
 		},
 		EntryConditionType: models.EntryConditionMACrossover,
-		InstrumentType:     "FUTIDX",
-		ExpiryRule:         "CURRENT_MONTH",
-		CandleInterval:     "1d",
+		InstrumentType:     models.InstrumentTypeFuturesIndex,
+		ExpiryRule:         models.ExpiryRuleCurrentMonth,
+		CandleInterval:     models.CandleInterval1D,
 	}
 }

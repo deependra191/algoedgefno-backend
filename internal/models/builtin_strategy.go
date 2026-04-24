@@ -29,6 +29,21 @@ type StrategyInput struct {
 	DefaultTo    string
 }
 
+// Input type constants for StrategyInput.Type — used by both the registry and the Android form renderer.
+const (
+	InputTypeSelect    = "SELECT"
+	InputTypeDateRange = "DATE_RANGE"
+	InputTypeNumber    = "NUMBER"
+	InputTypeCurrency  = "CURRENCY"
+)
+
+// Constraint key constants used in StrategyInput.Constraints maps.
+const (
+	ConstraintMin     = "min"
+	ConstraintMax     = "max"
+	ConstraintMinDate = "minDate"
+)
+
 // BuiltinStrategyLookup is the contract for resolving code-defined strategies by slug.
 type BuiltinStrategyLookup interface {
 	Get(slug string) (*BuiltinStrategy, bool)

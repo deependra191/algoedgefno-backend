@@ -1,6 +1,10 @@
 package strategies
 
-import "github.com/deependra191/algoedgefno-backend/internal/models"
+import (
+	"fmt"
+
+	"github.com/deependra191/algoedgefno-backend/internal/models"
+)
 
 var _ models.BuiltinStrategyLookup = (*Registry)(nil)
 
@@ -20,6 +24,9 @@ func NewRegistry() *Registry {
 }
 
 func (r *Registry) register(s *models.BuiltinStrategy) {
+	if _, exists := r.strategies[s.ID]; exists {
+		panic(fmt.Sprintf("strategies: duplicate slug %q", s.ID))
+	}
 	r.strategies[s.ID] = s
 	r.order = append(r.order, s.ID)
 }

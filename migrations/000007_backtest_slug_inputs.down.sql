@@ -5,5 +5,6 @@ ALTER TABLE backtest_runs DROP COLUMN IF EXISTS lots;
 ALTER TABLE backtest_runs DROP COLUMN IF EXISTS capital;
 ALTER TABLE backtest_runs DROP COLUMN IF EXISTS strategy_slug;
 
-DELETE FROM backtest_runs WHERE strategy_id IS NULL;
+-- Rolling back requires manual triage: if any slug-based runs exist, SET NOT NULL will fail.
+-- Inspect and handle those rows before re-attempting the migration down.
 ALTER TABLE backtest_runs ALTER COLUMN strategy_id SET NOT NULL;

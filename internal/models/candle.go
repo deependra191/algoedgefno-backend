@@ -7,6 +7,11 @@ import (
 	"github.com/google/uuid"
 )
 
+// CandleInterval constants for supported OHLCV bar resolutions.
+const (
+	CandleInterval1D = "1d"
+)
+
 // CandleFilter specifies the query parameters for fetching candles from the repository.
 type CandleFilter struct {
 	InstrumentID uuid.UUID

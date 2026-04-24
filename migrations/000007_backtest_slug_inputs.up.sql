@@ -6,7 +6,7 @@ ALTER TABLE backtest_runs ADD COLUMN lots INTEGER;
 ALTER TABLE backtest_runs ADD COLUMN underlying TEXT;
 
 ALTER TABLE backtest_runs ADD CONSTRAINT chk_strategy_ref
-    CHECK (strategy_id IS NOT NULL OR strategy_slug IS NOT NULL);
+    CHECK (num_nonnulls(strategy_id, strategy_slug) = 1);
 
 CREATE INDEX idx_backtest_runs_slug ON backtest_runs(strategy_slug)
     WHERE strategy_slug IS NOT NULL;

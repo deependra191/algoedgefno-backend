@@ -7,6 +7,18 @@ import (
 	"github.com/google/uuid"
 )
 
+// InstrumentType constants for the NSE F&O instrument classification codes.
+const (
+	InstrumentTypeFuturesIndex = "FUTIDX"
+)
+
+// Underlying constants for supported index underlyings.
+const (
+	UnderlyingNifty     = "NIFTY"
+	UnderlyingBankNifty = "BANKNIFTY"
+	UnderlyingFinNifty  = "FINNIFTY"
+)
+
 // InstrumentRepository is the storage contract for tradable instrument records.
 type InstrumentRepository interface {
 	// GetByID returns the instrument with the given ID, or models.ErrNotFound.

@@ -49,3 +49,8 @@ const (
 	EntryConditionRSIOversold = "RSI_OVERSOLD"
 	EntryConditionMomentum    = "MOMENTUM"
 )
+
+// ExpiryRule constants for when a futures contract rolls.
+const (
+	ExpiryRuleCurrentMonth = "CURRENT_MONTH"
+)
