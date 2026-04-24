@@ -120,6 +120,19 @@ func (s *CandleStore) LastSyncedDate(ctx context.Context, provider string) (time
 	return d.Time, nil
 }
 
+// MaxDate returns the latest candle date across all instruments.
+func (s *CandleStore) MaxDate(ctx context.Context) (time.Time, error) {
+	var d pgtype.Date
+	err := s.pool.QueryRow(ctx, `SELECT MAX(ts::date) FROM candles`).Scan(&d)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if !d.Valid {
+		return time.Time{}, nil
+	}
+	return d.Time, nil
+}
+
 // Query returns candles for an instrument within a time range, ordered chronologically.
 func (s *CandleStore) Query(ctx context.Context, f models.CandleFilter) ([]models.Candle, error) {
 	rows, err := s.pool.Query(ctx, `

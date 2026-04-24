@@ -106,7 +106,7 @@ func (s *BacktestService) validateInputs(ctx context.Context, req BacktestReques
 func (s *BacktestService) createAndStartRun(ctx context.Context, inst *models.Instrument, req BacktestRequest) (*models.BacktestRun, error) {
 	run := &models.BacktestRun{
 		ID:              uuid.New(),
-		StrategyID:      req.StrategyID,
+		StrategyID:      &req.StrategyID,
 		InstrumentToken: inst.Symbol,
 		FromTs:          req.From,
 		ToTs:            req.To,

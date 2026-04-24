@@ -27,6 +27,10 @@ func toBacktestModel(e *entities.BacktestRun) *models.BacktestRun {
 		CreatedAt:       e.CreatedAt,
 		CompletedAt:     e.CompletedAt,
 		Trades:          json.RawMessage(e.TradesJSON),
+		StrategySlug:    e.StrategySlug,
+		Capital:         e.Capital,
+		Lots:            e.Lots,
+		Underlying:      e.Underlying,
 	}
 }
 
@@ -48,6 +52,10 @@ func toBacktestEntity(r *models.BacktestRun) *entities.BacktestRun {
 		CreatedAt:       r.CreatedAt,
 		CompletedAt:     r.CompletedAt,
 		TradesJSON:      []byte(r.Trades),
+		StrategySlug:    r.StrategySlug,
+		Capital:         r.Capital,
+		Lots:            r.Lots,
+		Underlying:      r.Underlying,
 	}
 }
 
@@ -62,6 +70,7 @@ func scanBacktestRun(row pgx.Row) (*entities.BacktestRun, error) {
 		&r.CandleInterval, &r.Status,
 		&netPnl, &totalTrades, &winCount, &lossCount, &maxDrawdown,
 		&tradesBytes, &errMsg, &r.CreatedAt, &r.CompletedAt,
+		&r.StrategySlug, &r.Capital, &r.Lots, &r.Underlying,
 	)
 	if err != nil {
 		return nil, err
@@ -87,6 +96,7 @@ func scanBacktestRunRow(rows pgx.Rows) (*entities.BacktestRun, error) {
 		&r.CandleInterval, &r.Status,
 		&netPnl, &totalTrades, &winCount, &lossCount, &maxDrawdown,
 		&tradesBytes, &errMsg, &r.CreatedAt, &r.CompletedAt,
+		&r.StrategySlug, &r.Capital, &r.Lots, &r.Underlying,
 	)
 	if err != nil {
 		return nil, err

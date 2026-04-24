@@ -22,6 +22,9 @@ type CandleRepository interface {
 	// InsertBatchIgnoreDuplicates bulk-inserts candles, skipping any that already
 	// exist for the same (instrument_id, ts, interval). Returns the count inserted.
 	InsertBatchIgnoreDuplicates(ctx context.Context, candles []Candle) (int64, error)
+	// MaxDate returns the latest candle date across all instruments.
+	// Returns a zero time.Time if no candles exist.
+	MaxDate(ctx context.Context) (time.Time, error)
 }
 
 // Candle is the domain representation of an OHLCV bar.

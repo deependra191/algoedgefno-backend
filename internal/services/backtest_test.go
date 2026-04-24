@@ -47,6 +47,9 @@ func (m *mockBacktestRepo) GetByID(_ context.Context, _ uuid.UUID) (*models.Back
 func (m *mockBacktestRepo) ListByStrategy(_ context.Context, _ uuid.UUID) ([]models.BacktestRun, error) {
 	return m.listResult, m.listErr
 }
+func (m *mockBacktestRepo) LatestCompletedBySlug(_ context.Context, _ string) (*models.BacktestRun, error) {
+	return nil, models.ErrNotFound
+}
 
 type mockStrategyRepo struct {
 	result *models.Strategy
@@ -71,6 +74,9 @@ func (m *mockCandleRepo) Query(_ context.Context, _ models.CandleFilter) ([]mode
 }
 func (m *mockCandleRepo) InsertBatchIgnoreDuplicates(_ context.Context, _ []models.Candle) (int64, error) {
 	return 0, nil
+}
+func (m *mockCandleRepo) MaxDate(_ context.Context) (time.Time, error) {
+	return time.Time{}, nil
 }
 
 type mockInstrumentRepo struct {
