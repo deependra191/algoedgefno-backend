@@ -110,6 +110,7 @@ func defaultStrategy() *models.Strategy {
 		ID:                 uuid.New(),
 		EntryConditionType: models.EntryConditionMACrossover,
 		LotSize:            1,
+		NumberOfLots:       1,
 	}
 }
 

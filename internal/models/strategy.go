@@ -36,6 +36,7 @@ type Strategy struct {
 	StopLossPct        *float64
 	TimeExitMinutes    *int
 	LotSize            int
+	NumberOfLots       int
 	CapitalPerTrade    *float64
 	Mode               string
 	IsReadyForRun      bool
