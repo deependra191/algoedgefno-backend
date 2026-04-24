@@ -2,37 +2,118 @@ package services
 
 import (
 	"context"
-
-	"github.com/google/uuid"
+	"errors"
+	"time"
 
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
-// StrategyService manages CRUD operations for user-defined trading strategies.
+// StrategySection is a grouping of strategies for the list endpoint.
+type StrategySection struct {
+	Key         string
+	Label       string
+	Placeholder *SectionPlaceholder
+	Strategies  []StrategyListItem
+}
+
+// SectionPlaceholder is shown when a section has no strategies.
+type SectionPlaceholder struct {
+	Title       string
+	Description string
+}
+
+// StrategyListItem pairs a built-in strategy with its most recent backtest run.
+type StrategyListItem struct {
+	Strategy     *models.BuiltinStrategy
+	LastBacktest *models.BacktestRun
+}
+
+// StrategyDetail is the full strategy definition with dynamic maxDate and last backtest.
+type StrategyDetail struct {
+	Strategy     *models.BuiltinStrategy
+	MaxDate      time.Time
+	LastBacktest *models.BacktestRun
+}
+
+// StrategyService provides strategy listing and detail for the API layer.
+// Phase 1 serves built-in strategies only. Phase 3 will add custom strategies.
 type StrategyService struct {
-	strategyStore models.StrategyRepository
+	builtins     models.BuiltinStrategyLookup
+	backtestRepo models.BacktestRepository
+	candleRepo   models.CandleRepository
 }
 
-func NewStrategyService(strategyStore models.StrategyRepository) *StrategyService {
-	return &StrategyService{strategyStore: strategyStore}
+// NewStrategyService creates a StrategyService wired to the built-in registry and storage.
+func NewStrategyService(
+	builtins models.BuiltinStrategyLookup,
+	backtestRepo models.BacktestRepository,
+	candleRepo models.CandleRepository,
+) *StrategyService {
+	return &StrategyService{
+		builtins:     builtins,
+		backtestRepo: backtestRepo,
+		candleRepo:   candleRepo,
+	}
 }
 
-func (s *StrategyService) List(ctx context.Context) ([]models.Strategy, error) {
-	return s.strategyStore.List(ctx)
+// ListSections returns BUILTIN and CUSTOM sections for the strategies list screen.
+func (s *StrategyService) ListSections(ctx context.Context) ([]StrategySection, error) {
+	all := s.builtins.All()
+	items := make([]StrategyListItem, len(all))
+	for i, b := range all {
+		item := StrategyListItem{Strategy: b}
+		run, err := s.backtestRepo.LatestCompletedBySlug(ctx, b.ID)
+		if err != nil && !errors.Is(err, models.ErrNotFound) {
+			return nil, err
+		}
+		if err == nil {
+			item.LastBacktest = run
+		}
+		items[i] = item
+	}
+
+	return []StrategySection{
+		{
+			Key:        "BUILTIN",
+			Label:      "Strategies",
+			Strategies: items,
+		},
+		{
+			Key:   "CUSTOM",
+			Label: "My Strategies",
+			Placeholder: &SectionPlaceholder{
+				Title:       "Coming soon",
+				Description: "Your saved strategies will appear here.",
+			},
+			Strategies: []StrategyListItem{},
+		},
+	}, nil
 }
 
-func (s *StrategyService) GetByID(ctx context.Context, id uuid.UUID) (*models.Strategy, error) {
-	return s.strategyStore.GetByID(ctx, id)
-}
+// GetBySlug returns the full strategy detail for a built-in slug.
+func (s *StrategyService) GetBySlug(ctx context.Context, slug string) (*StrategyDetail, error) {
+	b, ok := s.builtins.Get(slug)
+	if !ok {
+		return nil, models.ErrNotFound
+	}
 
-func (s *StrategyService) Create(ctx context.Context, strategy *models.Strategy) error {
-	return s.strategyStore.Create(ctx, strategy)
-}
+	maxDate, err := s.candleRepo.MaxDate(ctx)
+	if err != nil {
+		return nil, err
+	}
 
-func (s *StrategyService) Update(ctx context.Context, strategy *models.Strategy) error {
-	return s.strategyStore.Update(ctx, strategy)
-}
+	detail := &StrategyDetail{
+		Strategy: b,
+		MaxDate:  maxDate,
+	}
 
-func (s *StrategyService) Delete(ctx context.Context, id uuid.UUID) error {
-	return s.strategyStore.Delete(ctx, id)
+	run, err := s.backtestRepo.LatestCompletedBySlug(ctx, slug)
+	if err != nil && !errors.Is(err, models.ErrNotFound) {
+		return nil, err
+	}
+	if err == nil {
+		detail.LastBacktest = run
+	}
+
+	return detail, nil
 }

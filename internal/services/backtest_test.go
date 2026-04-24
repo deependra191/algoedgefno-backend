@@ -14,13 +14,13 @@ import (
 // -- hand-rolled mocks --
 
 type mockBacktestRepo struct {
-	createErr      error
+	createErr       error
 	updateStatusErr error
 	updateResultErr error
-	getByIDResult  *models.BacktestRun
-	getByIDErr     error
-	listResult     []models.BacktestRun
-	listErr        error
+	getByIDResult   *models.BacktestRun
+	getByIDErr      error
+	listResult      []models.BacktestRun
+	listErr         error
 
 	capturedCreate       *models.BacktestRun
 	capturedUpdateStatus []*models.BacktestRun
@@ -51,18 +51,22 @@ func (m *mockBacktestRepo) LatestCompletedBySlug(_ context.Context, _ string) (*
 	return nil, models.ErrNotFound
 }
 
-type mockStrategyRepo struct {
-	result *models.Strategy
-	err    error
+type mockBuiltinLookup struct {
+	strategies map[string]*models.BuiltinStrategy
+	order      []string
 }
 
-func (m *mockStrategyRepo) GetByID(_ context.Context, _ uuid.UUID) (*models.Strategy, error) {
-	return m.result, m.err
+func (m *mockBuiltinLookup) Get(slug string) (*models.BuiltinStrategy, bool) {
+	s, ok := m.strategies[slug]
+	return s, ok
 }
-func (m *mockStrategyRepo) List(_ context.Context) ([]models.Strategy, error)         { return nil, nil }
-func (m *mockStrategyRepo) Create(_ context.Context, _ *models.Strategy) error        { return nil }
-func (m *mockStrategyRepo) Update(_ context.Context, _ *models.Strategy) error        { return nil }
-func (m *mockStrategyRepo) Delete(_ context.Context, _ uuid.UUID) error               { return nil }
+func (m *mockBuiltinLookup) All() []*models.BuiltinStrategy {
+	result := make([]*models.BuiltinStrategy, 0, len(m.order))
+	for _, slug := range m.order {
+		result = append(result, m.strategies[slug])
+	}
+	return result
+}
 
 type mockCandleRepo struct {
 	result []models.Candle
@@ -80,15 +84,15 @@ func (m *mockCandleRepo) MaxDate(_ context.Context) (time.Time, error) {
 }
 
 type mockInstrumentRepo struct {
-	result *models.Instrument
-	err    error
+	listResult []models.Instrument
+	listErr    error
 }
 
 func (m *mockInstrumentRepo) GetByID(_ context.Context, _ uuid.UUID) (*models.Instrument, error) {
-	return m.result, m.err
+	return nil, models.ErrNotFound
 }
 func (m *mockInstrumentRepo) List(_ context.Context, _ models.InstrumentFilter) ([]models.Instrument, error) {
-	return nil, nil
+	return m.listResult, m.listErr
 }
 func (m *mockInstrumentRepo) UpsertBatch(_ context.Context, _ []models.Instrument) error {
 	return nil
@@ -105,17 +109,34 @@ func (m *mockEngine) RunBacktest(_ *models.Strategy, _ []models.Candle) (*models
 
 // -- helpers --
 
-func defaultStrategy() *models.Strategy {
-	return &models.Strategy{
-		ID:                 uuid.New(),
+const testSlug = "ma_crossover"
+
+func defaultBuiltin() *models.BuiltinStrategy {
+	return &models.BuiltinStrategy{
+		ID:                 testSlug,
+		Name:               "MA Crossover",
 		EntryConditionType: models.EntryConditionMACrossover,
-		LotSize:            1,
-		NumberOfLots:       1,
+		InstrumentType:     models.InstrumentTypeFuturesIndex,
+		ExpiryRule:         models.ExpiryRuleCurrentMonth,
+		CandleInterval:     models.CandleInterval1D,
 	}
 }
 
-func defaultInstrument() *models.Instrument {
-	return &models.Instrument{ID: uuid.New(), Symbol: "NIFTY"}
+func defaultLookup() *mockBuiltinLookup {
+	return &mockBuiltinLookup{
+		strategies: map[string]*models.BuiltinStrategy{testSlug: defaultBuiltin()},
+		order:      []string{testSlug},
+	}
+}
+
+func emptyLookup() *mockBuiltinLookup {
+	return &mockBuiltinLookup{strategies: map[string]*models.BuiltinStrategy{}}
+}
+
+func defaultInstruments() []models.Instrument {
+	return []models.Instrument{
+		{ID: uuid.New(), Symbol: "NIFTY", LotSize: 50},
+	}
 }
 
 func defaultCandles() []models.Candle {
@@ -131,29 +152,34 @@ func defaultCandles() []models.Candle {
 }
 
 func defaultEngineResult() *models.BacktestResult {
-	netPnL := 150.0
-	total := 3
-	wins := 2
-	losses := 1
-	dd := 0.05
-	_ = netPnL
 	return &models.BacktestResult{
 		NetPnL:      150.0,
-		TotalTrades: total,
-		WinCount:    wins,
-		LossCount:   losses,
-		MaxDrawdown: dd,
+		TotalTrades: 3,
+		WinCount:    2,
+		LossCount:   1,
+		MaxDrawdown: 0.05,
+	}
+}
+
+func defaultRequest() BacktestRequest {
+	return BacktestRequest{
+		StrategySlug: testSlug,
+		Underlying:   "NIFTY",
+		From:         time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		To:           time.Date(2025, 6, 30, 0, 0, 0, 0, time.UTC),
+		Lots:         2,
+		Capital:      200000,
 	}
 }
 
 func newService(
 	br *mockBacktestRepo,
-	sr *mockStrategyRepo,
+	bl *mockBuiltinLookup,
 	cr *mockCandleRepo,
 	ir *mockInstrumentRepo,
 	eng *mockEngine,
 ) *BacktestService {
-	return NewBacktestService(br, sr, cr, ir, eng)
+	return NewBacktestService(br, bl, cr, ir, eng)
 }
 
 // -- tests --
@@ -161,16 +187,15 @@ func newService(
 func TestSubmit_StrategyNotFound(t *testing.T) {
 	svc := newService(
 		&mockBacktestRepo{},
-		&mockStrategyRepo{err: errors.New("not found")},
+		emptyLookup(),
 		&mockCandleRepo{},
-		&mockInstrumentRepo{result: defaultInstrument()},
+		&mockInstrumentRepo{listResult: defaultInstruments()},
 		&mockEngine{},
 	)
 
-	_, err := svc.Submit(context.Background(), BacktestRequest{
-		StrategyID:   uuid.New(),
-		InstrumentID: uuid.New(),
-	})
+	req := defaultRequest()
+	req.StrategySlug = "nonexistent"
+	_, err := svc.Submit(context.Background(), req)
 	if err == nil || err.Error() != "strategy not found" {
 		t.Fatalf("expected strategy not found, got %v", err)
 	}
@@ -179,33 +204,28 @@ func TestSubmit_StrategyNotFound(t *testing.T) {
 func TestSubmit_InstrumentNotFound(t *testing.T) {
 	svc := newService(
 		&mockBacktestRepo{},
-		&mockStrategyRepo{result: defaultStrategy()},
+		defaultLookup(),
 		&mockCandleRepo{},
-		&mockInstrumentRepo{err: errors.New("not found")},
+		&mockInstrumentRepo{listResult: []models.Instrument{}},
 		&mockEngine{},
 	)
 
-	_, err := svc.Submit(context.Background(), BacktestRequest{
-		StrategyID:   uuid.New(),
-		InstrumentID: uuid.New(),
-	})
-	if err == nil || err.Error() != "instrument not found" {
-		t.Fatalf("expected instrument not found, got %v", err)
+	_, err := svc.Submit(context.Background(), defaultRequest())
+	if err == nil || err.Error() != "no instrument found for underlying" {
+		t.Fatalf("expected no instrument found, got %v", err)
 	}
 }
 
 func TestSubmit_CreateFails(t *testing.T) {
 	svc := newService(
 		&mockBacktestRepo{createErr: errors.New("db error")},
-		&mockStrategyRepo{result: defaultStrategy()},
+		defaultLookup(),
 		&mockCandleRepo{},
-		&mockInstrumentRepo{result: defaultInstrument()},
+		&mockInstrumentRepo{listResult: defaultInstruments()},
 		&mockEngine{},
 	)
 
-	_, err := svc.Submit(context.Background(), BacktestRequest{
-		StrategyID: uuid.New(), InstrumentID: uuid.New(),
-	})
+	_, err := svc.Submit(context.Background(), defaultRequest())
 	if err == nil {
 		t.Fatal("expected error on create failure")
 	}
@@ -215,19 +235,16 @@ func TestSubmit_NoCandleData(t *testing.T) {
 	br := &mockBacktestRepo{}
 	svc := newService(
 		br,
-		&mockStrategyRepo{result: defaultStrategy()},
+		defaultLookup(),
 		&mockCandleRepo{result: nil},
-		&mockInstrumentRepo{result: defaultInstrument()},
+		&mockInstrumentRepo{listResult: defaultInstruments()},
 		&mockEngine{},
 	)
 
-	_, err := svc.Submit(context.Background(), BacktestRequest{
-		StrategyID: uuid.New(), InstrumentID: uuid.New(),
-	})
+	_, err := svc.Submit(context.Background(), defaultRequest())
 	if err == nil || err.Error() != "no candle data available" {
 		t.Fatalf("expected no candle data available, got %v", err)
 	}
-	// run should be marked FAILED
 	if len(br.capturedUpdateResult) == 0 {
 		t.Fatal("expected UpdateResult to be called on failure")
 	}
@@ -240,15 +257,13 @@ func TestSubmit_EngineError(t *testing.T) {
 	br := &mockBacktestRepo{}
 	svc := newService(
 		br,
-		&mockStrategyRepo{result: defaultStrategy()},
+		defaultLookup(),
 		&mockCandleRepo{result: defaultCandles()},
-		&mockInstrumentRepo{result: defaultInstrument()},
+		&mockInstrumentRepo{listResult: defaultInstruments()},
 		&mockEngine{err: errors.New("engine failure")},
 	)
 
-	_, err := svc.Submit(context.Background(), BacktestRequest{
-		StrategyID: uuid.New(), InstrumentID: uuid.New(),
-	})
+	_, err := svc.Submit(context.Background(), defaultRequest())
 	if err == nil {
 		t.Fatal("expected error from engine failure")
 	}
@@ -264,21 +279,17 @@ func TestSubmit_StatusTransitions(t *testing.T) {
 	br := &mockBacktestRepo{}
 	svc := newService(
 		br,
-		&mockStrategyRepo{result: defaultStrategy()},
+		defaultLookup(),
 		&mockCandleRepo{result: defaultCandles()},
-		&mockInstrumentRepo{result: defaultInstrument()},
+		&mockInstrumentRepo{listResult: defaultInstruments()},
 		&mockEngine{result: defaultEngineResult()},
 	)
 
-	run, err := svc.Submit(context.Background(), BacktestRequest{
-		StrategyID: uuid.New(), InstrumentID: uuid.New(),
-		From: time.Now(), To: time.Now(), Interval: "5m",
-	})
+	run, err := svc.Submit(context.Background(), defaultRequest())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// UpdateStatus called once with RUNNING
 	if len(br.capturedUpdateStatus) != 1 {
 		t.Fatalf("expected 1 UpdateStatus call, got %d", len(br.capturedUpdateStatus))
 	}
@@ -286,7 +297,6 @@ func TestSubmit_StatusTransitions(t *testing.T) {
 		t.Errorf("expected RUNNING on UpdateStatus, got %s", br.capturedUpdateStatus[0].Status)
 	}
 
-	// UpdateResult called once with COMPLETED
 	if len(br.capturedUpdateResult) != 1 {
 		t.Fatalf("expected 1 UpdateResult call, got %d", len(br.capturedUpdateResult))
 	}
@@ -294,7 +304,6 @@ func TestSubmit_StatusTransitions(t *testing.T) {
 		t.Errorf("expected COMPLETED on UpdateResult, got %s", br.capturedUpdateResult[0].Status)
 	}
 
-	// Returned run is COMPLETED
 	if run.Status != models.BacktestCompleted {
 		t.Errorf("expected returned run to be COMPLETED, got %s", run.Status)
 	}
@@ -305,16 +314,13 @@ func TestSubmit_Success_MetricsPopulated(t *testing.T) {
 	engineResult := defaultEngineResult()
 	svc := newService(
 		br,
-		&mockStrategyRepo{result: defaultStrategy()},
+		defaultLookup(),
 		&mockCandleRepo{result: defaultCandles()},
-		&mockInstrumentRepo{result: defaultInstrument()},
+		&mockInstrumentRepo{listResult: defaultInstruments()},
 		&mockEngine{result: engineResult},
 	)
 
-	run, err := svc.Submit(context.Background(), BacktestRequest{
-		StrategyID: uuid.New(), InstrumentID: uuid.New(),
-		From: time.Now(), To: time.Now(), Interval: "5m",
-	})
+	run, err := svc.Submit(context.Background(), defaultRequest())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -336,28 +342,36 @@ func TestSubmit_Success_MetricsPopulated(t *testing.T) {
 	}
 }
 
-func TestSubmit_UpdateStatusNotCalledWithCompletedAt(t *testing.T) {
+func TestSubmit_RunCarriesSlugAndInputs(t *testing.T) {
 	br := &mockBacktestRepo{}
 	svc := newService(
 		br,
-		&mockStrategyRepo{result: defaultStrategy()},
+		defaultLookup(),
 		&mockCandleRepo{result: defaultCandles()},
-		&mockInstrumentRepo{result: defaultInstrument()},
+		&mockInstrumentRepo{listResult: defaultInstruments()},
 		&mockEngine{result: defaultEngineResult()},
 	)
 
-	_, err := svc.Submit(context.Background(), BacktestRequest{
-		StrategyID: uuid.New(), InstrumentID: uuid.New(),
-	})
+	req := defaultRequest()
+	run, err := svc.Submit(context.Background(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// UpdateStatus must only be called for RUNNING — never COMPLETED/FAILED
-	for _, run := range br.capturedUpdateStatus {
-		if run.Status != models.BacktestRunning {
-			t.Errorf("UpdateStatus called with non-RUNNING status: %s", run.Status)
-		}
+	if run.StrategySlug == nil || *run.StrategySlug != req.StrategySlug {
+		t.Errorf("expected StrategySlug %q, got %v", req.StrategySlug, run.StrategySlug)
+	}
+	if run.Capital == nil || *run.Capital != req.Capital {
+		t.Errorf("expected Capital %f, got %v", req.Capital, run.Capital)
+	}
+	if run.Lots == nil || *run.Lots != req.Lots {
+		t.Errorf("expected Lots %d, got %v", req.Lots, run.Lots)
+	}
+	if run.Underlying == nil || *run.Underlying != req.Underlying {
+		t.Errorf("expected Underlying %q, got %v", req.Underlying, run.Underlying)
+	}
+	if run.StrategyID != nil {
+		t.Errorf("expected StrategyID to be nil for built-in, got %v", run.StrategyID)
 	}
 }
 
@@ -365,7 +379,7 @@ func TestGetByID(t *testing.T) {
 	id := uuid.New()
 	expected := &models.BacktestRun{ID: id, Status: models.BacktestCompleted}
 	br := &mockBacktestRepo{getByIDResult: expected}
-	svc := newService(br, &mockStrategyRepo{}, &mockCandleRepo{}, &mockInstrumentRepo{}, &mockEngine{})
+	svc := newService(br, emptyLookup(), &mockCandleRepo{}, &mockInstrumentRepo{}, &mockEngine{})
 
 	run, err := svc.GetByID(context.Background(), id)
 	if err != nil {
@@ -373,23 +387,5 @@ func TestGetByID(t *testing.T) {
 	}
 	if run.ID != id {
 		t.Errorf("expected ID %s, got %s", id, run.ID)
-	}
-}
-
-func TestListByStrategy(t *testing.T) {
-	strategyID := uuid.New()
-	expected := []models.BacktestRun{
-		{ID: uuid.New(), Status: models.BacktestCompleted},
-		{ID: uuid.New(), Status: models.BacktestFailed},
-	}
-	br := &mockBacktestRepo{listResult: expected}
-	svc := newService(br, &mockStrategyRepo{}, &mockCandleRepo{}, &mockInstrumentRepo{}, &mockEngine{})
-
-	runs, err := svc.ListByStrategy(context.Background(), strategyID)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(runs) != 2 {
-		t.Errorf("expected 2 runs, got %d", len(runs))
 	}
 }
