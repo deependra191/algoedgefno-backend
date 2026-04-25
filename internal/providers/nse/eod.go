@@ -71,6 +71,7 @@ const (
 	csvColTimestampLegacy      = "TIMESTAMP"
 
 	// NSE indices bhavcopy CSV column names.
+	// NOTE: Verify column names against the live NSE indices bhavcopy before first production run.
 	csvColIndexName  = "Index Name"
 	csvColIndexDate  = "Index Date"
 	csvColIndexOpen  = "Open Index Value"
@@ -623,7 +624,13 @@ func parseExpiry(s string) time.Time {
 // parseDate parses a date string from a bhavcopy timestamp column,
 // trying multiple NSE-observed formats. Returns an error if none match.
 func parseDate(s string) (time.Time, error) {
-	formats := []string{"02-Jan-2006", "2006-01-02", "20060102", "01/02/2006", "02-01-2006"}
+	formats := []string{
+		"02-Jan-2006",
+		"2006-01-02",
+		"20060102",
+		"01/02/2006",
+		"02-01-2006", // DD-MM-YYYY with dashes — used by NSE indices bhavcopy "Index Date" column
+	}
 	for _, f := range formats {
 		if t, err := time.Parse(f, s); err == nil {
 			return t, nil
@@ -651,6 +658,10 @@ func (p *EODProvider) fetchLatestIndicesBhavcopy(ctx context.Context) ([]indexRo
 	if p.cachedIndexRows != nil && p.cachedIndexDate.Equal(anchor) {
 		return p.cachedIndexRows, nil
 	}
+
+	// Warm the session in case this is called without a prior fetchLatestBhavcopy
+	// (which also warms), so the NSE cookie jar has valid session cookies.
+	p.warmSession(ctx)
 
 	if !p.targetDate.IsZero() {
 		rows, err := p.downloadIndicesBhavcopy(ctx, p.targetDate)
