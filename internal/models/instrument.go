@@ -11,6 +11,7 @@ import (
 const (
 	InstrumentTypeFuturesIndex = "FUTIDX"
 	InstrumentTypeIndex        = "INDEX"
+	InstrumentTypeEquity       = "EQ"
 )
 
 // Exchange constants for NSE market segments.
