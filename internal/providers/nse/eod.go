@@ -294,6 +294,9 @@ func (p *EODProvider) SyncInstruments(ctx context.Context) (int, error) {
 	if !p.cmOnly {
 		indexRows, err := p.fetchLatestIndicesBhavcopy(ctx)
 		if err != nil {
+			if !p.targetDate.IsZero() {
+				return 0, fmt.Errorf("fetch indices bhavcopy: %w", err)
+			}
 			log.Printf("%s: indices bhavcopy unavailable, skipping index instruments: %v", ProviderName, err)
 		} else {
 			for _, row := range indexRows {
@@ -317,6 +320,9 @@ func (p *EODProvider) SyncInstruments(ctx context.Context) (int, error) {
 	if !p.indexOnly {
 		cmRows, err := p.fetchLatestCMBhavcopy(ctx)
 		if err != nil {
+			if !p.targetDate.IsZero() {
+				return 0, fmt.Errorf("fetch CM bhavcopy: %w", err)
+			}
 			log.Printf("%s: CM bhavcopy unavailable, skipping equity instruments: %v", ProviderName, err)
 		} else {
 			for _, row := range cmRows {
@@ -377,6 +383,9 @@ func (p *EODProvider) SyncCandles(ctx context.Context) (int, error) {
 	if !p.cmOnly {
 		indexRows, err := p.fetchLatestIndicesBhavcopy(ctx)
 		if err != nil {
+			if !p.targetDate.IsZero() {
+				return 0, fmt.Errorf("fetch indices bhavcopy: %w", err)
+			}
 			log.Printf("%s: indices bhavcopy unavailable, skipping index candles: %v", ProviderName, err)
 		} else {
 			for _, row := range indexRows {
@@ -402,6 +411,9 @@ func (p *EODProvider) SyncCandles(ctx context.Context) (int, error) {
 	if !p.indexOnly {
 		cmRows, err := p.fetchLatestCMBhavcopy(ctx)
 		if err != nil {
+			if !p.targetDate.IsZero() {
+				return 0, fmt.Errorf("fetch CM bhavcopy: %w", err)
+			}
 			log.Printf("%s: CM bhavcopy unavailable, skipping equity candles: %v", ProviderName, err)
 		} else {
 			for _, row := range cmRows {
