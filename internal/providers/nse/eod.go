@@ -25,20 +25,24 @@ import (
 // Current format (as of 2024-2025): BhavCopy_NSE_FO_0_0_0_YYYYMMDD_F_0000.csv.zip
 const (
 	bhavURL      = "https://nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_0_0_0_%s_F_0000.csv.zip"
+	indicesURL   = "https://nsearchives.nseindia.com/content/indices/ind_close_all_%s.csv"
 	nseMainURL   = "https://www.nseindia.com"
-	nseExchange  = "NFO"
 	eodInterval  = "1d"
 	ProviderName = "nse_eod"
 	maxBhavSize  = 50 << 20
 
-	// bhavDateFormat is the date layout used to format the bhavcopy URL and filename.
+	// bhavDateFormat is the date layout used to format the F&O bhavcopy URL.
 	// Kept separate from the date formats in parseDate — those parse incoming CSV values,
 	// this one is for generating outbound URLs.
 	bhavDateFormat = "20060102"
+	// indicesDateFormat is the date layout for the indices bhavcopy URL (DDMMYYYY).
+	indicesDateFormat = "02012006"
 
 	httpClientTimeout = 60 * time.Second
 
-	// NSE bhavcopy CSV column names. NSE uses cryptic abbreviations; constants
+	indexLotSize = 1
+
+	// NSE F&O bhavcopy CSV column names. NSE uses cryptic abbreviations; constants
 	// bridge the gap and make updates easy if NSE changes their column names.
 	csvColInstrumentType = "FinInstrmTp"
 	csvColInstrumentName = "FinInstrmNm"
@@ -65,6 +69,15 @@ const (
 	csvColCloseLegacy          = "CLOSE"
 	csvColVolumeLegacy         = "CONTRACTS"
 	csvColTimestampLegacy      = "TIMESTAMP"
+
+	// NSE indices bhavcopy CSV column names.
+	csvColIndexName  = "Index Name"
+	csvColIndexDate  = "Index Date"
+	csvColIndexOpen  = "Open Index Value"
+	csvColIndexHigh  = "High Index Value"
+	csvColIndexLow   = "Low Index Value"
+	csvColIndexClose = "Closing Index Value"
+	csvColIndexVol   = "Volume"
 )
 
 // bhavRow holds one parsed row from the F&O bhavcopy CSV.
@@ -90,6 +103,26 @@ type colMap struct {
 	open, high, low, close_, vol, ts, lotSize              int
 }
 
+// indexRow holds one parsed row from the NSE indices bhavcopy CSV.
+type indexRow struct {
+	Symbol string
+	Open   float64
+	High   float64
+	Low    float64
+	Close  float64
+	Volume int64
+	Date   time.Time
+}
+
+// nseIndexNameMap maps the "Index Name" values in the NSE indices bhavcopy to our
+// underlying constants. Only indices we actively use for backtesting are included.
+// NSE publishes ~100 indices; we filter to these three.
+var nseIndexNameMap = map[string]string{
+	"Nifty 50":          models.UnderlyingNifty,
+	"Nifty Bank":        models.UnderlyingBankNifty,
+	"Nifty Fin Service": models.UnderlyingFinNifty,
+}
+
 // EODProvider fetches NSE F&O end-of-day bhavcopy data and syncs it into the local store.
 type EODProvider struct {
 	instrumentStore models.InstrumentRepository
@@ -99,10 +132,12 @@ type EODProvider struct {
 	userAgent       string
 	acceptHTML      string
 	// Cache to avoid downloading the same bhavcopy twice in one sync cycle.
-	// cacheMu protects cachedRows and cachedDate against concurrent sync calls.
-	cacheMu    sync.Mutex
-	cachedRows []bhavRow
-	cachedDate time.Time
+	// cacheMu protects all cached* fields against concurrent sync calls.
+	cacheMu         sync.Mutex
+	cachedRows      []bhavRow
+	cachedDate      time.Time
+	cachedIndexRows []indexRow
+	cachedIndexDate time.Time
 }
 
 // EODOption is a functional option for configuring an EODProvider.
@@ -193,6 +228,15 @@ func (p *EODProvider) SyncInstruments(ctx context.Context) (int, error) {
 		instruments = append(instruments, bhavRowToInstrument(row))
 	}
 
+	indexRows, err := p.fetchLatestIndicesBhavcopy(ctx)
+	if err != nil {
+		log.Printf("%s: indices bhavcopy unavailable, skipping index instruments: %v", ProviderName, err)
+	} else {
+		for _, row := range indexRows {
+			instruments = append(instruments, indexRowToInstrument(row))
+		}
+	}
+
 	if err := p.instrumentStore.UpsertBatch(ctx, instruments); err != nil {
 		return 0, fmt.Errorf("upsert instruments: %w", err)
 	}
@@ -205,20 +249,18 @@ func (p *EODProvider) SyncCandles(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("fetch bhavcopy: %w", err)
 	}
 
-	// Load all NFO instruments into a symbol→ID map for FK lookup.
-	exchange := nseExchange
-	allInstr, err := p.instrumentStore.List(ctx, models.InstrumentFilter{Exchange: &exchange})
+	allInstr, err := p.instrumentStore.List(ctx, models.InstrumentFilter{})
 	if err != nil {
 		return 0, fmt.Errorf("list instruments: %w", err)
 	}
-	instrMap := make(map[string]uuid.UUID, len(allInstr))
+	instrMap := make(map[instrumentKey]uuid.UUID, len(allInstr))
 	for _, inst := range allInstr {
-		instrMap[inst.Symbol] = inst.ID
+		instrMap[instrumentKey{Symbol: inst.Symbol, Exchange: inst.Exchange}] = inst.ID
 	}
 
 	candles := make([]models.Candle, 0, len(rows))
 	for _, row := range rows {
-		id, ok := instrMap[row.Symbol]
+		id, ok := instrMap[instrumentKey{Symbol: row.Symbol, Exchange: models.ExchangeNFO}]
 		if !ok {
 			continue
 		}
@@ -233,6 +275,29 @@ func (p *EODProvider) SyncCandles(ctx context.Context) (int, error) {
 			Volume:       row.Volume,
 			Provider:     p.Name(),
 		})
+	}
+
+	indexRows, err := p.fetchLatestIndicesBhavcopy(ctx)
+	if err != nil {
+		log.Printf("%s: indices bhavcopy unavailable, skipping index candles: %v", ProviderName, err)
+	} else {
+		for _, row := range indexRows {
+			id, ok := instrMap[instrumentKey{Symbol: row.Symbol, Exchange: models.ExchangeNSE}]
+			if !ok {
+				continue
+			}
+			candles = append(candles, models.Candle{
+				InstrumentID: id,
+				Timestamp:    row.Date,
+				Interval:     eodInterval,
+				Open:         row.Open,
+				High:         row.High,
+				Low:          row.Low,
+				Close:        row.Close,
+				Volume:       row.Volume,
+				Provider:     p.Name(),
+			})
+		}
 	}
 
 	if len(candles) == 0 {
@@ -469,7 +534,7 @@ func bhavRowToInstrument(row bhavRow) models.Instrument {
 	inst := models.Instrument{
 		Symbol:         row.Symbol,
 		Name:           row.Symbol,
-		Exchange:       nseExchange,
+		Exchange:       models.ExchangeNFO,
 		InstrumentType: row.InstrumentType,
 		LotSize:        lotSize,
 	}
@@ -558,11 +623,189 @@ func parseExpiry(s string) time.Time {
 // parseDate parses a date string from a bhavcopy timestamp column,
 // trying multiple NSE-observed formats. Returns an error if none match.
 func parseDate(s string) (time.Time, error) {
-	formats := []string{"02-Jan-2006", "2006-01-02", "20060102", "01/02/2006"}
+	formats := []string{"02-Jan-2006", "2006-01-02", "20060102", "01/02/2006", "02-01-2006"}
 	for _, f := range formats {
 		if t, err := time.Parse(f, s); err == nil {
 			return t, nil
 		}
 	}
 	return time.Time{}, fmt.Errorf("unrecognized date: %s", s)
+}
+
+// instrumentKey is used to build a (symbol, exchange) lookup map for candle FK resolution.
+type instrumentKey struct {
+	Symbol   string
+	Exchange string
+}
+
+// fetchLatestIndicesBhavcopy fetches the NSE indices bhavcopy, trying recent trading days.
+// Only rows matching nseIndexNameMap are returned. Results are cached within a sync cycle.
+func (p *EODProvider) fetchLatestIndicesBhavcopy(ctx context.Context) ([]indexRow, error) {
+	p.cacheMu.Lock()
+	defer p.cacheMu.Unlock()
+
+	anchor := latestTradingDate()
+	if !p.targetDate.IsZero() {
+		anchor = p.targetDate
+	}
+	if p.cachedIndexRows != nil && p.cachedIndexDate.Equal(anchor) {
+		return p.cachedIndexRows, nil
+	}
+
+	if !p.targetDate.IsZero() {
+		rows, err := p.downloadIndicesBhavcopy(ctx, p.targetDate)
+		if err != nil {
+			return nil, fmt.Errorf("indices bhavcopy for %s: %w", p.targetDate.Format("2006-01-02"), err)
+		}
+		p.cachedIndexRows = rows
+		p.cachedIndexDate = anchor
+		return rows, nil
+	}
+
+	date := anchor
+	for range 7 {
+		rows, err := p.downloadIndicesBhavcopy(ctx, date)
+		if err == nil {
+			p.cachedIndexRows = rows
+			p.cachedIndexDate = anchor
+			return rows, nil
+		}
+		log.Printf("%s: indices bhavcopy not available for %s: %v", ProviderName, date.Format("2006-01-02"), err)
+		date = prevTradingDay(date)
+	}
+	return nil, fmt.Errorf("no indices bhavcopy available in the last 7 trading days")
+}
+
+// downloadIndicesBhavcopy fetches the plain-CSV indices bhavcopy for the given date.
+// Unlike the F&O bhavcopy, the indices file is not zipped.
+func (p *EODProvider) downloadIndicesBhavcopy(ctx context.Context, date time.Time) ([]indexRow, error) {
+	url := fmt.Sprintf(indicesURL, date.Format(indicesDateFormat))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", p.userAgent)
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("Referer", nseMainURL+"/")
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBhavSize))
+	if err != nil {
+		return nil, err
+	}
+
+	return parseIndicesCSV(bytes.NewReader(body), date)
+}
+
+// parseIndicesCSV parses the NSE indices bhavcopy CSV and returns rows for
+// the indices listed in nseIndexNameMap. Other indices are skipped.
+func parseIndicesCSV(r io.Reader, fallbackDate time.Time) ([]indexRow, error) {
+	cr := csv.NewReader(r)
+	cr.TrimLeadingSpace = true
+
+	header, err := cr.Read()
+	if err != nil {
+		return nil, fmt.Errorf("read header: %w", err)
+	}
+
+	idx := make(map[string]int, len(header))
+	for i, h := range header {
+		idx[strings.TrimSpace(h)] = i
+	}
+
+	nameIdx := col(idx, csvColIndexName)
+	if nameIdx < 0 {
+		return nil, fmt.Errorf("required column %q not found in indices CSV header: %v", csvColIndexName, header)
+	}
+
+	dateIdx := col(idx, csvColIndexDate)
+	openIdx := col(idx, csvColIndexOpen)
+	highIdx := col(idx, csvColIndexHigh)
+	lowIdx := col(idx, csvColIndexLow)
+	closeIdx := col(idx, csvColIndexClose)
+	volIdx := col(idx, csvColIndexVol)
+
+	get := func(rec []string, i int) string {
+		if i < 0 || i >= len(rec) {
+			return ""
+		}
+		return strings.TrimSpace(rec[i])
+	}
+
+	var rows []indexRow
+	for {
+		rec, err := cr.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			continue
+		}
+
+		indexName := get(rec, nameIdx)
+		symbol, ok := nseIndexNameMap[indexName]
+		if !ok {
+			continue
+		}
+
+		open, err := parseFloat(get(rec, openIdx))
+		if err != nil {
+			continue
+		}
+		high, err := parseFloat(get(rec, highIdx))
+		if err != nil {
+			continue
+		}
+		low, err := parseFloat(get(rec, lowIdx))
+		if err != nil {
+			continue
+		}
+		close_, err := parseFloat(get(rec, closeIdx))
+		if err != nil {
+			continue
+		}
+		vol, _ := parseInt64(get(rec, volIdx))
+
+		rowDate := fallbackDate
+		if ds := get(rec, dateIdx); ds != "" {
+			if t, err := parseDate(ds); err == nil {
+				rowDate = t
+			}
+		}
+
+		rows = append(rows, indexRow{
+			Symbol: symbol,
+			Open:   open,
+			High:   high,
+			Low:    low,
+			Close:  close_,
+			Volume: vol,
+			Date:   rowDate,
+		})
+	}
+	return rows, nil
+}
+
+// indexRowToInstrument maps a parsed index row to a domain Instrument.
+func indexRowToInstrument(row indexRow) models.Instrument {
+	underlying := row.Symbol
+	return models.Instrument{
+		Symbol:         row.Symbol,
+		Name:           row.Symbol,
+		Exchange:       models.ExchangeNSE,
+		InstrumentType: models.InstrumentTypeIndex,
+		Underlying:     &underlying,
+		LotSize:        indexLotSize,
+	}
 }

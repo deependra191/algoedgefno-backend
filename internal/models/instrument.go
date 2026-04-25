@@ -7,9 +7,16 @@ import (
 	"github.com/google/uuid"
 )
 
-// InstrumentType constants for the NSE F&O instrument classification codes.
+// InstrumentType constants for NSE instrument classification codes.
 const (
 	InstrumentTypeFuturesIndex = "FUTIDX"
+	InstrumentTypeIndex        = "INDEX"
+)
+
+// Exchange constants for NSE market segments.
+const (
+	ExchangeNFO = "NFO"
+	ExchangeNSE = "NSE"
 )
 
 // Underlying constants for supported index underlyings.
