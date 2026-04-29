@@ -147,12 +147,6 @@ func TestListSections_CustomIsEmpty(t *testing.T) {
 	if len(custom.Strategies) != 0 {
 		t.Errorf("expected 0 custom strategies, got %d", len(custom.Strategies))
 	}
-	if custom.Placeholder == nil {
-		t.Fatal("expected placeholder on CUSTOM section")
-	}
-	if custom.Placeholder.Title != "Coming soon" {
-		t.Errorf("expected placeholder title 'Coming soon', got %q", custom.Placeholder.Title)
-	}
 }
 
 func TestGetBySlug_Found(t *testing.T) {

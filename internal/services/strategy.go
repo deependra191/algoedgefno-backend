@@ -16,16 +16,8 @@ const (
 
 // StrategySection is a grouping of strategies for the list endpoint.
 type StrategySection struct {
-	Key         string
-	Label       string
-	Placeholder *SectionPlaceholder
-	Strategies  []StrategyListItem
-}
-
-// SectionPlaceholder is shown when a section has no strategies.
-type SectionPlaceholder struct {
-	Title       string
-	Description string
+	Key        string
+	Strategies []StrategyListItem
 }
 
 // StrategyListItem pairs a built-in strategy with its most recent backtest run.
@@ -81,16 +73,10 @@ func (s *StrategyService) ListSections(ctx context.Context) ([]StrategySection, 
 	return []StrategySection{
 		{
 			Key:        SectionKeyBuiltin,
-			Label:      "Strategies",
 			Strategies: items,
 		},
 		{
-			Key:   SectionKeyCustom,
-			Label: "My Strategies",
-			Placeholder: &SectionPlaceholder{
-				Title:       "Coming soon",
-				Description: "Your saved strategies will appear here.",
-			},
+			Key:        SectionKeyCustom,
 			Strategies: []StrategyListItem{},
 		},
 	}, nil

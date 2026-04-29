@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/deependra191/algoedgefno-backend/internal/csvutil"
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
@@ -180,23 +181,23 @@ func parseCMCSV(r io.Reader, fallbackDate time.Time) ([]cmRow, error) {
 			continue
 		}
 
-		open, err := parseFloat(get(rec, openIdx))
+		open, err := csvutil.ParseFloat(get(rec, openIdx))
 		if err != nil {
 			continue
 		}
-		high, err := parseFloat(get(rec, highIdx))
+		high, err := csvutil.ParseFloat(get(rec, highIdx))
 		if err != nil {
 			continue
 		}
-		low, err := parseFloat(get(rec, lowIdx))
+		low, err := csvutil.ParseFloat(get(rec, lowIdx))
 		if err != nil {
 			continue
 		}
-		close_, err := parseFloat(get(rec, closeIdx))
+		close_, err := csvutil.ParseFloat(get(rec, closeIdx))
 		if err != nil {
 			continue
 		}
-		vol, _ := parseInt64(get(rec, volIdx))
+		vol, _ := csvutil.ParseInt64(get(rec, volIdx))
 
 		rowDate := fallbackDate
 		if ds := get(rec, dateIdx); ds != "" {

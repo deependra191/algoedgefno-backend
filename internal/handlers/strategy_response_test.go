@@ -171,8 +171,7 @@ func TestToStrategyInputResponses_DoesNotMutateOriginal(t *testing.T) {
 func TestToStrategySectionsResponse_MatchesContract(t *testing.T) {
 	sections := []services.StrategySection{
 		{
-			Key:   "BUILTIN",
-			Label: "Strategies",
+			Key: "BUILTIN",
 			Strategies: []services.StrategyListItem{
 				{
 					Strategy: &models.BuiltinStrategy{
@@ -183,11 +182,7 @@ func TestToStrategySectionsResponse_MatchesContract(t *testing.T) {
 			},
 		},
 		{
-			Key:   "CUSTOM",
-			Label: "My Strategies",
-			Placeholder: &services.SectionPlaceholder{
-				Title: "Coming soon", Description: "Your saved strategies will appear here.",
-			},
+			Key:        "CUSTOM",
 			Strategies: []services.StrategyListItem{},
 		},
 	}
@@ -196,14 +191,25 @@ func TestToStrategySectionsResponse_MatchesContract(t *testing.T) {
 	if len(resp.Sections) != 2 {
 		t.Fatalf("expected 2 sections, got %d", len(resp.Sections))
 	}
-	if resp.Sections[0].Key != "BUILTIN" {
-		t.Errorf("expected BUILTIN, got %s", resp.Sections[0].Key)
+	builtin := resp.Sections[0]
+	if builtin.Key != "BUILTIN" {
+		t.Errorf("expected BUILTIN, got %s", builtin.Key)
 	}
-	if len(resp.Sections[0].Strategies) != 1 {
-		t.Errorf("expected 1 builtin strategy, got %d", len(resp.Sections[0].Strategies))
+	if builtin.Label != sectionLabelBuiltin {
+		t.Errorf("expected label %q, got %q", sectionLabelBuiltin, builtin.Label)
 	}
-	if resp.Sections[1].Placeholder == nil {
+	if len(builtin.Strategies) != 1 {
+		t.Errorf("expected 1 builtin strategy, got %d", len(builtin.Strategies))
+	}
+	custom := resp.Sections[1]
+	if custom.Label != sectionLabelCustom {
+		t.Errorf("expected label %q, got %q", sectionLabelCustom, custom.Label)
+	}
+	if custom.Placeholder == nil {
 		t.Error("CUSTOM section should have placeholder")
+	}
+	if custom.Placeholder.Title != placeholderTitleCustom {
+		t.Errorf("expected placeholder title %q, got %q", placeholderTitleCustom, custom.Placeholder.Title)
 	}
 }
 

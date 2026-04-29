@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/deependra191/algoedgefno-backend/internal/csvutil"
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
@@ -244,28 +245,28 @@ func parseRow(rec []string, cols colMap, fallbackDate time.Time) (bhavRow, error
 		return bhavRow{}, fmt.Errorf("empty symbol")
 	}
 
-	open, err := parseFloat(get(cols.open))
+	open, err := csvutil.ParseFloat(get(cols.open))
 	if err != nil {
 		return bhavRow{}, fmt.Errorf("open: %w", err)
 	}
-	high, err := parseFloat(get(cols.high))
+	high, err := csvutil.ParseFloat(get(cols.high))
 	if err != nil {
 		return bhavRow{}, fmt.Errorf("high: %w", err)
 	}
-	low, err := parseFloat(get(cols.low))
+	low, err := csvutil.ParseFloat(get(cols.low))
 	if err != nil {
 		return bhavRow{}, fmt.Errorf("low: %w", err)
 	}
-	close_, err := parseFloat(get(cols.close_))
+	close_, err := csvutil.ParseFloat(get(cols.close_))
 	if err != nil {
 		return bhavRow{}, fmt.Errorf("close: %w", err)
 	}
 
-	vol, _ := parseInt64(get(cols.vol)) // non-fatal if missing
-	lotSize, _ := parseInt64(get(cols.lotSize))
+	vol, _ := csvutil.ParseInt64(get(cols.vol)) // non-fatal if missing
+	lotSize, _ := csvutil.ParseInt64(get(cols.lotSize))
 
 	expiry := parseExpiry(get(cols.expiry))
-	strike, _ := parseFloat(get(cols.strike))
+	strike, _ := csvutil.ParseFloat(get(cols.strike))
 
 	// Use the file's timestamp if available, else the date we fetched for.
 	rowDate := fallbackDate
