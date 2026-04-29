@@ -162,12 +162,6 @@ type EODProvider struct {
 	targetDate      time.Time
 	userAgent       string
 	acceptHTML      string
-	// cmOnly skips F&O and index fetches — used for targeted equity-only backfill runs.
-	cmOnly bool
-	// skipFO skips F&O fetches only — used for targeted index+equity backfill runs.
-	skipFO bool
-	// indexOnly skips F&O and CM fetches — used for targeted index-only backfill runs.
-	indexOnly bool
 	// Cache to avoid downloading the same bhavcopy twice in one sync cycle.
 	// cacheMu protects all cached* fields against concurrent sync calls.
 	cacheMu        sync.Mutex
@@ -199,24 +193,6 @@ func WithUserAgent(ua string) EODOption {
 // WithAcceptHTML overrides the Accept header sent during the session warm-up request.
 func WithAcceptHTML(accept string) EODOption {
 	return func(p *EODProvider) { p.acceptHTML = accept }
-}
-
-// WithCMOnly restricts the provider to only fetch CM equity data, skipping F&O and index.
-// Intended for targeted backfill runs only — not for production daily sync.
-func WithCMOnly() EODOption {
-	return func(p *EODProvider) { p.cmOnly = true }
-}
-
-// WithSkipFO skips F&O fetches while still syncing index and equity.
-// Intended for targeted backfill runs only — not for production daily sync.
-func WithSkipFO() EODOption {
-	return func(p *EODProvider) { p.skipFO = true }
-}
-
-// WithIndexOnly restricts the provider to only fetch index data, skipping F&O and CM equity.
-// Intended for targeted backfill runs only — not for production daily sync.
-func WithIndexOnly() EODOption {
-	return func(p *EODProvider) { p.indexOnly = true }
 }
 
 // NewEODProvider creates an EODProvider with a cookie-jar-enabled HTTP client.
@@ -275,62 +251,44 @@ func (p *EODProvider) Healthy(ctx context.Context) bool {
 }
 
 func (p *EODProvider) SyncInstruments(ctx context.Context) (int, error) {
-	instruments := make([]models.Instrument, 0)
-	underlyings := make(map[string]bool)
+	rows, err := p.fetchLatestBhavcopy(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("fetch bhavcopy: %w", err)
+	}
 
-	if !p.cmOnly && !p.skipFO && !p.indexOnly {
-		rows, err := p.fetchLatestBhavcopy(ctx)
-		if err != nil {
-			return 0, fmt.Errorf("fetch bhavcopy: %w", err)
-		}
-		for _, row := range rows {
-			instruments = append(instruments, bhavRowToInstrument(row))
-			if row.Underlying != "" {
-				underlyings[row.Underlying] = true
-			}
+	instruments := make([]models.Instrument, 0, len(rows))
+	underlyings := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		instruments = append(instruments, bhavRowToInstrument(row))
+		if row.Underlying != "" {
+			underlyings[row.Underlying] = true
 		}
 	}
 
-	if !p.cmOnly {
-		indexRows, err := p.fetchLatestIndicesBhavcopy(ctx)
-		if err != nil {
-			if !p.targetDate.IsZero() {
-				return 0, fmt.Errorf("fetch indices bhavcopy: %w", err)
-			}
-			log.Printf("%s: indices bhavcopy unavailable, skipping index instruments: %v", ProviderName, err)
-		} else {
-			for _, row := range indexRows {
-				instruments = append(instruments, indexRowToInstrument(row))
-			}
+	indexRows, err := p.fetchLatestIndicesBhavcopy(ctx)
+	if err != nil {
+		if !p.targetDate.IsZero() {
+			return 0, fmt.Errorf("fetch indices bhavcopy: %w", err)
+		}
+		log.Printf("%s: indices bhavcopy unavailable, skipping index instruments: %v", ProviderName, err)
+	} else {
+		for _, row := range indexRows {
+			instruments = append(instruments, indexRowToInstrument(row))
 		}
 	}
 
-	if p.cmOnly || p.skipFO {
-		allInstr, err := p.instrumentStore.List(ctx, models.InstrumentFilter{})
-		if err != nil {
-			return 0, fmt.Errorf("list instruments for underlying set: %w", err)
+	cmRows, err := p.fetchLatestCMBhavcopy(ctx)
+	if err != nil {
+		if !p.targetDate.IsZero() {
+			return 0, fmt.Errorf("fetch CM bhavcopy: %w", err)
 		}
-		for _, inst := range allInstr {
-			if inst.Exchange == models.ExchangeNFO && inst.Underlying != nil {
-				underlyings[*inst.Underlying] = true
+		log.Printf("%s: CM bhavcopy unavailable, skipping equity instruments: %v", ProviderName, err)
+	} else {
+		for _, row := range cmRows {
+			if !underlyings[row.Symbol] {
+				continue
 			}
-		}
-	}
-
-	if !p.indexOnly {
-		cmRows, err := p.fetchLatestCMBhavcopy(ctx)
-		if err != nil {
-			if !p.targetDate.IsZero() {
-				return 0, fmt.Errorf("fetch CM bhavcopy: %w", err)
-			}
-			log.Printf("%s: CM bhavcopy unavailable, skipping equity instruments: %v", ProviderName, err)
-		} else {
-			for _, row := range cmRows {
-				if !underlyings[row.Symbol] {
-					continue
-				}
-				instruments = append(instruments, cmRowToInstrument(row))
-			}
+			instruments = append(instruments, cmRowToInstrument(row))
 		}
 	}
 
@@ -354,15 +312,39 @@ func (p *EODProvider) SyncCandles(ctx context.Context) (int, error) {
 		}
 	}
 
-	candles := make([]models.Candle, 0)
+	rows, err := p.fetchLatestBhavcopy(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("fetch bhavcopy: %w", err)
+	}
 
-	if !p.cmOnly && !p.skipFO && !p.indexOnly {
-		rows, err := p.fetchLatestBhavcopy(ctx)
-		if err != nil {
-			return 0, fmt.Errorf("fetch bhavcopy: %w", err)
+	candles := make([]models.Candle, 0, len(rows))
+	for _, row := range rows {
+		id, ok := instrMap[instrumentKey{Symbol: row.Symbol, Exchange: models.ExchangeNFO}]
+		if !ok {
+			continue
 		}
-		for _, row := range rows {
-			id, ok := instrMap[instrumentKey{Symbol: row.Symbol, Exchange: models.ExchangeNFO}]
+		candles = append(candles, models.Candle{
+			InstrumentID: id,
+			Timestamp:    row.Date,
+			Interval:     eodInterval,
+			Open:         row.Open,
+			High:         row.High,
+			Low:          row.Low,
+			Close:        row.Close,
+			Volume:       row.Volume,
+			Provider:     p.Name(),
+		})
+	}
+
+	indexRows, err := p.fetchLatestIndicesBhavcopy(ctx)
+	if err != nil {
+		if !p.targetDate.IsZero() {
+			return 0, fmt.Errorf("fetch indices bhavcopy: %w", err)
+		}
+		log.Printf("%s: indices bhavcopy unavailable, skipping index candles: %v", ProviderName, err)
+	} else {
+		for _, row := range indexRows {
+			id, ok := instrMap[instrumentKey{Symbol: row.Symbol, Exchange: models.ExchangeNSE}]
 			if !ok {
 				continue
 			}
@@ -380,62 +362,32 @@ func (p *EODProvider) SyncCandles(ctx context.Context) (int, error) {
 		}
 	}
 
-	if !p.cmOnly {
-		indexRows, err := p.fetchLatestIndicesBhavcopy(ctx)
-		if err != nil {
-			if !p.targetDate.IsZero() {
-				return 0, fmt.Errorf("fetch indices bhavcopy: %w", err)
-			}
-			log.Printf("%s: indices bhavcopy unavailable, skipping index candles: %v", ProviderName, err)
-		} else {
-			for _, row := range indexRows {
-				id, ok := instrMap[instrumentKey{Symbol: row.Symbol, Exchange: models.ExchangeNSE}]
-				if !ok {
-					continue
-				}
-				candles = append(candles, models.Candle{
-					InstrumentID: id,
-					Timestamp:    row.Date,
-					Interval:     eodInterval,
-					Open:         row.Open,
-					High:         row.High,
-					Low:          row.Low,
-					Close:        row.Close,
-					Volume:       row.Volume,
-					Provider:     p.Name(),
-				})
-			}
+	cmRows, err := p.fetchLatestCMBhavcopy(ctx)
+	if err != nil {
+		if !p.targetDate.IsZero() {
+			return 0, fmt.Errorf("fetch CM bhavcopy: %w", err)
 		}
-	}
-
-	if !p.indexOnly {
-		cmRows, err := p.fetchLatestCMBhavcopy(ctx)
-		if err != nil {
-			if !p.targetDate.IsZero() {
-				return 0, fmt.Errorf("fetch CM bhavcopy: %w", err)
+		log.Printf("%s: CM bhavcopy unavailable, skipping equity candles: %v", ProviderName, err)
+	} else {
+		for _, row := range cmRows {
+			if !underlyings[row.Symbol] {
+				continue
 			}
-			log.Printf("%s: CM bhavcopy unavailable, skipping equity candles: %v", ProviderName, err)
-		} else {
-			for _, row := range cmRows {
-				if !underlyings[row.Symbol] {
-					continue
-				}
-				id, ok := instrMap[instrumentKey{Symbol: row.Symbol, Exchange: models.ExchangeNSE}]
-				if !ok {
-					continue
-				}
-				candles = append(candles, models.Candle{
-					InstrumentID: id,
-					Timestamp:    row.Date,
-					Interval:     eodInterval,
-					Open:         row.Open,
-					High:         row.High,
-					Low:          row.Low,
-					Close:        row.Close,
-					Volume:       row.Volume,
-					Provider:     p.Name(),
-				})
+			id, ok := instrMap[instrumentKey{Symbol: row.Symbol, Exchange: models.ExchangeNSE}]
+			if !ok {
+				continue
 			}
+			candles = append(candles, models.Candle{
+				InstrumentID: id,
+				Timestamp:    row.Date,
+				Interval:     eodInterval,
+				Open:         row.Open,
+				High:         row.High,
+				Low:          row.Low,
+				Close:        row.Close,
+				Volume:       row.Volume,
+				Provider:     p.Name(),
+			})
 		}
 	}
 
