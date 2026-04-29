@@ -7,7 +7,13 @@ import (
 	"github.com/deependra191/algoedgefno-backend/internal/services"
 )
 
-const constraintMaxDate = "maxDate"
+const (
+	constraintMaxDate      = "maxDate"
+	sectionLabelBuiltin    = "Strategies"
+	sectionLabelCustom     = "My Strategies"
+	placeholderTitleCustom = "Coming soon"
+	placeholderDescCustom  = "Your saved strategies will appear here."
+)
 
 type strategySectionsResponse struct {
 	Sections []strategySectionResponse `json:"sections"`
@@ -82,19 +88,37 @@ func toStrategySectionsResponse(sections []services.StrategySection) strategySec
 func toStrategySectionResponse(s services.StrategySection) strategySectionResponse {
 	resp := strategySectionResponse{
 		Key:        s.Key,
-		Label:      s.Label,
+		Label:      sectionLabel(s.Key),
 		Strategies: make([]strategyListItemResponse, len(s.Strategies)),
 	}
-	if s.Placeholder != nil {
-		resp.Placeholder = &sectionPlaceholder{
-			Title:       s.Placeholder.Title,
-			Description: s.Placeholder.Description,
-		}
-	}
+	resp.Placeholder = sectionPlaceholderFor(s.Key)
 	for i, item := range s.Strategies {
 		resp.Strategies[i] = toStrategyListItemResponse(item)
 	}
 	return resp
+}
+
+func sectionLabel(key string) string {
+	switch key {
+	case services.SectionKeyBuiltin:
+		return sectionLabelBuiltin
+	case services.SectionKeyCustom:
+		return sectionLabelCustom
+	default:
+		return key
+	}
+}
+
+func sectionPlaceholderFor(key string) *sectionPlaceholder {
+	switch key {
+	case services.SectionKeyCustom:
+		return &sectionPlaceholder{
+			Title:       placeholderTitleCustom,
+			Description: placeholderDescCustom,
+		}
+	default:
+		return nil
+	}
 }
 
 func toStrategyListItemResponse(item services.StrategyListItem) strategyListItemResponse {

@@ -2,12 +2,23 @@ package nse
 
 import (
 	"fmt"
-	"strconv"
 	"time"
 )
 
+const (
+	istOffsetSeconds = 5*60*60 + 30*60
+
+	// NSE CSV date format strings. Go's reference time is Mon Jan 2 15:04:05 MST 2006.
+	nseDateFmtDMY      = "02-Jan-2006" // e.g. 15-Jan-2025 — F&O expiry, bhavcopy timestamp
+	nseDateFmtISO      = "2006-01-02"  // e.g. 2025-01-15 — standard ISO date
+	nseDateFmtDMYUpper = "02-JAN-2006" // e.g. 15-JAN-2025 — NSE uppercase variant
+	nseDateFmtSlashMDY = "01/02/2006"  // e.g. 01/15/2025 — slash-separated
+	nseDateFmtCompact  = "20060102"    // e.g. 20250115 — compact no-separator
+	nseDateFmtDDMMYYYY = "02-01-2006"  // e.g. 15-01-2025 — NSE indices bhavcopy "Index Date"
+)
+
 // ist is the Indian Standard Time location (UTC+5:30). NSE operates on IST.
-var ist = time.FixedZone("IST", 5*60*60+30*60)
+var ist = time.FixedZone("IST", istOffsetSeconds)
 
 // latestTradingDate returns the most recent weekday (Mon–Fri) in IST.
 func latestTradingDate() time.Time {
@@ -43,29 +54,13 @@ func col(idx map[string]int, names ...string) int {
 	return -1
 }
 
-func parseFloat(s string) (float64, error) {
-	if s == "" || s == "-" {
-		return 0, fmt.Errorf("empty or missing value")
-	}
-	return strconv.ParseFloat(s, 64)
-}
-
-func parseInt64(s string) (int64, error) {
-	if s == "" || s == "-" {
-		return 0, nil
-	}
-	return strconv.ParseInt(s, 10, 64)
-}
-
 // parseExpiry parses a contract expiry date string, trying multiple NSE-observed formats.
 // Returns a zero time.Time for empty, missing, or unrecognised values — callers treat zero as "no expiry".
 func parseExpiry(s string) time.Time {
 	if s == "" || s == "-" {
 		return time.Time{}
 	}
-	// Try common NSE date formats.
-	formats := []string{"02-Jan-2006", "2006-01-02", "02-JAN-2006", "01/02/2006"}
-	for _, f := range formats {
+	for _, f := range []string{nseDateFmtDMY, nseDateFmtISO, nseDateFmtDMYUpper, nseDateFmtSlashMDY} {
 		if t, err := time.Parse(f, s); err == nil {
 			return t
 		}
@@ -76,14 +71,7 @@ func parseExpiry(s string) time.Time {
 // parseDate parses a date string from a bhavcopy timestamp column,
 // trying multiple NSE-observed formats. Returns an error if none match.
 func parseDate(s string) (time.Time, error) {
-	formats := []string{
-		"02-Jan-2006",
-		"2006-01-02",
-		"20060102",
-		"01/02/2006",
-		"02-01-2006", // DD-MM-YYYY with dashes — used by NSE indices bhavcopy "Index Date" column
-	}
-	for _, f := range formats {
+	for _, f := range []string{nseDateFmtDMY, nseDateFmtISO, nseDateFmtCompact, nseDateFmtSlashMDY, nseDateFmtDDMMYYYY} {
 		if t, err := time.Parse(f, s); err == nil {
 			return t, nil
 		}

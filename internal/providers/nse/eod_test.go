@@ -76,45 +76,6 @@ func TestParseExpiry(t *testing.T) {
 	}
 }
 
-func TestParseFloat(t *testing.T) {
-	tests := []struct {
-		in      string
-		want    float64
-		wantErr bool
-	}{
-		{"100.50", 100.50, false},
-		{"0", 0, false},
-		{"", 0, true},
-		{"-", 0, true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.in, func(t *testing.T) {
-			got, err := parseFloat(tt.in)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("parseFloat(%q) error = %v, wantErr %v", tt.in, err, tt.wantErr)
-			}
-			if !tt.wantErr && got != tt.want {
-				t.Errorf("parseFloat(%q) = %f, want %f", tt.in, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestParseInt64(t *testing.T) {
-	got, err := parseInt64("12345")
-	if err != nil || got != 12345 {
-		t.Errorf("parseInt64(\"12345\") = %d, %v", got, err)
-	}
-	got, _ = parseInt64("")
-	if got != 0 {
-		t.Errorf("parseInt64(\"\") = %d, want 0", got)
-	}
-	got, _ = parseInt64("-")
-	if got != 0 {
-		t.Errorf("parseInt64(\"-\") = %d, want 0", got)
-	}
-}
-
 func TestParseBhavCSV(t *testing.T) {
 	csv := `FinInstrmNm,FinInstrmTp,TckrSymb,XpryDt,StrkPric,OptnTp,OpnPric,HghPric,LwPric,ClsPric,TtlTradgVol,TmStmp,NewBrdLotQty
 NIFTY26APR22500CE,OPTIDX,NIFTY,26-Apr-2026,22500,CE,150.00,180.00,140.00,170.00,50000,17-Apr-2026,75
