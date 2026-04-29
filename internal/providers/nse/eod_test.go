@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
 func TestPrevTradingDay(t *testing.T) {
@@ -206,7 +208,7 @@ func TestBhavRowToInstrument(t *testing.T) {
 	if inst.Symbol != "NIFTY26APR22500CE" {
 		t.Errorf("symbol = %q", inst.Symbol)
 	}
-	if inst.Exchange != nseExchange {
+	if inst.Exchange != models.ExchangeNFO {
 		t.Errorf("exchange = %q", inst.Exchange)
 	}
 	if inst.InstrumentType != "OPTIDX" {
@@ -254,6 +256,136 @@ func TestWithTargetDate(t *testing.T) {
 	WithTargetDate(target)(p)
 	if !p.targetDate.Equal(target) {
 		t.Errorf("targetDate = %v, want %v", p.targetDate, target)
+	}
+}
+
+func TestParseIndicesCSV(t *testing.T) {
+	csv := `Index Name,Index Date,Open Index Value,High Index Value,Low Index Value,Closing Index Value,Points Change,Change(%),Volume,Turnover (Rs. Cr.),P/E,P/B,Div Yield
+Nifty 50,17-04-2026,22100.50,22500.75,22050.25,22400.60,150.10,0.67,500000000,25000.50,22.5,4.1,1.2
+Nifty Bank,17-04-2026,48500.00,49200.00,48300.00,49100.00,300.00,0.61,200000000,12000.00,18.3,3.5,0.8
+Nifty Financial Services,17-04-2026,22800.00,23100.00,22700.00,23000.00,120.00,0.52,100000000,8000.00,20.1,3.8,1.0
+Nifty IT,17-04-2026,35000.00,35500.00,34800.00,35200.00,200.00,0.57,50000000,3000.00,28.5,8.2,1.5
+`
+
+	fallback := date(2026, 4, 17)
+	rows, err := parseIndicesCSV(strings.NewReader(csv), fallback)
+	if err != nil {
+		t.Fatalf("parseIndicesCSV: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("expected 3 rows (filtered to known indices), got %d", len(rows))
+	}
+
+	nifty := rows[0]
+	if nifty.Symbol != models.UnderlyingNifty {
+		t.Errorf("symbol = %q, want %q", nifty.Symbol, models.UnderlyingNifty)
+	}
+	if nifty.Open != 22100.50 {
+		t.Errorf("open = %f, want 22100.50", nifty.Open)
+	}
+	if nifty.High != 22500.75 {
+		t.Errorf("high = %f, want 22500.75", nifty.High)
+	}
+	if nifty.Low != 22050.25 {
+		t.Errorf("low = %f, want 22050.25", nifty.Low)
+	}
+	if nifty.Close != 22400.60 {
+		t.Errorf("close = %f, want 22400.60", nifty.Close)
+	}
+	if nifty.Volume != 500000000 {
+		t.Errorf("volume = %d, want 500000000", nifty.Volume)
+	}
+
+	bank := rows[1]
+	if bank.Symbol != models.UnderlyingBankNifty {
+		t.Errorf("bank symbol = %q, want %q", bank.Symbol, models.UnderlyingBankNifty)
+	}
+
+	fin := rows[2]
+	if fin.Symbol != models.UnderlyingFinNifty {
+		t.Errorf("fin symbol = %q, want %q", fin.Symbol, models.UnderlyingFinNifty)
+	}
+}
+
+func TestParseIndicesCSV_MissingIndexNameCol(t *testing.T) {
+	csv := `Name,Date,Open,High,Low,Close
+Nifty 50,17-04-2026,22100,22500,22050,22400
+`
+	_, err := parseIndicesCSV(strings.NewReader(csv), date(2026, 4, 17))
+	if err == nil {
+		t.Fatal("expected error when Index Name column is missing")
+	}
+}
+
+func TestParseIndicesCSV_SkipsMalformedRows(t *testing.T) {
+	csv := `Index Name,Index Date,Open Index Value,High Index Value,Low Index Value,Closing Index Value,Volume
+Nifty 50,17-04-2026,22100.50,22500.75,22050.25,22400.60,500000
+Nifty Bank,17-04-2026,not_a_number,49200.00,48300.00,49100.00,200000
+`
+	rows, err := parseIndicesCSV(strings.NewReader(csv), date(2026, 4, 17))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Errorf("expected 1 valid row, got %d", len(rows))
+	}
+	if rows[0].Symbol != models.UnderlyingNifty {
+		t.Errorf("expected NIFTY row, got %q", rows[0].Symbol)
+	}
+}
+
+func TestParseIndicesCSV_UsesDateFromCSV(t *testing.T) {
+	csv := `Index Name,Index Date,Open Index Value,High Index Value,Low Index Value,Closing Index Value,Volume
+Nifty 50,15-04-2026,22100.50,22500.75,22050.25,22400.60,500000
+`
+	rows, err := parseIndicesCSV(strings.NewReader(csv), date(2026, 4, 17))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	want := date(2026, 4, 15)
+	if !rows[0].Date.Equal(want) {
+		t.Errorf("date = %v, want %v", rows[0].Date, want)
+	}
+}
+
+func TestIndexRowToInstrument(t *testing.T) {
+	row := indexRow{
+		Symbol: models.UnderlyingNifty,
+		Open:   22100,
+		High:   22500,
+		Low:    22050,
+		Close:  22400,
+		Volume: 500000,
+		Date:   date(2026, 4, 17),
+	}
+
+	inst := indexRowToInstrument(row)
+	if inst.Symbol != models.UnderlyingNifty {
+		t.Errorf("symbol = %q", inst.Symbol)
+	}
+	if inst.Exchange != models.ExchangeNSE {
+		t.Errorf("exchange = %q, want %q", inst.Exchange, models.ExchangeNSE)
+	}
+	if inst.InstrumentType != models.InstrumentTypeIndex {
+		t.Errorf("instrument type = %q, want %q", inst.InstrumentType, models.InstrumentTypeIndex)
+	}
+	if inst.Underlying == nil || *inst.Underlying != models.UnderlyingNifty {
+		t.Errorf("underlying = %v", inst.Underlying)
+	}
+	if inst.LotSize != indexLotSize {
+		t.Errorf("lot size = %d, want %d", inst.LotSize, indexLotSize)
+	}
+	if inst.Expiry != nil {
+		t.Errorf("index should have nil expiry, got %v", inst.Expiry)
+	}
+	if inst.Strike != nil {
+		t.Errorf("index should have nil strike, got %v", inst.Strike)
+	}
+	if inst.OptionType != nil {
+		t.Errorf("index should have nil option type, got %v", inst.OptionType)
 	}
 }
 
