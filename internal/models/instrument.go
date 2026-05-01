@@ -47,6 +47,8 @@ type InstrumentFilter struct {
 	Exchange       *string
 	InstrumentType *string
 	Underlying     *string
+	ExpiryFrom     *time.Time
+	ExpiryTo       *time.Time
 }
 
 // Instrument is the domain representation of a tradable contract.
