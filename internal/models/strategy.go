@@ -45,10 +45,11 @@ type Strategy struct {
 }
 
 const (
-	EntryConditionMACrossover = "MA_CROSSOVER"
-	EntryConditionSupertrend  = "SUPERTREND"
-	EntryConditionRSIOversold = "RSI_OVERSOLD"
-	EntryConditionMomentum    = "MOMENTUM"
+	EntryConditionMACrossover   = "MA_CROSSOVER"
+	EntryConditionSupertrend    = "SUPERTREND"
+	EntryConditionRSIOversold   = "RSI_OVERSOLD"
+	EntryConditionMomentum      = "MOMENTUM"
+	EntryConditionVWAPCrossover = "VWAP_CROSSOVER"
 )
 
 // ExpiryRule constants for when a futures contract rolls.

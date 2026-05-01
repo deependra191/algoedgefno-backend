@@ -50,6 +50,9 @@ func (m *mockBacktestRepo) ListByStrategy(_ context.Context, _ uuid.UUID) ([]mod
 func (m *mockBacktestRepo) LatestCompletedBySlug(_ context.Context, _ string) (*models.BacktestRun, error) {
 	return nil, models.ErrNotFound
 }
+func (m *mockBacktestRepo) ListAll(_ context.Context) ([]models.BacktestRun, error) {
+	return m.listResult, m.listErr
+}
 
 type mockBuiltinLookup struct {
 	strategies map[string]*models.BuiltinStrategy
@@ -195,7 +198,7 @@ func TestSubmit_StrategyNotFound(t *testing.T) {
 
 	req := defaultRequest()
 	req.StrategySlug = "nonexistent"
-	_, err := svc.Submit(context.Background(), req)
+	_, err := svc.Submit(context.Background(),req)
 	if !errors.Is(err, ErrStrategyNotFound) {
 		t.Fatalf("expected ErrStrategyNotFound, got %v", err)
 	}
@@ -210,7 +213,7 @@ func TestSubmit_InstrumentNotFound(t *testing.T) {
 		&mockEngine{},
 	)
 
-	_, err := svc.Submit(context.Background(), defaultRequest())
+	_, err := svc.Submit(context.Background(),defaultRequest())
 	if !errors.Is(err, ErrNoInstrument) {
 		t.Fatalf("expected ErrNoInstrument, got %v", err)
 	}
@@ -225,7 +228,7 @@ func TestSubmit_CreateFails(t *testing.T) {
 		&mockEngine{},
 	)
 
-	_, err := svc.Submit(context.Background(), defaultRequest())
+	_, err := svc.Submit(context.Background(),defaultRequest())
 	if err == nil {
 		t.Fatal("expected error on create failure")
 	}
@@ -241,7 +244,7 @@ func TestSubmit_NoCandleData(t *testing.T) {
 		&mockEngine{},
 	)
 
-	_, err := svc.Submit(context.Background(), defaultRequest())
+	_, err := svc.Submit(context.Background(),defaultRequest())
 	if !errors.Is(err, ErrNoCandleData) {
 		t.Fatalf("expected ErrNoCandleData, got %v", err)
 	}
@@ -263,7 +266,7 @@ func TestSubmit_EngineError(t *testing.T) {
 		&mockEngine{err: errors.New("engine failure")},
 	)
 
-	_, err := svc.Submit(context.Background(), defaultRequest())
+	_, err := svc.Submit(context.Background(),defaultRequest())
 	if err == nil {
 		t.Fatal("expected error from engine failure")
 	}
