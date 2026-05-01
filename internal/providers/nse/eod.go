@@ -125,6 +125,13 @@ func (p *EODProvider) SyncInstruments(ctx context.Context) (int, error) {
 
 	instruments := make([]models.Instrument, 0, len(rows))
 	underlyings := make(map[string]bool, len(rows))
+	// Track futures underlyings so we can create continuous instruments.
+	type futuresInfo struct {
+		contType string
+		lotSize  int
+	}
+	futuresUnderlyings := make(map[string]futuresInfo)
+
 	for _, row := range rows {
 		inst, ok := bhavRowToInstrument(row)
 		if !ok {
@@ -135,6 +142,24 @@ func (p *EODProvider) SyncInstruments(ctx context.Context) (int, error) {
 		if row.Underlying != "" {
 			underlyings[row.Underlying] = true
 		}
+		if contType, ok := continuousFuturesType(inst.InstrumentType); ok {
+			if _, exists := futuresUnderlyings[row.Underlying]; !exists && row.Underlying != "" {
+				futuresUnderlyings[row.Underlying] = futuresInfo{contType: contType, lotSize: inst.LotSize}
+			}
+		}
+	}
+
+	for underlying, fi := range futuresUnderlyings {
+		u := underlying
+		symbol := underlying + models.ContinuousFuturesSuffix
+		instruments = append(instruments, models.Instrument{
+			Symbol:         symbol,
+			Name:           symbol,
+			Exchange:       models.ExchangeNFO,
+			InstrumentType: fi.contType,
+			Underlying:     &u,
+			LotSize:        fi.lotSize,
+		})
 	}
 
 	indexRows, err := p.fetchLatestIndicesBhavcopy(ctx)
@@ -191,6 +216,12 @@ func (p *EODProvider) SyncCandles(ctx context.Context) (int, error) {
 	}
 
 	candles := make([]models.Candle, 0, len(rows))
+	type nearMonthCandidate struct {
+		expiry time.Time
+		candle models.Candle
+	}
+	nearMonth := make(map[string]*nearMonthCandidate)
+
 	for _, row := range rows {
 		id, ok := instrMap[instrumentKey{Symbol: row.Symbol, Exchange: models.ExchangeNFO}]
 		if !ok {
@@ -207,6 +238,43 @@ func (p *EODProvider) SyncCandles(ctx context.Context) (int, error) {
 			Volume:       row.Volume,
 			Provider:     p.Name(),
 		})
+
+		instrType, isFO := foVendorToInstrumentType(row.InstrumentType)
+		if !isFO || row.Underlying == "" || row.Expiry.IsZero() {
+			continue
+		}
+		if _, isFut := continuousFuturesType(instrType); !isFut {
+			continue
+		}
+		if row.Expiry.Before(row.Date) {
+			continue
+		}
+		existing, seen := nearMonth[row.Underlying]
+		if !seen || row.Expiry.Before(existing.expiry) {
+			contSymbol := row.Underlying + models.ContinuousFuturesSuffix
+			contID, ok := instrMap[instrumentKey{Symbol: contSymbol, Exchange: models.ExchangeNFO}]
+			if !ok {
+				continue
+			}
+			nearMonth[row.Underlying] = &nearMonthCandidate{
+				expiry: row.Expiry,
+				candle: models.Candle{
+					InstrumentID: contID,
+					Timestamp:    row.Date,
+					Interval:     eodInterval,
+					Open:         row.Open,
+					High:         row.High,
+					Low:          row.Low,
+					Close:        row.Close,
+					Volume:       row.Volume,
+					Provider:     p.Name(),
+				},
+			}
+		}
+	}
+
+	for _, nm := range nearMonth {
+		candles = append(candles, nm.candle)
 	}
 
 	indexRows, err := p.fetchLatestIndicesBhavcopy(ctx)

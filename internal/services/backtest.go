@@ -63,12 +63,10 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 		return nil, ErrStrategyNotFound
 	}
 
-	contracts, err := s.resolveContracts(ctx, builtin.InstrumentType, req.Underlying, req.From, req.To)
+	inst, err := s.resolveInstrument(ctx, builtin.InstrumentType, req.Underlying)
 	if err != nil {
 		return nil, err
 	}
-
-	inst := &contracts[0]
 
 	engineStrategy := &models.Strategy{
 		Name:               builtin.Name,
@@ -89,7 +87,12 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 		return nil, err
 	}
 
-	candles, err := s.stitchCandles(ctx, contracts, req.From, req.To, builtin.CandleInterval)
+	candles, err := s.candleStore.Query(ctx, models.CandleFilter{
+		InstrumentID: inst.ID,
+		From:         req.From,
+		To:           req.To,
+		Interval:     builtin.CandleInterval,
+	})
 	if err != nil {
 		return s.failRun(ctx, run, fmt.Errorf("failed to fetch candle data: %w", err))
 	}
@@ -115,82 +118,29 @@ func (s *BacktestService) ListAll(ctx context.Context) ([]models.BacktestRun, er
 	return s.backtestStore.ListAll(ctx)
 }
 
-// isFuturesType returns true for instrument types that represent monthly futures contracts.
-func isFuturesType(instrumentType string) bool {
-	return instrumentType == models.InstrumentTypeFuturesIndex ||
-		instrumentType == models.InstrumentTypeFuturesStock
-}
+// resolveInstrument finds the instrument matching the strategy's type and user's underlying.
+// For futures types, it resolves to the continuous near-month instrument created during sync
+// (e.g. FUTIDX → FUTIDX_CONT), so the backtest gets a single pre-stitched candle series.
+func (s *BacktestService) resolveInstrument(ctx context.Context, instrumentType, underlying string) (*models.Instrument, error) {
+	lookupType := instrumentType
+	switch instrumentType {
+	case models.InstrumentTypeFuturesIndex:
+		lookupType = models.InstrumentTypeFuturesIndexCont
+	case models.InstrumentTypeFuturesStock:
+		lookupType = models.InstrumentTypeFuturesStockCont
+	}
 
-// resolveContracts returns the ordered sequence of near-month contracts covering [from, to].
-// For non-futures types it returns a single-element slice (existing behaviour).
-// For futures types it sets only ExpiryFrom — it intentionally does NOT set ExpiryTo
-// because the last contract in the range will have an expiry beyond `to` (e.g. if the
-// user requests up to 2024-03-15, the contract expiring 2024-03-28 must still be
-// included). The stitchCandles loop handles the upper boundary via min(to, contract.Expiry).
-func (s *BacktestService) resolveContracts(ctx context.Context, instrumentType, underlying string, from, to time.Time) ([]models.Instrument, error) {
-	filter := models.InstrumentFilter{
-		InstrumentType: &instrumentType,
+	instruments, err := s.instrumentStore.List(ctx, models.InstrumentFilter{
+		InstrumentType: &lookupType,
 		Underlying:     &underlying,
-	}
-
-	if isFuturesType(instrumentType) {
-		filter.ExpiryFrom = &from
-	}
-
-	instruments, err := s.instrumentStore.List(ctx, filter)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve instrument: %w", err)
 	}
 	if len(instruments) == 0 {
 		return nil, ErrNoInstrument
 	}
-	return instruments, nil
-}
-
-// stitchCandles fetches candles from each contract for only the period it was
-// the active near-month contract, then concatenates them in chronological order.
-// For a single contract (non-futures), this is equivalent to a simple query.
-func (s *BacktestService) stitchCandles(ctx context.Context, contracts []models.Instrument, from, to time.Time, interval string) ([]models.Candle, error) {
-	if len(contracts) == 1 {
-		return s.candleStore.Query(ctx, models.CandleFilter{
-			InstrumentID: contracts[0].ID,
-			From:         from,
-			To:           to,
-			Interval:     interval,
-		})
-	}
-
-	var allCandles []models.Candle
-	for i, contract := range contracts {
-		segFrom := from
-		if i > 0 && contracts[i-1].Expiry != nil {
-			dayAfterPrevExpiry := contracts[i-1].Expiry.AddDate(0, 0, 1)
-			if dayAfterPrevExpiry.After(segFrom) {
-				segFrom = dayAfterPrevExpiry
-			}
-		}
-
-		segTo := to
-		if contract.Expiry != nil && contract.Expiry.Before(to) {
-			segTo = *contract.Expiry
-		}
-
-		if segFrom.After(segTo) {
-			continue
-		}
-
-		candles, err := s.candleStore.Query(ctx, models.CandleFilter{
-			InstrumentID: contract.ID,
-			From:         segFrom,
-			To:           segTo,
-			Interval:     interval,
-		})
-		if err != nil {
-			return nil, err
-		}
-		allCandles = append(allCandles, candles...)
-	}
-	return allCandles, nil
+	return &instruments[0], nil
 }
 
 // createAndStartRun builds the BacktestRun record, persists it, and transitions
