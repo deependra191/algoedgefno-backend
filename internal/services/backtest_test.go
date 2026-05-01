@@ -138,7 +138,7 @@ func emptyLookup() *mockBuiltinLookup {
 
 func defaultInstruments() []models.Instrument {
 	return []models.Instrument{
-		{ID: uuid.New(), Symbol: "NIFTY", LotSize: 50},
+		{ID: uuid.New(), Symbol: "NIFTY" + models.ContinuousFuturesSuffix, LotSize: 50},
 	}
 }
 
@@ -340,8 +340,8 @@ func TestSubmit_Success_MetricsPopulated(t *testing.T) {
 	if run.LossCount == nil || *run.LossCount != engineResult.LossCount {
 		t.Errorf("expected LossCount %d, got %v", engineResult.LossCount, run.LossCount)
 	}
-	if run.InstrumentToken != "NIFTY" {
-		t.Errorf("expected InstrumentToken NIFTY, got %s", run.InstrumentToken)
+	if run.InstrumentToken != "NIFTY"+models.ContinuousFuturesSuffix {
+		t.Errorf("expected InstrumentToken %s, got %s", "NIFTY"+models.ContinuousFuturesSuffix, run.InstrumentToken)
 	}
 }
 

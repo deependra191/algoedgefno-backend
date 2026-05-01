@@ -115,16 +115,6 @@ func (s *InstrumentStore) List(ctx context.Context, filter models.InstrumentFilt
 		args = append(args, *filter.Underlying)
 		idx++
 	}
-	if filter.ExpiryFrom != nil {
-		conds = append(conds, fmt.Sprintf("expiry >= $%d", idx))
-		args = append(args, *filter.ExpiryFrom)
-		idx++
-	}
-	if filter.ExpiryTo != nil {
-		conds = append(conds, fmt.Sprintf("expiry <= $%d", idx))
-		args = append(args, *filter.ExpiryTo)
-		idx++
-	}
 	_ = idx
 	if len(conds) > 0 {
 		q += " WHERE " + strings.Join(conds, " AND ")
@@ -132,7 +122,9 @@ func (s *InstrumentStore) List(ctx context.Context, filter models.InstrumentFilt
 
 	isFutures := filter.InstrumentType != nil &&
 		(*filter.InstrumentType == models.InstrumentTypeFuturesIndex ||
-			*filter.InstrumentType == models.InstrumentTypeFuturesStock)
+			*filter.InstrumentType == models.InstrumentTypeFuturesStock ||
+			*filter.InstrumentType == models.InstrumentTypeFuturesIndexCont ||
+			*filter.InstrumentType == models.InstrumentTypeFuturesStockCont)
 	if isFutures {
 		q += " ORDER BY expiry ASC"
 	} else {

@@ -254,6 +254,7 @@ func (p *EODProvider) SyncCandles(ctx context.Context) (int, error) {
 			contSymbol := row.Underlying + models.ContinuousFuturesSuffix
 			contID, ok := instrMap[instrumentKey{Symbol: contSymbol, Exchange: models.ExchangeNFO}]
 			if !ok {
+				log.Printf("%s: continuous instrument %q not found in instrMap; run SyncInstruments first", ProviderName, contSymbol)
 				continue
 			}
 			nearMonth[row.Underlying] = &nearMonthCandidate{
