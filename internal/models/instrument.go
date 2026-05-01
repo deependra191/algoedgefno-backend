@@ -7,11 +7,16 @@ import (
 	"github.com/google/uuid"
 )
 
-// InstrumentType constants for NSE instrument classification codes.
+// InstrumentType constants are our internal classification codes for tradable instruments.
+// These are owned by us — vendor CSV codes are mapped to these during ingestion and never
+// stored directly.
 const (
-	InstrumentTypeFuturesIndex = "FUTIDX"
 	InstrumentTypeIndex        = "INDEX"
 	InstrumentTypeEquity       = "EQ"
+	InstrumentTypeFuturesIndex = "FUTIDX"
+	InstrumentTypeFuturesStock = "FUTSTK"
+	InstrumentTypeOptionsIndex = "OPTIDX"
+	InstrumentTypeOptionsStock = "OPTSTK"
 )
 
 // Exchange constants for NSE market segments.

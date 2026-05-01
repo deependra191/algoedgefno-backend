@@ -43,6 +43,19 @@ const (
 	csvColTimestamp      = "TmStmp"
 	csvColLotSize        = "NewBrdLotQty"
 
+	// Vendor instrument type codes — new NSE bhavcopy format (FinInstrmTp column).
+	foVendorIDF = "IDF" // index futures
+	foVendorIDO = "IDO" // index options
+	foVendorSTF = "STF" // stock futures
+	foVendorSTO = "STO" // stock options
+
+	// Vendor instrument type codes — legacy NSE bhavcopy format (INSTRUMENT column).
+	// These happen to match our internal codes, so both directions resolve correctly.
+	foVendorFUTIDX = "FUTIDX"
+	foVendorFUTSTK = "FUTSTK"
+	foVendorOPTIDX = "OPTIDX"
+	foVendorOPTSTK = "OPTSTK"
+
 	// Fallback column names from the older NSE bhavcopy format.
 	csvColInstrumentTypeLegacy = "INSTRUMENT"
 	csvColExpiryLegacy         = "EXPIRY_DT"
@@ -293,9 +306,31 @@ func parseRow(rec []string, cols colMap, fallbackDate time.Time) (bhavRow, error
 	}, nil
 }
 
+// foVendorToInstrumentType maps NSE vendor instrument type codes to our internal constants.
+// Returns ("", false) for unrecognised codes so callers can skip unknown rows.
+func foVendorToInstrumentType(vendorCode string) (string, bool) {
+	switch vendorCode {
+	case foVendorIDF, foVendorFUTIDX:
+		return models.InstrumentTypeFuturesIndex, true
+	case foVendorSTF, foVendorFUTSTK:
+		return models.InstrumentTypeFuturesStock, true
+	case foVendorIDO, foVendorOPTIDX:
+		return models.InstrumentTypeOptionsIndex, true
+	case foVendorSTO, foVendorOPTSTK:
+		return models.InstrumentTypeOptionsStock, true
+	default:
+		return "", false
+	}
+}
+
 // bhavRowToInstrument maps a parsed bhavcopy row to a domain Instrument.
+// Returns (zero value, false) when the vendor instrument type code is unrecognised.
 // LotSize defaults to 1 when the CSV value is absent or zero.
-func bhavRowToInstrument(row bhavRow) models.Instrument {
+func bhavRowToInstrument(row bhavRow) (models.Instrument, bool) {
+	instrType, ok := foVendorToInstrumentType(row.InstrumentType)
+	if !ok {
+		return models.Instrument{}, false
+	}
 	lotSize := row.LotSize
 	if lotSize <= 0 {
 		lotSize = 1
@@ -304,7 +339,7 @@ func bhavRowToInstrument(row bhavRow) models.Instrument {
 		Symbol:         row.Symbol,
 		Name:           row.Symbol,
 		Exchange:       models.ExchangeNFO,
-		InstrumentType: row.InstrumentType,
+		InstrumentType: instrType,
 		LotSize:        lotSize,
 	}
 	if row.Underlying != "" {
@@ -319,5 +354,5 @@ func bhavRowToInstrument(row bhavRow) models.Instrument {
 	if row.OptionType != "" && row.OptionType != "-" {
 		inst.OptionType = &row.OptionType
 	}
-	return inst
+	return inst, true
 }

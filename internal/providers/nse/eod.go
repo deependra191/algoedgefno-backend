@@ -126,7 +126,12 @@ func (p *EODProvider) SyncInstruments(ctx context.Context) (int, error) {
 	instruments := make([]models.Instrument, 0, len(rows))
 	underlyings := make(map[string]bool, len(rows))
 	for _, row := range rows {
-		instruments = append(instruments, bhavRowToInstrument(row))
+		inst, ok := bhavRowToInstrument(row)
+		if !ok {
+			log.Printf("%s: skipping row with unrecognised instrument type %q", ProviderName, row.InstrumentType)
+			continue
+		}
+		instruments = append(instruments, inst)
 		if row.Underlying != "" {
 			underlyings[row.Underlying] = true
 		}

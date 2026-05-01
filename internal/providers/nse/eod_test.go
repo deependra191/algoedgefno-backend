@@ -165,7 +165,10 @@ func TestBhavRowToInstrument(t *testing.T) {
 		LotSize:        75,
 	}
 
-	inst := bhavRowToInstrument(row)
+	inst, ok := bhavRowToInstrument(row)
+	if !ok {
+		t.Fatal("bhavRowToInstrument returned ok=false for known instrument type")
+	}
 	if inst.Symbol != "NIFTY26APR22500CE" {
 		t.Errorf("symbol = %q", inst.Symbol)
 	}
@@ -202,7 +205,10 @@ func TestBhavRowToInstrument_Futures(t *testing.T) {
 		OptionType:     "-",
 	}
 
-	inst := bhavRowToInstrument(row)
+	inst, ok := bhavRowToInstrument(row)
+	if !ok {
+		t.Fatal("bhavRowToInstrument returned ok=false for known instrument type")
+	}
 	if inst.Strike != nil {
 		t.Errorf("futures should have nil strike, got %v", inst.Strike)
 	}
