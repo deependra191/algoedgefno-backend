@@ -42,6 +42,7 @@ type strategyListItemResponse struct {
 type lastBacktestSummaryResponse struct {
 	ID         string  `json:"id"`
 	ReturnPct  float64 `json:"returnPct"`
+	WinRate    int     `json:"winRate"`
 	TradeCount int     `json:"tradeCount"`
 	RanAt      string  `json:"ranAt"`
 }
@@ -141,6 +142,7 @@ func toLastBacktestSummary(run *models.BacktestRun) *lastBacktestSummaryResponse
 	return &lastBacktestSummaryResponse{
 		ID:         run.ID.String(),
 		ReturnPct:  computeReturnPct(run),
+		WinRate:    computeWinRate(run),
 		TradeCount: derefInt(run.TotalTrades),
 		RanAt:      formatCompletedAt(run.CompletedAt),
 	}
