@@ -113,6 +113,11 @@ func (s *BacktestService) GetByID(ctx context.Context, id uuid.UUID) (*models.Ba
 	return s.backtestStore.GetByID(ctx, id)
 }
 
+// ListAll returns all backtest runs ordered newest first.
+func (s *BacktestService) ListAll(ctx context.Context) ([]models.BacktestRun, error) {
+	return s.backtestStore.ListAll(ctx)
+}
+
 // resolveInstrument finds the first instrument matching the strategy's type and user's underlying.
 func (s *BacktestService) resolveInstrument(ctx context.Context, instrumentType, underlying string) (*models.Instrument, error) {
 	instruments, err := s.instrumentStore.List(ctx, models.InstrumentFilter{

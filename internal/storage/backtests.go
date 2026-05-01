@@ -112,6 +112,30 @@ func (s *BacktestStore) ListByStrategy(ctx context.Context, strategyID uuid.UUID
 	return result, rows.Err()
 }
 
+// ListAll returns all backtest runs ordered by created_at descending.
+func (s *BacktestStore) ListAll(ctx context.Context) ([]models.BacktestRun, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, strategy_id, instrument_token, from_ts, to_ts, candle_interval, status,
+		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
+		       trades_json, error_message, created_at, completed_at,
+		       strategy_slug, capital, lots, underlying
+		FROM backtest_runs ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []models.BacktestRun
+	for rows.Next() {
+		ent, err := scanBacktestRunRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *toBacktestModel(ent))
+	}
+	return result, rows.Err()
+}
+
 // LatestCompletedBySlug returns the most recent COMPLETED backtest for a built-in strategy slug.
 func (s *BacktestStore) LatestCompletedBySlug(ctx context.Context, slug string) (*models.BacktestRun, error) {
 	row := s.pool.QueryRow(ctx, `
@@ -131,4 +155,3 @@ func (s *BacktestStore) LatestCompletedBySlug(ctx context.Context, slug string) 
 	}
 	return toBacktestModel(ent), nil
 }
-

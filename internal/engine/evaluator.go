@@ -2,19 +2,21 @@ package engine
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
 const (
-	defaultShortMA        = 9
-	defaultLongMA         = 21
-	defaultSupertrendPer  = 10
-	defaultSupertrendMult = 3.0
-	defaultRSIPeriod      = 14
-	defaultRSIOversold    = 30.0
-	defaultRSIOverbought  = 70.0
+	defaultShortMA          = 9
+	defaultLongMA           = 21
+	defaultSupertrendPer    = 10
+	defaultSupertrendMult   = 3.0
+	defaultRSIPeriod        = 14
+	defaultRSIOversold      = 30.0
+	defaultRSIOverbought    = 70.0
 	defaultMomentumLookback = 20
+	defaultVWAPPeriod       = 20
 )
 
 // Evaluate generates entry signals for the given strategy by dispatching to the
@@ -34,6 +36,8 @@ func Evaluate(strategy *models.Strategy, candles []models.Candle) ([]Signal, err
 		return evaluateRSI(candles)
 	case models.EntryConditionMomentum:
 		return evaluateMomentum(candles)
+	case models.EntryConditionVWAPCrossover:
+		return evaluateVWAPCrossover(candles)
 	default:
 		return nil, fmt.Errorf("unknown entry condition type: %s", strategy.EntryConditionType)
 	}
@@ -160,6 +164,38 @@ func evaluateMomentum(candles []models.Candle) ([]Signal, error) {
 				})
 			}
 			inBreakout = false
+		}
+	}
+	return signals, nil
+}
+
+// evaluateVWAPCrossover emits a BUY when the close crosses above the rolling VWAP
+// and a SELL when it crosses below. Uses a 20-period rolling VWAP.
+func evaluateVWAPCrossover(candles []models.Candle) ([]Signal, error) {
+	vwap := RollingVWAP(candles, defaultVWAPPeriod)
+
+	var signals []Signal
+	for i := defaultVWAPPeriod; i < len(candles); i++ {
+		if math.IsNaN(vwap[i]) || math.IsNaN(vwap[i-1]) {
+			continue
+		}
+		prevAbove := candles[i-1].Close > vwap[i-1]
+		currAbove := candles[i].Close > vwap[i]
+
+		if currAbove && !prevAbove {
+			signals = append(signals, Signal{
+				Timestamp: candles[i].Timestamp,
+				Side:      models.OrderSideBuy,
+				Price:     candles[i].Close,
+				Reason:    "Close crossed above VWAP",
+			})
+		} else if !currAbove && prevAbove {
+			signals = append(signals, Signal{
+				Timestamp: candles[i].Timestamp,
+				Side:      models.OrderSideSell,
+				Price:     candles[i].Close,
+				Reason:    "Close crossed below VWAP",
+			})
 		}
 	}
 	return signals, nil

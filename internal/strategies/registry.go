@@ -20,6 +20,7 @@ func NewRegistry() *Registry {
 		strategies: make(map[string]*models.BuiltinStrategy),
 	}
 	r.register(MACrossover())
+	r.register(VWAPCrossover())
 	return r
 }
 

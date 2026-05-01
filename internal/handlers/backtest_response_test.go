@@ -121,13 +121,14 @@ func TestToBacktestTradeResponses_InvalidJSON(t *testing.T) {
 func TestBacktestSubmitRequestJSONShape(t *testing.T) {
 	resp := backtestSubmitRequest{
 		StrategyID: "ma_crossover",
-		Underlying: "NIFTY",
-		From:       "2025-01-01",
-		To:         "2025-06-30",
-		Lots:       2,
-		Capital:    200000,
+		Inputs: backtestInputsRequest{
+			Underlying: "NIFTY",
+			DateRange:  backtestDateRange{From: "2025-01-01", To: "2025-06-30"},
+			Lots:       2,
+			Capital:    200000,
+		},
 	}
 	keys := jsonKeys(t, resp)
-	want := []string{"capital", "from", "lots", "strategyId", "to", "underlying"}
+	want := []string{"inputs", "strategyId"}
 	assertKeysEqual(t, keys, want)
 }
