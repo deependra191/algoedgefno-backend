@@ -63,11 +63,12 @@ func TestLastBacktestSummaryResponseJSONShape(t *testing.T) {
 	resp := lastBacktestSummaryResponse{
 		ID:         "abc",
 		ReturnPct:  11.2,
+		WinRate:    49,
 		TradeCount: 22,
 		RanAt:      "2025-04-20T10:30:00Z",
 	}
 	keys := jsonKeys(t, resp)
-	want := []string{"id", "ranAt", "returnPct", "tradeCount"}
+	want := []string{"id", "ranAt", "returnPct", "tradeCount", "winRate"}
 	assertKeysEqual(t, keys, want)
 }
 

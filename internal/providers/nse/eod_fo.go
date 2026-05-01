@@ -306,6 +306,19 @@ func parseRow(rec []string, cols colMap, fallbackDate time.Time) (bhavRow, error
 	}, nil
 }
 
+// continuousFuturesType maps a regular futures instrument type to its continuous counterpart.
+// Returns ("", false) for non-futures types.
+func continuousFuturesType(instrumentType string) (string, bool) {
+	switch instrumentType {
+	case models.InstrumentTypeFuturesIndex:
+		return models.InstrumentTypeFuturesIndexCont, true
+	case models.InstrumentTypeFuturesStock:
+		return models.InstrumentTypeFuturesStockCont, true
+	default:
+		return "", false
+	}
+}
+
 // foVendorToInstrumentType maps NSE vendor instrument type codes to our internal constants.
 // Returns ("", false) for unrecognised codes so callers can skip unknown rows.
 func foVendorToInstrumentType(vendorCode string) (string, bool) {

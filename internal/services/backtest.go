@@ -118,10 +118,20 @@ func (s *BacktestService) ListAll(ctx context.Context) ([]models.BacktestRun, er
 	return s.backtestStore.ListAll(ctx)
 }
 
-// resolveInstrument finds the first instrument matching the strategy's type and user's underlying.
+// resolveInstrument finds the instrument matching the strategy's type and user's underlying.
+// For futures types, it resolves to the continuous near-month instrument created during sync
+// (e.g. FUTIDX → FUTIDX_CONT), so the backtest gets a single pre-stitched candle series.
 func (s *BacktestService) resolveInstrument(ctx context.Context, instrumentType, underlying string) (*models.Instrument, error) {
+	lookupType := instrumentType
+	switch instrumentType {
+	case models.InstrumentTypeFuturesIndex:
+		lookupType = models.InstrumentTypeFuturesIndexCont
+	case models.InstrumentTypeFuturesStock:
+		lookupType = models.InstrumentTypeFuturesStockCont
+	}
+
 	instruments, err := s.instrumentStore.List(ctx, models.InstrumentFilter{
-		InstrumentType: &instrumentType,
+		InstrumentType: &lookupType,
 		Underlying:     &underlying,
 	})
 	if err != nil {
