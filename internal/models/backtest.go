@@ -59,12 +59,17 @@ type BacktestRepository interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*BacktestRun, error)
 	// ListByStrategy returns all runs for a strategy, newest first.
 	ListByStrategy(ctx context.Context, strategyID uuid.UUID) ([]BacktestRun, error)
+	// LatestCompletedBySlug returns the most recent COMPLETED backtest for a built-in strategy slug.
+	// Returns models.ErrNotFound if no completed run exists.
+	LatestCompletedBySlug(ctx context.Context, slug string) (*BacktestRun, error)
+	// ListAll returns all backtest runs ordered by created_at descending.
+	ListAll(ctx context.Context) ([]BacktestRun, error)
 }
 
 // BacktestRun is the domain representation of a single backtest execution.
 type BacktestRun struct {
 	ID              uuid.UUID
-	StrategyID      uuid.UUID
+	StrategyID      *uuid.UUID
 	InstrumentToken string
 	FromTs          time.Time
 	ToTs            time.Time
@@ -79,6 +84,10 @@ type BacktestRun struct {
 	ErrorMessage    *string
 	CreatedAt       time.Time
 	CompletedAt     *time.Time
+	StrategySlug    *string
+	Capital         *float64
+	Lots            *int
+	Underlying      *string
 }
 
 const (

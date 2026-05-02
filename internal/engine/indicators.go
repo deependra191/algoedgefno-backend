@@ -240,6 +240,62 @@ func Supertrend(candles []models.Candle, period int, multiplier float64) ([]floa
 	return st, dir
 }
 
+// RollingVWAP returns a slice of rolling VWAP values aligned to candles.
+// VWAP = Σ(TypicalPrice × Volume) / Σ(Volume) over the lookback window,
+// where TypicalPrice = (High + Low + Close) / 3.
+// The first (period-1) values are NaN.
+func RollingVWAP(candles []models.Candle, period int) []float64 {
+	n := len(candles)
+	if period <= 0 || n == 0 {
+		return nanSlice(n)
+	}
+
+	out := make([]float64, n)
+	for i := range period - 1 {
+		if i < n {
+			out[i] = math.NaN()
+		}
+	}
+
+	if period > n {
+		return out
+	}
+
+	sumTPV := 0.0
+	sumVol := 0.0
+	for i := range period {
+		tp := (candles[i].High + candles[i].Low + candles[i].Close) / 3
+		vol := float64(candles[i].Volume)
+		sumTPV += tp * vol
+		sumVol += vol
+	}
+	if sumVol > 0 {
+		out[period-1] = sumTPV / sumVol
+	} else {
+		out[period-1] = math.NaN()
+	}
+
+	for i := period; i < n; i++ {
+		prevTP := (candles[i-period].High + candles[i-period].Low + candles[i-period].Close) / 3
+		prevVol := float64(candles[i-period].Volume)
+		sumTPV -= prevTP * prevVol
+		sumVol -= prevVol
+
+		tp := (candles[i].High + candles[i].Low + candles[i].Close) / 3
+		vol := float64(candles[i].Volume)
+		sumTPV += tp * vol
+		sumVol += vol
+
+		if sumVol > 0 {
+			out[i] = sumTPV / sumVol
+		} else {
+			out[i] = math.NaN()
+		}
+	}
+
+	return out
+}
+
 // nanSlice returns a length-n slice filled with NaN. Used to mark positions
 // where an indicator has insufficient data rather than returning a misleading zero.
 func nanSlice(n int) []float64 {

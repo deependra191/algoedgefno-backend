@@ -2,12 +2,16 @@ package storage
 
 import (
 	"context"
+	"errors"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
+
+const defaultListLimit = 100
 
 var _ models.BacktestRepository = (*BacktestStore)(nil)
 
@@ -26,10 +30,12 @@ func (s *BacktestStore) Create(ctx context.Context, run *models.BacktestRun) err
 	ent := toBacktestEntity(run)
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO backtest_runs
-			(id, strategy_id, instrument_token, from_ts, to_ts, candle_interval, status, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
-		ent.ID, ent.StrategyID, ent.InstrumentToken,
+			(id, strategy_id, strategy_slug, instrument_token, from_ts, to_ts,
+			 candle_interval, status, capital, lots, underlying, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
+		ent.ID, ent.StrategyID, ent.StrategySlug, ent.InstrumentToken,
 		ent.FromTs, ent.ToTs, ent.CandleInterval, ent.Status,
+		ent.Capital, ent.Lots, ent.Underlying,
 	)
 	return err
 }
@@ -72,9 +78,13 @@ func (s *BacktestStore) GetByID(ctx context.Context, id uuid.UUID) (*models.Back
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, strategy_id, instrument_token, from_ts, to_ts, candle_interval, status,
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
-		       trades_json, error_message, created_at, completed_at
+		       trades_json, error_message, created_at, completed_at,
+		       strategy_slug, capital, lots, underlying
 		FROM backtest_runs WHERE id = $1`, id)
 	ent, err := scanBacktestRun(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, models.ErrNotFound
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +95,8 @@ func (s *BacktestStore) ListByStrategy(ctx context.Context, strategyID uuid.UUID
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, strategy_id, instrument_token, from_ts, to_ts, candle_interval, status,
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
-		       trades_json, error_message, created_at, completed_at
+		       trades_json, error_message, created_at, completed_at,
+		       strategy_slug, capital, lots, underlying
 		FROM backtest_runs WHERE strategy_id = $1 ORDER BY created_at DESC`, strategyID)
 	if err != nil {
 		return nil, err
@@ -103,3 +114,46 @@ func (s *BacktestStore) ListByStrategy(ctx context.Context, strategyID uuid.UUID
 	return result, rows.Err()
 }
 
+// ListAll returns the most recent backtest runs, capped at 100 rows.
+func (s *BacktestStore) ListAll(ctx context.Context) ([]models.BacktestRun, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, strategy_id, instrument_token, from_ts, to_ts, candle_interval, status,
+		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
+		       trades_json, error_message, created_at, completed_at,
+		       strategy_slug, capital, lots, underlying
+		FROM backtest_runs ORDER BY created_at DESC LIMIT $1`, defaultListLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []models.BacktestRun
+	for rows.Next() {
+		ent, err := scanBacktestRunRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *toBacktestModel(ent))
+	}
+	return result, rows.Err()
+}
+
+// LatestCompletedBySlug returns the most recent COMPLETED backtest for a built-in strategy slug.
+func (s *BacktestStore) LatestCompletedBySlug(ctx context.Context, slug string) (*models.BacktestRun, error) {
+	row := s.pool.QueryRow(ctx, `
+		SELECT id, strategy_id, instrument_token, from_ts, to_ts, candle_interval, status,
+		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
+		       trades_json, error_message, created_at, completed_at,
+		       strategy_slug, capital, lots, underlying
+		FROM backtest_runs
+		WHERE strategy_slug = $1 AND status = $2
+		ORDER BY created_at DESC LIMIT 1`, slug, models.BacktestCompleted)
+	ent, err := scanBacktestRun(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, models.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return toBacktestModel(ent), nil
+}

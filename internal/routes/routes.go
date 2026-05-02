@@ -2,11 +2,13 @@ package routes
 
 import (
 	"github.com/deependra191/algoedgefno-backend/internal/config"
+	"github.com/deependra191/algoedgefno-backend/internal/engine"
 	"github.com/deependra191/algoedgefno-backend/internal/handlers"
 	"github.com/deependra191/algoedgefno-backend/internal/middleware"
 	"github.com/deependra191/algoedgefno-backend/internal/providers"
 	"github.com/deependra191/algoedgefno-backend/internal/services"
 	"github.com/deependra191/algoedgefno-backend/internal/storage"
+	"github.com/deependra191/algoedgefno-backend/internal/strategies"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -15,6 +17,17 @@ func Register(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, registry *p
 	userRepo := storage.NewUserStore(pool)
 	authSvc := services.NewAuthService(userRepo, cfg.JWTSecret)
 	authHandler := handlers.NewAuthHandler(authSvc)
+
+	backtestStore := storage.NewBacktestStore(pool)
+	candleStore := storage.NewCandleStore(pool)
+	instrumentStore := storage.NewInstrumentStore(pool)
+	builtinRegistry := strategies.NewRegistry()
+
+	strategySvc := services.NewStrategyService(builtinRegistry, backtestStore, candleStore)
+	backtestSvc := services.NewBacktestService(backtestStore, builtinRegistry, candleStore, instrumentStore, engine.NewBacktester())
+
+	strategyHandler := handlers.NewStrategyHandler(strategySvc)
+	backtestHandler := handlers.NewBacktestHandler(backtestSvc)
 
 	r.GET("/health", handlers.Health)
 
@@ -30,8 +43,15 @@ func Register(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, registry *p
 		protected.Use(middleware.Auth(cfg.AppSecretToken, authSvc))
 		{
 			protected.GET("/config/app", handlers.AppConfig)
+
+			protected.GET("/strategies", strategyHandler.List)
+			protected.GET("/strategies/:id", strategyHandler.GetByID)
+
+			protected.GET("/backtests", backtestHandler.List)
+			protected.POST("/backtests", backtestHandler.Submit)
+			protected.GET("/backtests/:id", backtestHandler.GetByID)
 		}
 	}
 
-	_ = registry // wired here; handlers added in B11
+	_ = registry
 }

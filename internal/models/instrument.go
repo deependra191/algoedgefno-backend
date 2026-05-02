@@ -7,6 +7,35 @@ import (
 	"github.com/google/uuid"
 )
 
+// InstrumentType constants are our internal classification codes for tradable instruments.
+// These are owned by us — vendor CSV codes are mapped to these during ingestion and never
+// stored directly.
+const (
+	InstrumentTypeIndex             = "INDEX"
+	InstrumentTypeEquity            = "EQ"
+	InstrumentTypeFuturesIndex      = "FUTIDX"
+	InstrumentTypeFuturesStock      = "FUTSTK"
+	InstrumentTypeFuturesIndexCont  = "FUTIDX_CONT"
+	InstrumentTypeFuturesStockCont  = "FUTSTK_CONT"
+	InstrumentTypeOptionsIndex      = "OPTIDX"
+	InstrumentTypeOptionsStock      = "OPTSTK"
+
+	ContinuousFuturesSuffix = "-FUTCONT"
+)
+
+// Exchange constants for NSE market segments.
+const (
+	ExchangeNFO = "NFO"
+	ExchangeNSE = "NSE"
+)
+
+// Underlying constants for supported index underlyings.
+const (
+	UnderlyingNifty     = "NIFTY"
+	UnderlyingBankNifty = "BANKNIFTY"
+	UnderlyingFinNifty  = "FINNIFTY"
+)
+
 // InstrumentRepository is the storage contract for tradable instrument records.
 type InstrumentRepository interface {
 	// GetByID returns the instrument with the given ID, or models.ErrNotFound.
