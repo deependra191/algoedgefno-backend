@@ -122,6 +122,13 @@ func defaultBuiltin() *models.BuiltinStrategy {
 		InstrumentType:     models.InstrumentTypeFuturesIndex,
 		ExpiryRule:         models.ExpiryRuleCurrentMonth,
 		CandleInterval:     models.CandleInterval1D,
+		Inputs: []models.StrategyInput{
+			{
+				Key:     "underlying",
+				Type:    models.InputTypeSelect,
+				Options: []string{models.UnderlyingNifty, models.UnderlyingBankNifty, models.UnderlyingFinNifty},
+			},
+		},
 	}
 }
 
@@ -216,6 +223,23 @@ func TestSubmit_InstrumentNotFound(t *testing.T) {
 	_, err := svc.Submit(context.Background(),defaultRequest())
 	if !errors.Is(err, ErrNoInstrument) {
 		t.Fatalf("expected ErrNoInstrument, got %v", err)
+	}
+}
+
+func TestSubmit_InvalidUnderlying(t *testing.T) {
+	svc := newService(
+		&mockBacktestRepo{},
+		defaultLookup(),
+		&mockCandleRepo{},
+		&mockInstrumentRepo{listResult: defaultInstruments()},
+		&mockEngine{},
+	)
+
+	req := defaultRequest()
+	req.Underlying = "INVALID"
+	_, err := svc.Submit(context.Background(), req)
+	if !errors.Is(err, ErrInvalidUnderlying) {
+		t.Fatalf("expected ErrInvalidUnderlying, got %v", err)
 	}
 }
 
@@ -375,6 +399,29 @@ func TestSubmit_RunCarriesSlugAndInputs(t *testing.T) {
 	}
 	if run.StrategyID != nil {
 		t.Errorf("expected StrategyID to be nil for built-in, got %v", run.StrategyID)
+	}
+}
+
+func TestSubmit_FailRunStoresSafeMessage(t *testing.T) {
+	br := &mockBacktestRepo{}
+	svc := newService(
+		br,
+		defaultLookup(),
+		&mockCandleRepo{result: defaultCandles()},
+		&mockInstrumentRepo{listResult: defaultInstruments()},
+		&mockEngine{err: errors.New("pq: connection refused to 10.0.0.5:5432")},
+	)
+
+	_, _ = svc.Submit(context.Background(), defaultRequest())
+	if len(br.capturedUpdateResult) == 0 {
+		t.Fatal("expected UpdateResult to be called on failure")
+	}
+	stored := br.capturedUpdateResult[0]
+	if stored.ErrorMessage == nil {
+		t.Fatal("expected ErrorMessage to be set")
+	}
+	if *stored.ErrorMessage != "internal error" {
+		t.Errorf("expected safe message %q, got %q", "internal error", *stored.ErrorMessage)
 	}
 }
 
