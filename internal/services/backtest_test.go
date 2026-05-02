@@ -420,8 +420,8 @@ func TestSubmit_FailRunStoresSafeMessage(t *testing.T) {
 	if stored.ErrorMessage == nil {
 		t.Fatal("expected ErrorMessage to be set")
 	}
-	if *stored.ErrorMessage != "internal error" {
-		t.Errorf("expected safe message %q, got %q", "internal error", *stored.ErrorMessage)
+	if *stored.ErrorMessage != errMsgInternalError {
+		t.Errorf("expected safe message %q, got %q", errMsgInternalError, *stored.ErrorMessage)
 	}
 }
 

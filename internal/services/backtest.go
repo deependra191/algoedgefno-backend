@@ -21,7 +21,10 @@ var (
 	ErrInvalidUnderlying   = errors.New("invalid underlying for strategy")
 )
 
-const underlyingInputKey = "underlying"
+const (
+	underlyingInputKey   = "underlying"
+	errMsgInternalError  = "internal error"
+)
 
 // BacktestService orchestrates the full backtest lifecycle: create a run record,
 // fetch candles, invoke the engine, and persist results.
@@ -220,7 +223,7 @@ func safeErrorMessage(err error) string {
 	case errors.Is(err, ErrNoInstrument):
 		return ErrNoInstrument.Error()
 	default:
-		return "internal error"
+		return errMsgInternalError
 	}
 }
 
