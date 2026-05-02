@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,9 +15,15 @@ import (
 )
 
 var (
-	ErrStrategyNotFound = errors.New("strategy not found")
-	ErrNoInstrument     = errors.New("no instrument found for underlying")
-	ErrNoCandleData     = errors.New("no candle data available")
+	ErrStrategyNotFound    = errors.New("strategy not found")
+	ErrNoInstrument        = errors.New("no instrument found for underlying")
+	ErrNoCandleData        = errors.New("no candle data available")
+	ErrInvalidUnderlying   = errors.New("invalid underlying for strategy")
+)
+
+const (
+	underlyingInputKey   = "underlying"
+	errMsgInternalError  = "internal error"
 )
 
 // BacktestService orchestrates the full backtest lifecycle: create a run record,
@@ -61,6 +69,10 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 	builtin, ok := s.builtins.Get(req.StrategySlug)
 	if !ok {
 		return nil, ErrStrategyNotFound
+	}
+
+	if opts := underlyingOptions(builtin); len(opts) > 0 && !slices.Contains(opts, req.Underlying) {
+		return nil, ErrInvalidUnderlying
 	}
 
 	inst, err := s.resolveInstrument(ctx, builtin.InstrumentType, req.Underlying)
@@ -189,12 +201,39 @@ func (s *BacktestService) applyResult(ctx context.Context, run *models.BacktestR
 }
 
 // failRun marks the run as FAILED and attempts to persist the state.
+// The full error is logged; only a safe summary is stored in the DB to avoid
+// leaking internal details (pgx errors, table names) if the column is ever exposed.
 // The UpdateResult error is intentionally swallowed — the original cause is
 // always returned to the caller regardless of persistence success.
 func (s *BacktestService) failRun(ctx context.Context, run *models.BacktestRun, cause error) (*models.BacktestRun, error) {
-	msg := cause.Error()
+	log.Printf("backtest %s failed: %v", run.ID, cause)
+	safeMsg := safeErrorMessage(cause)
 	run.Status = models.BacktestFailed
-	run.ErrorMessage = &msg
+	run.ErrorMessage = &safeMsg
 	_ = s.backtestStore.UpdateResult(ctx, run)
 	return nil, cause
+}
+
+// safeErrorMessage returns a user-safe summary for known sentinel errors,
+// falling back to a generic message for unexpected errors.
+func safeErrorMessage(err error) string {
+	switch {
+	case errors.Is(err, ErrNoCandleData):
+		return ErrNoCandleData.Error()
+	case errors.Is(err, ErrNoInstrument):
+		return ErrNoInstrument.Error()
+	default:
+		return errMsgInternalError
+	}
+}
+
+// underlyingOptions returns the allowed values for the "underlying" input
+// declared by the strategy, or nil if the strategy has no such input.
+func underlyingOptions(b *models.BuiltinStrategy) []string {
+	for _, inp := range b.Inputs {
+		if inp.Key == underlyingInputKey {
+			return inp.Options
+		}
+	}
+	return nil
 }

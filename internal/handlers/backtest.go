@@ -58,6 +58,8 @@ func (h *BacktestHandler) Submit(c *gin.Context) {
 		switch {
 		case errors.Is(err, services.ErrStrategyNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"error": "strategy not found"})
+		case errors.Is(err, services.ErrInvalidUnderlying):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid underlying for strategy"})
 		case errors.Is(err, services.ErrNoInstrument):
 			c.JSON(http.StatusNotFound, gin.H{"error": "no instrument found for underlying"})
 		case errors.Is(err, services.ErrNoCandleData):

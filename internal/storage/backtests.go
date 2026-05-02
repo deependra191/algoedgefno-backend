@@ -11,6 +11,8 @@ import (
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
+const defaultListLimit = 100
+
 var _ models.BacktestRepository = (*BacktestStore)(nil)
 
 type BacktestStore struct {
@@ -112,14 +114,14 @@ func (s *BacktestStore) ListByStrategy(ctx context.Context, strategyID uuid.UUID
 	return result, rows.Err()
 }
 
-// ListAll returns all backtest runs ordered by created_at descending.
+// ListAll returns the most recent backtest runs, capped at 100 rows.
 func (s *BacktestStore) ListAll(ctx context.Context) ([]models.BacktestRun, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, strategy_id, instrument_token, from_ts, to_ts, candle_interval, status,
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
 		       trades_json, error_message, created_at, completed_at,
 		       strategy_slug, capital, lots, underlying
-		FROM backtest_runs ORDER BY created_at DESC`)
+		FROM backtest_runs ORDER BY created_at DESC LIMIT $1`, defaultListLimit)
 	if err != nil {
 		return nil, err
 	}
