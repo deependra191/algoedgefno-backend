@@ -10,7 +10,7 @@ import (
 // TradesJSON holds the raw jsonb column bytes; typing is deferred to B09.
 type BacktestRun struct {
 	ID              uuid.UUID
-	StrategyID      uuid.UUID
+	StrategyID      *uuid.UUID
 	InstrumentToken string
 	FromTs          time.Time
 	ToTs            time.Time
@@ -25,4 +25,8 @@ type BacktestRun struct {
 	ErrorMessage    *string
 	CreatedAt       time.Time
 	CompletedAt     *time.Time
+	StrategySlug    *string
+	Capital         *float64
+	Lots            *int
+	Underlying      *string
 }

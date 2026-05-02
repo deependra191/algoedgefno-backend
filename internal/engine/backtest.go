@@ -36,10 +36,15 @@ func (b *Backtester) RunBacktest(strategy *models.Strategy, candles []models.Can
 		return nil, err
 	}
 
-	qty := strategy.LotSize
-	if qty <= 0 {
-		qty = 1
+	lotSize := strategy.LotSize
+	if lotSize <= 0 {
+		lotSize = 1
 	}
+	nLots := strategy.NumberOfLots
+	if nLots <= 0 {
+		nLots = 1
+	}
+	qty := lotSize * nLots
 
 	result := &models.BacktestResult{}
 	var openTrade *models.Trade

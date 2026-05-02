@@ -1,17 +1,11 @@
 package nse
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
-	"encoding/csv"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"net/http/cookiejar"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -20,75 +14,13 @@ import (
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
-// bhavURL is the NSE F&O bhavcopy URL pattern.
-// NOTE: NSE has changed this URL format historically. Verify before deploying.
-// Current format (as of 2024-2025): BhavCopy_NSE_FO_0_0_0_YYYYMMDD_F_0000.csv.zip
 const (
-	bhavURL      = "https://nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_0_0_0_%s_F_0000.csv.zip"
-	nseMainURL   = "https://www.nseindia.com"
-	nseExchange  = "NFO"
-	eodInterval  = "1d"
-	ProviderName = "nse_eod"
-	maxBhavSize  = 50 << 20
-
-	// bhavDateFormat is the date layout used to format the bhavcopy URL and filename.
-	// Kept separate from the date formats in parseDate — those parse incoming CSV values,
-	// this one is for generating outbound URLs.
-	bhavDateFormat = "20060102"
-
+	nseMainURL        = "https://www.nseindia.com"
+	eodInterval       = "1d"
+	ProviderName      = "nse_eod"
+	maxBhavSize       = 50 << 20
 	httpClientTimeout = 60 * time.Second
-
-	// NSE bhavcopy CSV column names. NSE uses cryptic abbreviations; constants
-	// bridge the gap and make updates easy if NSE changes their column names.
-	csvColInstrumentType = "FinInstrmTp"
-	csvColInstrumentName = "FinInstrmNm"
-	csvColUnderlying     = "TckrSymb"
-	csvColExpiry         = "XpryDt"
-	csvColStrike         = "StrkPric"
-	csvColOptionType     = "OptnTp"
-	csvColOpen           = "OpnPric"
-	csvColHigh           = "HghPric"
-	csvColLow            = "LwPric"
-	csvColClose          = "ClsPric"
-	csvColVolume         = "TtlTradgVol"
-	csvColTimestamp      = "TmStmp"
-	csvColLotSize        = "NewBrdLotQty"
-
-	// Fallback column names from the older NSE bhavcopy format.
-	csvColInstrumentTypeLegacy = "INSTRUMENT"
-	csvColExpiryLegacy         = "EXPIRY_DT"
-	csvColStrikeLegacy         = "STRIKE_PR"
-	csvColOptionTypeLegacy     = "OPTION_TYP"
-	csvColOpenLegacy           = "OPEN"
-	csvColHighLegacy           = "HIGH"
-	csvColLowLegacy            = "LOW"
-	csvColCloseLegacy          = "CLOSE"
-	csvColVolumeLegacy         = "CONTRACTS"
-	csvColTimestampLegacy      = "TIMESTAMP"
 )
-
-// bhavRow holds one parsed row from the F&O bhavcopy CSV.
-type bhavRow struct {
-	InstrumentType string
-	Symbol         string
-	Underlying     string
-	Expiry         time.Time
-	Strike         float64
-	OptionType     string
-	Open           float64
-	High           float64
-	Low            float64
-	Close          float64
-	Volume         int64
-	LotSize        int
-	Date           time.Time
-}
-
-// colMap holds resolved column indices for the CSV.
-type colMap struct {
-	instrType, symbol, underlying, expiry, strike, optType int
-	open, high, low, close_, vol, ts, lotSize              int
-}
 
 // EODProvider fetches NSE F&O end-of-day bhavcopy data and syncs it into the local store.
 type EODProvider struct {
@@ -98,11 +30,14 @@ type EODProvider struct {
 	targetDate      time.Time
 	userAgent       string
 	acceptHTML      string
-	// Cache to avoid downloading the same bhavcopy twice in one sync cycle.
-	// cacheMu protects cachedRows and cachedDate against concurrent sync calls.
-	cacheMu    sync.Mutex
-	cachedRows []bhavRow
-	cachedDate time.Time
+	// cacheMu protects all cached* fields against concurrent sync calls.
+	cacheMu         sync.Mutex
+	cachedRows      []bhavRow
+	cachedDate      time.Time
+	cachedIndexRows []indexRow
+	cachedIndexDate time.Time
+	cachedCMRows    []cmRow
+	cachedCMDate    time.Time
 }
 
 // EODOption is a functional option for configuring an EODProvider.
@@ -189,8 +124,69 @@ func (p *EODProvider) SyncInstruments(ctx context.Context) (int, error) {
 	}
 
 	instruments := make([]models.Instrument, 0, len(rows))
+	underlyings := make(map[string]bool, len(rows))
+	// Track futures underlyings so we can create continuous instruments.
+	type futuresInfo struct {
+		contType string
+		lotSize  int
+	}
+	futuresUnderlyings := make(map[string]futuresInfo)
+
 	for _, row := range rows {
-		instruments = append(instruments, bhavRowToInstrument(row))
+		inst, ok := bhavRowToInstrument(row)
+		if !ok {
+			log.Printf("%s: skipping row with unrecognised instrument type %q", ProviderName, row.InstrumentType)
+			continue
+		}
+		instruments = append(instruments, inst)
+		if row.Underlying != "" {
+			underlyings[row.Underlying] = true
+		}
+		if contType, ok := continuousFuturesType(inst.InstrumentType); ok {
+			if _, exists := futuresUnderlyings[row.Underlying]; !exists && row.Underlying != "" {
+				futuresUnderlyings[row.Underlying] = futuresInfo{contType: contType, lotSize: inst.LotSize}
+			}
+		}
+	}
+
+	for underlying, fi := range futuresUnderlyings {
+		u := underlying
+		symbol := underlying + models.ContinuousFuturesSuffix
+		instruments = append(instruments, models.Instrument{
+			Symbol:         symbol,
+			Name:           symbol,
+			Exchange:       models.ExchangeNFO,
+			InstrumentType: fi.contType,
+			Underlying:     &u,
+			LotSize:        fi.lotSize,
+		})
+	}
+
+	indexRows, err := p.fetchLatestIndicesBhavcopy(ctx)
+	if err != nil {
+		if !p.targetDate.IsZero() {
+			return 0, fmt.Errorf("fetch indices bhavcopy: %w", err)
+		}
+		log.Printf("%s: indices bhavcopy unavailable, skipping index instruments: %v", ProviderName, err)
+	} else {
+		for _, row := range indexRows {
+			instruments = append(instruments, indexRowToInstrument(row))
+		}
+	}
+
+	cmRows, err := p.fetchLatestCMBhavcopy(ctx)
+	if err != nil {
+		if !p.targetDate.IsZero() {
+			return 0, fmt.Errorf("fetch CM bhavcopy: %w", err)
+		}
+		log.Printf("%s: CM bhavcopy unavailable, skipping equity instruments: %v", ProviderName, err)
+	} else {
+		for _, row := range cmRows {
+			if !underlyings[row.Symbol] {
+				continue
+			}
+			instruments = append(instruments, cmRowToInstrument(row))
+		}
 	}
 
 	if err := p.instrumentStore.UpsertBatch(ctx, instruments); err != nil {
@@ -200,25 +196,34 @@ func (p *EODProvider) SyncInstruments(ctx context.Context) (int, error) {
 }
 
 func (p *EODProvider) SyncCandles(ctx context.Context) (int, error) {
+	// Load instruments from both NSE and NFO: NSE for index/equity spot, NFO for F&O contracts.
+	allInstr, err := p.instrumentStore.List(ctx, models.InstrumentFilter{})
+	if err != nil {
+		return 0, fmt.Errorf("list instruments: %w", err)
+	}
+	instrMap := make(map[instrumentKey]uuid.UUID, len(allInstr))
+	underlyings := make(map[string]bool, len(allInstr))
+	for _, inst := range allInstr {
+		instrMap[instrumentKey{Symbol: inst.Symbol, Exchange: inst.Exchange}] = inst.ID
+		if inst.Exchange == models.ExchangeNFO && inst.Underlying != nil {
+			underlyings[*inst.Underlying] = true
+		}
+	}
+
 	rows, err := p.fetchLatestBhavcopy(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("fetch bhavcopy: %w", err)
 	}
 
-	// Load all NFO instruments into a symbol→ID map for FK lookup.
-	exchange := nseExchange
-	allInstr, err := p.instrumentStore.List(ctx, models.InstrumentFilter{Exchange: &exchange})
-	if err != nil {
-		return 0, fmt.Errorf("list instruments: %w", err)
-	}
-	instrMap := make(map[string]uuid.UUID, len(allInstr))
-	for _, inst := range allInstr {
-		instrMap[inst.Symbol] = inst.ID
-	}
-
 	candles := make([]models.Candle, 0, len(rows))
+	type nearMonthCandidate struct {
+		expiry time.Time
+		candle models.Candle
+	}
+	nearMonth := make(map[string]*nearMonthCandidate)
+
 	for _, row := range rows {
-		id, ok := instrMap[row.Symbol]
+		id, ok := instrMap[instrumentKey{Symbol: row.Symbol, Exchange: models.ExchangeNFO}]
 		if !ok {
 			continue
 		}
@@ -233,6 +238,99 @@ func (p *EODProvider) SyncCandles(ctx context.Context) (int, error) {
 			Volume:       row.Volume,
 			Provider:     p.Name(),
 		})
+
+		instrType, isFO := foVendorToInstrumentType(row.InstrumentType)
+		if !isFO || row.Underlying == "" || row.Expiry.IsZero() {
+			continue
+		}
+		if _, isFut := continuousFuturesType(instrType); !isFut {
+			continue
+		}
+		if row.Expiry.Before(row.Date) {
+			continue
+		}
+		existing, seen := nearMonth[row.Underlying]
+		if !seen || row.Expiry.Before(existing.expiry) {
+			contSymbol := row.Underlying + models.ContinuousFuturesSuffix
+			contID, ok := instrMap[instrumentKey{Symbol: contSymbol, Exchange: models.ExchangeNFO}]
+			if !ok {
+				log.Printf("%s: continuous instrument %q not found in instrMap; run SyncInstruments first", ProviderName, contSymbol)
+				continue
+			}
+			nearMonth[row.Underlying] = &nearMonthCandidate{
+				expiry: row.Expiry,
+				candle: models.Candle{
+					InstrumentID: contID,
+					Timestamp:    row.Date,
+					Interval:     eodInterval,
+					Open:         row.Open,
+					High:         row.High,
+					Low:          row.Low,
+					Close:        row.Close,
+					Volume:       row.Volume,
+					Provider:     p.Name(),
+				},
+			}
+		}
+	}
+
+	for _, nm := range nearMonth {
+		candles = append(candles, nm.candle)
+	}
+
+	indexRows, err := p.fetchLatestIndicesBhavcopy(ctx)
+	if err != nil {
+		if !p.targetDate.IsZero() {
+			return 0, fmt.Errorf("fetch indices bhavcopy: %w", err)
+		}
+		log.Printf("%s: indices bhavcopy unavailable, skipping index candles: %v", ProviderName, err)
+	} else {
+		for _, row := range indexRows {
+			id, ok := instrMap[instrumentKey{Symbol: row.Symbol, Exchange: models.ExchangeNSE}]
+			if !ok {
+				continue
+			}
+			candles = append(candles, models.Candle{
+				InstrumentID: id,
+				Timestamp:    row.Date,
+				Interval:     eodInterval,
+				Open:         row.Open,
+				High:         row.High,
+				Low:          row.Low,
+				Close:        row.Close,
+				Volume:       row.Volume,
+				Provider:     p.Name(),
+			})
+		}
+	}
+
+	cmRows, err := p.fetchLatestCMBhavcopy(ctx)
+	if err != nil {
+		if !p.targetDate.IsZero() {
+			return 0, fmt.Errorf("fetch CM bhavcopy: %w", err)
+		}
+		log.Printf("%s: CM bhavcopy unavailable, skipping equity candles: %v", ProviderName, err)
+	} else {
+		for _, row := range cmRows {
+			if !underlyings[row.Symbol] {
+				continue
+			}
+			id, ok := instrMap[instrumentKey{Symbol: row.Symbol, Exchange: models.ExchangeNSE}]
+			if !ok {
+				continue
+			}
+			candles = append(candles, models.Candle{
+				InstrumentID: id,
+				Timestamp:    row.Date,
+				Interval:     eodInterval,
+				Open:         row.Open,
+				High:         row.High,
+				Low:          row.Low,
+				Close:        row.Close,
+				Volume:       row.Volume,
+				Provider:     p.Name(),
+			})
+		}
 	}
 
 	if len(candles) == 0 {
@@ -243,326 +341,4 @@ func (p *EODProvider) SyncCandles(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("insert candles: %w", err)
 	}
 	return int(count), nil
-}
-
-// fetchLatestBhavcopy tries the last few trading days until it finds an available file.
-// Results are cached so that SyncInstruments + SyncCandles in the same cycle don't
-// download the same file twice.
-func (p *EODProvider) fetchLatestBhavcopy(ctx context.Context) ([]bhavRow, error) {
-	p.cacheMu.Lock()
-	defer p.cacheMu.Unlock()
-
-	anchor := latestTradingDate()
-	if !p.targetDate.IsZero() {
-		anchor = p.targetDate
-	}
-	if p.cachedRows != nil && p.cachedDate.Equal(anchor) {
-		return p.cachedRows, nil
-	}
-
-	p.warmSession(ctx)
-
-	if !p.targetDate.IsZero() {
-		rows, err := p.downloadBhavcopy(ctx, p.targetDate)
-		if err != nil {
-			return nil, fmt.Errorf("bhavcopy for %s: %w", p.targetDate.Format("2006-01-02"), err)
-		}
-		p.cachedRows = rows
-		p.cachedDate = anchor
-		return rows, nil
-	}
-
-	date := anchor
-	for range 7 {
-		rows, err := p.downloadBhavcopy(ctx, date)
-		if err == nil {
-			p.cachedRows = rows
-			p.cachedDate = anchor
-			return rows, nil
-		}
-		log.Printf("%s: bhavcopy not available for %s: %v", ProviderName, date.Format("2006-01-02"), err)
-		date = prevTradingDay(date)
-	}
-	return nil, fmt.Errorf("no bhavcopy available in the last 7 trading days")
-}
-
-// downloadBhavcopy fetches and unzips the bhavcopy archive for the given date,
-// returning the parsed rows. Returns an error if the file is unavailable (HTTP non-200)
-// or the zip contains no CSV — callers use this to step back to the previous trading day.
-func (p *EODProvider) downloadBhavcopy(ctx context.Context, date time.Time) ([]bhavRow, error) {
-	url := fmt.Sprintf(bhavURL, date.Format(bhavDateFormat))
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	// NSE blocks requests without proper headers.
-	req.Header.Set("User-Agent", p.userAgent)
-	req.Header.Set("Accept", "*/*")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
-	req.Header.Set("Referer", nseMainURL+"/")
-
-	resp, err := p.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
-	}
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBhavSize))
-	if err != nil {
-		return nil, err
-	}
-
-	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
-	if err != nil {
-		return nil, fmt.Errorf("unzip: %w", err)
-	}
-
-	for _, f := range zr.File {
-		if strings.HasSuffix(strings.ToLower(f.Name), ".csv") {
-			rc, err := f.Open()
-			if err != nil {
-				return nil, err
-			}
-			rows, err := parseBhavCSV(rc, date)
-			rc.Close()
-			return rows, err
-		}
-	}
-	return nil, fmt.Errorf("no CSV found in zip")
-}
-
-// parseBhavCSV parses the bhavcopy CSV.
-// Column names are mapped with fallbacks to handle both old and new NSE formats.
-// NOTE: Verify column names against the live NSE bhavcopy before first production run.
-func parseBhavCSV(r io.Reader, date time.Time) ([]bhavRow, error) {
-	cr := csv.NewReader(r)
-	cr.TrimLeadingSpace = true
-
-	header, err := cr.Read()
-	if err != nil {
-		return nil, fmt.Errorf("read header: %w", err)
-	}
-
-	idx := make(map[string]int, len(header))
-	for i, h := range header {
-		idx[strings.TrimSpace(h)] = i
-	}
-
-	// FinInstrmNm is the unique per-contract name (e.g. "NIFTY26APR22500CE").
-	// TckrSymb holds only the underlying (e.g. "NIFTY"), not unique per contract.
-	symbolIdx := col(idx, csvColInstrumentName)
-	if symbolIdx < 0 {
-		return nil, fmt.Errorf("required column %s not found in CSV header: %v", csvColInstrumentName, header)
-	}
-
-	cols := colMap{
-		instrType:  col(idx, csvColInstrumentType, csvColInstrumentTypeLegacy),
-		symbol:     symbolIdx,
-		underlying: col(idx, csvColUnderlying),
-		expiry:     col(idx, csvColExpiry, csvColExpiryLegacy),
-		strike:     col(idx, csvColStrike, csvColStrikeLegacy),
-		optType:    col(idx, csvColOptionType, csvColOptionTypeLegacy),
-		open:       col(idx, csvColOpen, csvColOpenLegacy),
-		high:       col(idx, csvColHigh, csvColHighLegacy),
-		low:        col(idx, csvColLow, csvColLowLegacy),
-		close_:     col(idx, csvColClose, csvColCloseLegacy),
-		vol:        col(idx, csvColVolume, csvColVolumeLegacy),
-		ts:         col(idx, csvColTimestamp, csvColTimestampLegacy),
-		lotSize:    col(idx, csvColLotSize),
-	}
-
-	var rows []bhavRow
-	for {
-		rec, err := cr.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			continue
-		}
-		row, err := parseRow(rec, cols, date)
-		if err != nil {
-			continue // skip malformed rows
-		}
-		rows = append(rows, row)
-	}
-	return rows, nil
-}
-
-// parseRow converts a single CSV record into a bhavRow using pre-resolved column indices.
-// fallbackDate is used when the record's timestamp column is absent or unparseable.
-// Returns an error only for fatal fields (missing symbol, unparseable OHLC); non-fatal
-// fields (volume, lot size, strike) default to zero silently.
-func parseRow(rec []string, cols colMap, fallbackDate time.Time) (bhavRow, error) {
-	get := func(i int) string {
-		if i < 0 || i >= len(rec) {
-			return ""
-		}
-		return strings.TrimSpace(rec[i])
-	}
-
-	symbol := get(cols.symbol)
-	if symbol == "" {
-		return bhavRow{}, fmt.Errorf("empty symbol")
-	}
-
-	open, err := parseFloat(get(cols.open))
-	if err != nil {
-		return bhavRow{}, fmt.Errorf("open: %w", err)
-	}
-	high, err := parseFloat(get(cols.high))
-	if err != nil {
-		return bhavRow{}, fmt.Errorf("high: %w", err)
-	}
-	low, err := parseFloat(get(cols.low))
-	if err != nil {
-		return bhavRow{}, fmt.Errorf("low: %w", err)
-	}
-	close_, err := parseFloat(get(cols.close_))
-	if err != nil {
-		return bhavRow{}, fmt.Errorf("close: %w", err)
-	}
-
-	vol, _ := parseInt64(get(cols.vol)) // non-fatal if missing
-	lotSize, _ := parseInt64(get(cols.lotSize))
-
-	expiry := parseExpiry(get(cols.expiry))
-	strike, _ := parseFloat(get(cols.strike))
-
-	// Use the file's timestamp if available, else the date we fetched for.
-	rowDate := fallbackDate
-	if ts := get(cols.ts); ts != "" {
-		if t, err := parseDate(ts); err == nil {
-			rowDate = t
-		}
-	}
-
-	return bhavRow{
-		InstrumentType: get(cols.instrType),
-		Symbol:         symbol,
-		Underlying:     get(cols.underlying),
-		Expiry:         expiry,
-		Strike:         strike,
-		OptionType:     get(cols.optType),
-		Open:           open,
-		High:           high,
-		Low:            low,
-		Close:          close_,
-		Volume:         vol,
-		LotSize:        int(lotSize),
-		Date:           rowDate,
-	}, nil
-}
-
-// bhavRowToInstrument maps a parsed bhavcopy row to a domain Instrument.
-// LotSize defaults to 1 when the CSV value is absent or zero.
-func bhavRowToInstrument(row bhavRow) models.Instrument {
-	lotSize := row.LotSize
-	if lotSize <= 0 {
-		lotSize = 1
-	}
-	inst := models.Instrument{
-		Symbol:         row.Symbol,
-		Name:           row.Symbol,
-		Exchange:       nseExchange,
-		InstrumentType: row.InstrumentType,
-		LotSize:        lotSize,
-	}
-	if row.Underlying != "" {
-		inst.Underlying = &row.Underlying
-	}
-	if !row.Expiry.IsZero() {
-		inst.Expiry = &row.Expiry
-	}
-	if row.Strike > 0 {
-		inst.Strike = &row.Strike
-	}
-	if row.OptionType != "" && row.OptionType != "-" {
-		inst.OptionType = &row.OptionType
-	}
-	return inst
-}
-
-// ist is the Indian Standard Time location (UTC+5:30). NSE operates on IST.
-var ist = time.FixedZone("IST", 5*60*60+30*60)
-
-// latestTradingDate returns the most recent weekday (Mon–Fri) in IST.
-func latestTradingDate() time.Time {
-	t := time.Now().In(ist).Truncate(24 * time.Hour)
-	return prevTradingDayOrToday(t)
-}
-
-// prevTradingDayOrToday returns t itself unless it falls on a weekend,
-// in which case it rolls back to the preceding Friday.
-func prevTradingDayOrToday(t time.Time) time.Time {
-	switch t.Weekday() {
-	case time.Sunday:
-		return t.AddDate(0, 0, -2)
-	case time.Saturday:
-		return t.AddDate(0, 0, -1)
-	}
-	return t
-}
-
-// prevTradingDay returns the trading day immediately before t, skipping weekends.
-func prevTradingDay(t time.Time) time.Time {
-	t = t.AddDate(0, 0, -1)
-	return prevTradingDayOrToday(t)
-}
-
-// col returns the index of the first matching column name, or -1 if none found.
-func col(idx map[string]int, names ...string) int {
-	for _, name := range names {
-		if i, ok := idx[name]; ok {
-			return i
-		}
-	}
-	return -1
-}
-
-func parseFloat(s string) (float64, error) {
-	if s == "" || s == "-" {
-		return 0, fmt.Errorf("empty or missing value")
-	}
-	return strconv.ParseFloat(s, 64)
-}
-
-func parseInt64(s string) (int64, error) {
-	if s == "" || s == "-" {
-		return 0, nil
-	}
-	return strconv.ParseInt(s, 10, 64)
-}
-
-// parseExpiry parses a contract expiry date string, trying multiple NSE-observed formats.
-// Returns a zero time.Time for empty, missing, or unrecognised values — callers treat zero as "no expiry".
-func parseExpiry(s string) time.Time {
-	if s == "" || s == "-" {
-		return time.Time{}
-	}
-	// Try common NSE date formats.
-	formats := []string{"02-Jan-2006", "2006-01-02", "02-JAN-2006", "01/02/2006"}
-	for _, f := range formats {
-		if t, err := time.Parse(f, s); err == nil {
-			return t
-		}
-	}
-	return time.Time{}
-}
-
-// parseDate parses a date string from a bhavcopy timestamp column,
-// trying multiple NSE-observed formats. Returns an error if none match.
-func parseDate(s string) (time.Time, error) {
-	formats := []string{"02-Jan-2006", "2006-01-02", "20060102", "01/02/2006"}
-	for _, f := range formats {
-		if t, err := time.Parse(f, s); err == nil {
-			return t, nil
-		}
-	}
-	return time.Time{}, fmt.Errorf("unrecognized date: %s", s)
 }

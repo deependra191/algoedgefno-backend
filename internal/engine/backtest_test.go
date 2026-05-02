@@ -207,6 +207,7 @@ func TestRunBacktest_TargetHit(t *testing.T) {
 	s := &models.Strategy{
 		EntryConditionType: models.EntryConditionMACrossover,
 		LotSize:            2,
+		NumberOfLots:       1,
 		TargetPct:          ptrFloat(5.0),
 	}
 
@@ -346,11 +347,12 @@ func TestRunBacktest_NoSignals(t *testing.T) {
 	}
 }
 
-func TestRunBacktest_LotSizeApplied(t *testing.T) {
+func TestRunBacktest_QuantityIsLotSizeTimesNumberOfLots(t *testing.T) {
 	candles := makeUpDownCandles(30, 30)
 	s := &models.Strategy{
 		EntryConditionType: models.EntryConditionMACrossover,
-		LotSize:            10,
+		LotSize:            50,
+		NumberOfLots:       3,
 	}
 
 	result, err := NewBacktester().RunBacktest(s, candles)
@@ -359,8 +361,8 @@ func TestRunBacktest_LotSizeApplied(t *testing.T) {
 	}
 
 	for _, tr := range result.Trades {
-		if tr.Quantity != 10 {
-			t.Errorf("expected quantity 10, got %d", tr.Quantity)
+		if tr.Quantity != 150 {
+			t.Errorf("expected quantity 150 (50*3), got %d", tr.Quantity)
 		}
 	}
 }

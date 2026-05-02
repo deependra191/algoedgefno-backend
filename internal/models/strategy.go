@@ -36,6 +36,7 @@ type Strategy struct {
 	StopLossPct        *float64
 	TimeExitMinutes    *int
 	LotSize            int
+	NumberOfLots       int
 	CapitalPerTrade    *float64
 	Mode               string
 	IsReadyForRun      bool
@@ -44,8 +45,14 @@ type Strategy struct {
 }
 
 const (
-	EntryConditionMACrossover = "MA_CROSSOVER"
-	EntryConditionSupertrend  = "SUPERTREND"
-	EntryConditionRSIOversold = "RSI_OVERSOLD"
-	EntryConditionMomentum    = "MOMENTUM"
+	EntryConditionMACrossover   = "MA_CROSSOVER"
+	EntryConditionSupertrend    = "SUPERTREND"
+	EntryConditionRSIOversold   = "RSI_OVERSOLD"
+	EntryConditionMomentum      = "MOMENTUM"
+	EntryConditionVWAPCrossover = "VWAP_CROSSOVER"
+)
+
+// ExpiryRule constants for when a futures contract rolls.
+const (
+	ExpiryRuleCurrentMonth = "CURRENT_MONTH"
 )
