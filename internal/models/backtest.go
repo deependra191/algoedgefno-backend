@@ -29,6 +29,37 @@ type Trade struct {
 	ExitReason     string
 }
 
+// TradeStats holds derived performance metrics computed once from a completed trade list.
+// Pointer fields are nil when mathematically undefined (e.g. no losing trades → ProfitFactor is nil).
+type TradeStats struct {
+	AvgWin            *float64
+	AvgLoss           *float64
+	BestTrade         *float64
+	WorstTrade        *float64
+	AvgPnlPerTrade    *float64
+	AvgHoldingMinutes *float64
+	ProfitFactor      *float64
+	RewardRisk        *float64
+	LongestWinStreak  int
+	LongestLossStreak int
+	TradesPerWeek     float64
+}
+
+// ChartPoint is a single (timestamp, value) entry on a time-series chart.
+type ChartPoint struct {
+	Ts    time.Time
+	Value float64
+}
+
+// ChartData holds equity-curve and drawdown series for a completed backtest.
+// Each slice has one point per closed trade, keyed by ExitTimestamp.
+// Equity values are cumulative PnL from zero; drawdown values are percentage
+// decline from the running peak (0 = at peak, 6.8 = 6.8% below peak).
+type ChartData struct {
+	Equity   []ChartPoint
+	Drawdown []ChartPoint
+}
+
 // BacktestResult aggregates the outcome of a full backtest run.
 type BacktestResult struct {
 	Trades      []Trade
@@ -88,6 +119,8 @@ type BacktestRun struct {
 	Capital         *float64
 	Lots            *int
 	Underlying      *string
+	ResultStats     *TradeStats
+	ChartData       *ChartData
 }
 
 const (

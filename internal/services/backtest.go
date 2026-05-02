@@ -11,19 +11,20 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/deependra191/algoedgefno-backend/internal/engine"
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
 var (
-	ErrStrategyNotFound    = errors.New("strategy not found")
-	ErrNoInstrument        = errors.New("no instrument found for underlying")
-	ErrNoCandleData        = errors.New("no candle data available")
-	ErrInvalidUnderlying   = errors.New("invalid underlying for strategy")
+	ErrStrategyNotFound  = errors.New("strategy not found")
+	ErrNoInstrument      = errors.New("no instrument found for underlying")
+	ErrNoCandleData      = errors.New("no candle data available")
+	ErrInvalidUnderlying = errors.New("invalid underlying for strategy")
 )
 
 const (
-	underlyingInputKey   = "underlying"
-	errMsgInternalError  = "internal error"
+	underlyingInputKey  = "underlying"
+	errMsgInternalError = "internal error"
 )
 
 // BacktestService orchestrates the full backtest lifecycle: create a run record,
@@ -34,6 +35,9 @@ type BacktestService struct {
 	candleStore     models.CandleRepository
 	instrumentStore models.InstrumentRepository
 	engine          models.BacktestEngine
+	// launch fires the background execution function. Defaults to a goroutine;
+	// tests replace this with a synchronous caller to observe final state.
+	launch func(func())
 }
 
 // NewBacktestService wires the backtest lifecycle to storage, registry, and engine.
@@ -50,6 +54,7 @@ func NewBacktestService(
 		candleStore:     candleStore,
 		instrumentStore: instrumentStore,
 		engine:          engine,
+		launch:          func(fn func()) { go fn() },
 	}
 }
 
@@ -63,8 +68,11 @@ type BacktestRequest struct {
 	Capital      float64
 }
 
-// Submit validates the request, runs the backtest engine synchronously, and
-// persists the result. Returns the completed (or failed) BacktestRun.
+// Submit validates the request and creates a RUNNING backtest run, then fires the
+// engine asynchronously. The caller receives the run in RUNNING state immediately;
+// poll GetByID until status transitions to COMPLETED or FAILED.
+// Candle availability is checked synchronously so the caller gets an immediate error
+// if no data exists for the requested range.
 func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*models.BacktestRun, error) {
 	builtin, ok := s.builtins.Get(req.StrategySlug)
 	if !ok {
@@ -78,6 +86,19 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 	inst, err := s.resolveInstrument(ctx, builtin.InstrumentType, req.Underlying)
 	if err != nil {
 		return nil, err
+	}
+
+	candles, err := s.candleStore.Query(ctx, models.CandleFilter{
+		InstrumentID: inst.ID,
+		From:         req.From,
+		To:           req.To,
+		Interval:     builtin.CandleInterval,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch candle data: %w", err)
+	}
+	if len(candles) == 0 {
+		return nil, ErrNoCandleData
 	}
 
 	engineStrategy := &models.Strategy{
@@ -99,25 +120,11 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 		return nil, err
 	}
 
-	candles, err := s.candleStore.Query(ctx, models.CandleFilter{
-		InstrumentID: inst.ID,
-		From:         req.From,
-		To:           req.To,
-		Interval:     builtin.CandleInterval,
-	})
-	if err != nil {
-		return s.failRun(ctx, run, fmt.Errorf("failed to fetch candle data: %w", err))
-	}
-	if len(candles) == 0 {
-		return s.failRun(ctx, run, ErrNoCandleData)
-	}
+	// Return a snapshot of the RUNNING run before the goroutine can mutate it.
+	snapshot := *run
+	s.launch(func() { s.executeRun(run, engineStrategy, candles) })
 
-	result, err := s.engine.RunBacktest(engineStrategy, candles)
-	if err != nil {
-		return s.failRun(ctx, run, fmt.Errorf("engine error: %w", err))
-	}
-
-	return s.applyResult(ctx, run, result)
+	return &snapshot, nil
 }
 
 // GetByID returns a single backtest run by its UUID.
@@ -130,9 +137,23 @@ func (s *BacktestService) ListAll(ctx context.Context) ([]models.BacktestRun, er
 	return s.backtestStore.ListAll(ctx)
 }
 
+// executeRun runs the engine and persists the result. It is called in a goroutine
+// and uses context.Background() since the originating HTTP request context will
+// have been cancelled by the time this executes.
+func (s *BacktestService) executeRun(run *models.BacktestRun, strategy *models.Strategy, candles []models.Candle) {
+	ctx := context.Background()
+	result, err := s.engine.RunBacktest(strategy, candles)
+	if err != nil {
+		s.failRun(ctx, run, fmt.Errorf("engine error: %w", err))
+		return
+	}
+	if _, err := s.applyResult(ctx, run, result); err != nil {
+		log.Printf("backtest %s: failed to persist result: %v", run.ID, err)
+	}
+}
+
 // resolveInstrument finds the instrument matching the strategy's type and user's underlying.
-// For futures types, it resolves to the continuous near-month instrument created during sync
-// (e.g. FUTIDX → FUTIDX_CONT), so the backtest gets a single pre-stitched candle series.
+// For futures types, it resolves to the continuous near-month instrument created during sync.
 func (s *BacktestService) resolveInstrument(ctx context.Context, instrumentType, underlying string) (*models.Instrument, error) {
 	lookupType := instrumentType
 	switch instrumentType {
@@ -156,7 +177,7 @@ func (s *BacktestService) resolveInstrument(ctx context.Context, instrumentType,
 }
 
 // createAndStartRun builds the BacktestRun record, persists it, and transitions
-// it to RUNNING. Returns the persisted run ready for candle fetching.
+// it to RUNNING. Returns the persisted run ready for engine execution.
 func (s *BacktestService) createAndStartRun(ctx context.Context, inst *models.Instrument, builtin *models.BuiltinStrategy, req BacktestRequest) (*models.BacktestRun, error) {
 	run := &models.BacktestRun{
 		ID:              uuid.New(),
@@ -180,8 +201,8 @@ func (s *BacktestService) createAndStartRun(ctx context.Context, inst *models.In
 	return run, nil
 }
 
-// applyResult marshals trade data, stamps all result metrics onto the run,
-// and persists the final COMPLETED state.
+// applyResult marshals trade data, computes derived stats and chart data,
+// stamps all metrics onto the run, and persists the final COMPLETED state.
 func (s *BacktestService) applyResult(ctx context.Context, run *models.BacktestRun, result *models.BacktestResult) (*models.BacktestRun, error) {
 	tradesJSON, err := json.Marshal(result.Trades)
 	if err != nil {
@@ -194,6 +215,8 @@ func (s *BacktestService) applyResult(ctx context.Context, run *models.BacktestR
 	run.LossCount = &result.LossCount
 	run.MaxDrawdown = &result.MaxDrawdown
 	run.Trades = tradesJSON
+	run.ResultStats = engine.ComputeTradeStats(result.Trades, run.FromTs, run.ToTs)
+	run.ChartData = engine.BuildChartData(result.Trades)
 	if err := s.backtestStore.UpdateResult(ctx, run); err != nil {
 		return nil, fmt.Errorf("failed to save backtest results: %w", err)
 	}
@@ -202,7 +225,7 @@ func (s *BacktestService) applyResult(ctx context.Context, run *models.BacktestR
 
 // failRun marks the run as FAILED and attempts to persist the state.
 // The full error is logged; only a safe summary is stored in the DB to avoid
-// leaking internal details (pgx errors, table names) if the column is ever exposed.
+// leaking internal details if the column is ever exposed.
 // The UpdateResult error is intentionally swallowed — the original cause is
 // always returned to the caller regardless of persistence success.
 func (s *BacktestService) failRun(ctx context.Context, run *models.BacktestRun, cause error) (*models.BacktestRun, error) {
