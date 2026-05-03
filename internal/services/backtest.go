@@ -11,7 +11,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/deependra191/algoedgefno-backend/internal/engine"
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
@@ -127,9 +126,15 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 	return &snapshot, nil
 }
 
-// GetByID returns a single backtest run by its UUID.
+// GetByID returns a single backtest run by its UUID. Does not include the trades blob.
 func (s *BacktestService) GetByID(ctx context.Context, id uuid.UUID) (*models.BacktestRun, error) {
 	return s.backtestStore.GetByID(ctx, id)
+}
+
+// GetByIDWithTrades returns a single backtest run by its UUID including the raw trades blob.
+// Use this only for the paginated trades endpoint.
+func (s *BacktestService) GetByIDWithTrades(ctx context.Context, id uuid.UUID) (*models.BacktestRun, error) {
+	return s.backtestStore.GetByIDWithTrades(ctx, id)
 }
 
 // ListAll returns all backtest runs ordered newest first.
@@ -141,13 +146,19 @@ func (s *BacktestService) ListAll(ctx context.Context) ([]models.BacktestRun, er
 // and uses context.Background() since the originating HTTP request context will
 // have been cancelled by the time this executes.
 func (s *BacktestService) executeRun(run *models.BacktestRun, strategy *models.Strategy, candles []models.Candle) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("backtest %s: engine panic: %v", run.ID, r)
+			s.failRun(context.Background(), run, fmt.Errorf("engine panic: %v", r))
+		}
+	}()
 	ctx := context.Background()
 	result, err := s.engine.RunBacktest(strategy, candles)
 	if err != nil {
 		s.failRun(ctx, run, fmt.Errorf("engine error: %w", err))
 		return
 	}
-	if _, err := s.applyResult(ctx, run, result); err != nil {
+	if err := s.applyResult(ctx, run, result); err != nil {
 		log.Printf("backtest %s: failed to persist result: %v", run.ID, err)
 	}
 }
@@ -203,10 +214,11 @@ func (s *BacktestService) createAndStartRun(ctx context.Context, inst *models.In
 
 // applyResult marshals trade data, computes derived stats and chart data,
 // stamps all metrics onto the run, and persists the final COMPLETED state.
-func (s *BacktestService) applyResult(ctx context.Context, run *models.BacktestRun, result *models.BacktestResult) (*models.BacktestRun, error) {
+func (s *BacktestService) applyResult(ctx context.Context, run *models.BacktestRun, result *models.BacktestResult) error {
 	tradesJSON, err := json.Marshal(result.Trades)
 	if err != nil {
-		return s.failRun(ctx, run, fmt.Errorf("failed to marshal trade results: %w", err))
+		_, cause := s.failRun(ctx, run, fmt.Errorf("failed to marshal trade results: %w", err))
+		return cause
 	}
 	run.Status = models.BacktestCompleted
 	run.NetPnl = &result.NetPnL
@@ -215,12 +227,12 @@ func (s *BacktestService) applyResult(ctx context.Context, run *models.BacktestR
 	run.LossCount = &result.LossCount
 	run.MaxDrawdown = &result.MaxDrawdown
 	run.Trades = tradesJSON
-	run.ResultStats = engine.ComputeTradeStats(result.Trades, run.FromTs, run.ToTs)
-	run.ChartData = engine.BuildChartData(result.Trades)
+	run.ResultStats = s.engine.ComputeTradeStats(result.Trades, run.FromTs, run.ToTs)
+	run.ChartData = s.engine.BuildChartData(result.Trades)
 	if err := s.backtestStore.UpdateResult(ctx, run); err != nil {
-		return nil, fmt.Errorf("failed to save backtest results: %w", err)
+		return fmt.Errorf("failed to save backtest results: %w", err)
 	}
-	return run, nil
+	return nil
 }
 
 // failRun marks the run as FAILED and attempts to persist the state.

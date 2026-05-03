@@ -121,7 +121,7 @@ func (h *BacktestHandler) GetTrades(c *gin.Context) {
 		return
 	}
 
-	run, err := h.backtestSvc.GetByID(c.Request.Context(), id)
+	run, err := h.backtestSvc.GetByIDWithTrades(c.Request.Context(), id)
 	if err != nil {
 		if errors.Is(err, models.ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "backtest not found"})
@@ -137,7 +137,12 @@ func (h *BacktestHandler) GetTrades(c *gin.Context) {
 	}
 
 	page, limit := parsePagination(c)
-	c.JSON(http.StatusOK, toBacktestTradesPageResponse(run.Trades, page, limit))
+	resp, err := toBacktestTradesPageResponse(run.Trades, page, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 func parsePagination(c *gin.Context) (page, limit int) {

@@ -98,6 +98,16 @@ func BuildChartData(trades []models.Trade) *models.ChartData {
 	return &models.ChartData{Equity: equity, Drawdown: drawdown}
 }
 
+// ComputeTradeStats implements models.BacktestEngine.
+func (b *Backtester) ComputeTradeStats(trades []models.Trade, from, to time.Time) *models.TradeStats {
+	return ComputeTradeStats(trades, from, to)
+}
+
+// BuildChartData implements models.BacktestEngine.
+func (b *Backtester) BuildChartData(trades []models.Trade) *models.ChartData {
+	return BuildChartData(trades)
+}
+
 func computeStreaks(trades []models.Trade) (longestWin, longestLoss int) {
 	curWin, curLoss := 0, 0
 	for _, tr := range trades {

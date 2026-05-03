@@ -2,6 +2,7 @@ package storage
 
 import (
 	"encoding/json"
+	"log"
 
 	"github.com/jackc/pgx/v5"
 
@@ -34,13 +35,17 @@ func toBacktestModel(e *entities.BacktestRun) *models.BacktestRun {
 	}
 	if len(e.ResultStatsJSON) > 0 {
 		var stats models.TradeStats
-		if err := json.Unmarshal(e.ResultStatsJSON, &stats); err == nil {
+		if err := json.Unmarshal(e.ResultStatsJSON, &stats); err != nil {
+			log.Printf("backtest %s: corrupt result_stats JSON: %v", e.ID, err)
+		} else {
 			run.ResultStats = &stats
 		}
 	}
 	if len(e.ChartDataJSON) > 0 {
 		var cd models.ChartData
-		if err := json.Unmarshal(e.ChartDataJSON, &cd); err == nil {
+		if err := json.Unmarshal(e.ChartDataJSON, &cd); err != nil {
+			log.Printf("backtest %s: corrupt chart_data JSON: %v", e.ID, err)
+		} else {
 			run.ChartData = &cd
 		}
 	}
@@ -83,10 +88,41 @@ func toBacktestEntity(r *models.BacktestRun) *entities.BacktestRun {
 	return ent
 }
 
-// scanBacktestRun scans a single row from GetByID, which SELECTs result_stats and chart_data.
+// scanBacktestRun scans a single row from GetByID and LatestCompletedBySlug,
+// which SELECT result_stats and chart_data but not trades_json.
 func scanBacktestRun(row pgx.Row) (*entities.BacktestRun, error) {
 	var r entities.BacktestRun
-	var tradesBytes, resultStatsBytes, chartDataBytes []byte
+	var resultStatsBytes, chartDataBytes []byte
+	var netPnl, maxDrawdown *float64
+	var totalTrades, winCount, lossCount *int
+	var errMsg *string
+	err := row.Scan(
+		&r.ID, &r.StrategyID, &r.InstrumentToken, &r.FromTs, &r.ToTs,
+		&r.CandleInterval, &r.Status,
+		&netPnl, &totalTrades, &winCount, &lossCount, &maxDrawdown,
+		&errMsg, &r.CreatedAt, &r.CompletedAt,
+		&r.StrategySlug, &r.Capital, &r.Lots, &r.Underlying,
+		&resultStatsBytes, &chartDataBytes,
+	)
+	if err != nil {
+		return nil, err
+	}
+	r.NetPnl = netPnl
+	r.TotalTrades = totalTrades
+	r.WinCount = winCount
+	r.LossCount = lossCount
+	r.MaxDrawdown = maxDrawdown
+	r.ErrorMessage = errMsg
+	r.ResultStatsJSON = resultStatsBytes
+	r.ChartDataJSON = chartDataBytes
+	return &r, nil
+}
+
+// scanBacktestRunWithTrades scans a single row from GetByIDWithTrades,
+// which SELECTs trades_json but not result_stats or chart_data.
+func scanBacktestRunWithTrades(row pgx.Row) (*entities.BacktestRun, error) {
+	var r entities.BacktestRun
+	var tradesBytes []byte
 	var netPnl, maxDrawdown *float64
 	var totalTrades, winCount, lossCount *int
 	var errMsg *string
@@ -96,7 +132,6 @@ func scanBacktestRun(row pgx.Row) (*entities.BacktestRun, error) {
 		&netPnl, &totalTrades, &winCount, &lossCount, &maxDrawdown,
 		&tradesBytes, &errMsg, &r.CreatedAt, &r.CompletedAt,
 		&r.StrategySlug, &r.Capital, &r.Lots, &r.Underlying,
-		&resultStatsBytes, &chartDataBytes,
 	)
 	if err != nil {
 		return nil, err
@@ -108,8 +143,6 @@ func scanBacktestRun(row pgx.Row) (*entities.BacktestRun, error) {
 	r.LossCount = lossCount
 	r.MaxDrawdown = maxDrawdown
 	r.ErrorMessage = errMsg
-	r.ResultStatsJSON = resultStatsBytes
-	r.ChartDataJSON = chartDataBytes
 	return &r, nil
 }
 

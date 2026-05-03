@@ -76,6 +76,13 @@ type BacktestEngine interface {
 	// aggregated trade results. Candles must be in chronological order.
 	// Returns an error only if the strategy configuration is invalid.
 	RunBacktest(strategy *Strategy, candles []Candle) (*BacktestResult, error)
+	// ComputeTradeStats derives performance statistics from a completed trade list.
+	// from and to are the backtest date range used to compute tradesPerWeek.
+	// Pointer fields in the result are nil when mathematically undefined.
+	ComputeTradeStats(trades []Trade, from, to time.Time) *TradeStats
+	// BuildChartData builds equity-curve and drawdown time series from a completed trade list.
+	// Each point is keyed by the trade's ExitTimestamp.
+	BuildChartData(trades []Trade) *ChartData
 }
 
 // BacktestRepository is the storage contract for persisting backtest run records.
@@ -87,7 +94,11 @@ type BacktestRepository interface {
 	// UpdateResult persists final metrics and stamps completed_at — used for COMPLETED/FAILED.
 	UpdateResult(ctx context.Context, run *BacktestRun) error
 	// GetByID returns the run with the given ID, or models.ErrNotFound.
+	// Does not load the trades_json blob; use GetByIDWithTrades when trade data is needed.
 	GetByID(ctx context.Context, id uuid.UUID) (*BacktestRun, error)
+	// GetByIDWithTrades returns the run with the given ID including the trades_json blob, or models.ErrNotFound.
+	// Use only when trade-level data is needed (e.g. the paginated trades endpoint).
+	GetByIDWithTrades(ctx context.Context, id uuid.UUID) (*BacktestRun, error)
 	// ListByStrategy returns all runs for a strategy, newest first.
 	ListByStrategy(ctx context.Context, strategyID uuid.UUID) ([]BacktestRun, error)
 	// LatestCompletedBySlug returns the most recent COMPLETED backtest for a built-in strategy slug.
@@ -123,6 +134,7 @@ type BacktestRun struct {
 	ChartData       *ChartData
 }
 
+// Backtest run status values stored in the status column of backtest_runs.
 const (
 	BacktestPending   = "PENDING"
 	BacktestRunning   = "RUNNING"

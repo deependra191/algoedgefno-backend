@@ -176,7 +176,10 @@ func TestToBacktestTradesPageResponse_Pagination(t *testing.T) {
 	raw, _ := json.Marshal(trades)
 
 	// page 1, limit 2 → first 2 trades
-	resp := toBacktestTradesPageResponse(raw, 1, 2)
+	resp, err := toBacktestTradesPageResponse(raw, 1, 2)
+	if err != nil {
+		t.Fatal("unexpected error:", err)
+	}
 	if resp.Total != 5 {
 		t.Errorf("expected total 5, got %d", resp.Total)
 	}
@@ -185,13 +188,19 @@ func TestToBacktestTradesPageResponse_Pagination(t *testing.T) {
 	}
 
 	// page 3, limit 2 → last 1 trade
-	resp = toBacktestTradesPageResponse(raw, 3, 2)
+	resp, err = toBacktestTradesPageResponse(raw, 3, 2)
+	if err != nil {
+		t.Fatal("unexpected error:", err)
+	}
 	if len(resp.Trades) != 1 {
 		t.Errorf("expected 1 trade on page 3, got %d", len(resp.Trades))
 	}
 
 	// page beyond end → empty
-	resp = toBacktestTradesPageResponse(raw, 10, 2)
+	resp, err = toBacktestTradesPageResponse(raw, 10, 2)
+	if err != nil {
+		t.Fatal("unexpected error:", err)
+	}
 	if len(resp.Trades) != 0 {
 		t.Errorf("expected 0 trades past end, got %d", len(resp.Trades))
 	}

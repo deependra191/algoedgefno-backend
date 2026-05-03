@@ -50,6 +50,9 @@ func (m *mockBacktestRepo) ListByStrategy(_ context.Context, _ uuid.UUID) ([]mod
 func (m *mockBacktestRepo) LatestCompletedBySlug(_ context.Context, _ string) (*models.BacktestRun, error) {
 	return nil, models.ErrNotFound
 }
+func (m *mockBacktestRepo) GetByIDWithTrades(_ context.Context, _ uuid.UUID) (*models.BacktestRun, error) {
+	return m.getByIDResult, m.getByIDErr
+}
 func (m *mockBacktestRepo) ListAll(_ context.Context) ([]models.BacktestRun, error) {
 	return m.listResult, m.listErr
 }
@@ -108,6 +111,12 @@ type mockEngine struct {
 
 func (m *mockEngine) RunBacktest(_ *models.Strategy, _ []models.Candle) (*models.BacktestResult, error) {
 	return m.result, m.err
+}
+func (m *mockEngine) ComputeTradeStats(trades []models.Trade, from, to time.Time) *models.TradeStats {
+	return &models.TradeStats{}
+}
+func (m *mockEngine) BuildChartData(_ []models.Trade) *models.ChartData {
+	return &models.ChartData{}
 }
 
 // -- helpers --

@@ -203,10 +203,12 @@ func toBacktestChartResponse(cd *models.ChartData) backtestChartResponse {
 	return backtestChartResponse{Equity: equity, Drawdown: drawdown}
 }
 
-func toBacktestTradesPageResponse(tradesJSON json.RawMessage, page, limit int) backtestTradesPageResponse {
+func toBacktestTradesPageResponse(tradesJSON json.RawMessage, page, limit int) (backtestTradesPageResponse, error) {
 	var all []models.Trade
 	if len(tradesJSON) > 0 {
-		_ = json.Unmarshal(tradesJSON, &all)
+		if err := json.Unmarshal(tradesJSON, &all); err != nil {
+			return backtestTradesPageResponse{}, err
+		}
 	}
 	total := len(all)
 
@@ -217,7 +219,7 @@ func toBacktestTradesPageResponse(tradesJSON json.RawMessage, page, limit int) b
 			Total:  total,
 			Page:   page,
 			Limit:  limit,
-		}
+		}, nil
 	}
 	end := start + limit
 	if end > total {
@@ -245,7 +247,7 @@ func toBacktestTradesPageResponse(tradesJSON json.RawMessage, page, limit int) b
 		Total:  total,
 		Page:   page,
 		Limit:  limit,
-	}
+	}, nil
 }
 
 func toBacktestListResponse(runs []models.BacktestRun) backtestListResponse {

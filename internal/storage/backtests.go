@@ -87,11 +87,29 @@ func (s *BacktestStore) GetByID(ctx context.Context, id uuid.UUID) (*models.Back
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, strategy_id, instrument_token, from_ts, to_ts, candle_interval, status,
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
-		       trades_json, error_message, created_at, completed_at,
+		       error_message, created_at, completed_at,
 		       strategy_slug, capital, lots, underlying,
 		       result_stats, chart_data
 		FROM backtest_runs WHERE id = $1`, id)
 	ent, err := scanBacktestRun(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, models.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return toBacktestModel(ent), nil
+}
+
+// GetByIDWithTrades returns the run including the trades_json blob — use only for the trades endpoint.
+func (s *BacktestStore) GetByIDWithTrades(ctx context.Context, id uuid.UUID) (*models.BacktestRun, error) {
+	row := s.pool.QueryRow(ctx, `
+		SELECT id, strategy_id, instrument_token, from_ts, to_ts, candle_interval, status,
+		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
+		       trades_json, error_message, created_at, completed_at,
+		       strategy_slug, capital, lots, underlying
+		FROM backtest_runs WHERE id = $1`, id)
+	ent, err := scanBacktestRunWithTrades(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, models.ErrNotFound
 	}
@@ -153,8 +171,9 @@ func (s *BacktestStore) LatestCompletedBySlug(ctx context.Context, slug string) 
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, strategy_id, instrument_token, from_ts, to_ts, candle_interval, status,
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
-		       trades_json, error_message, created_at, completed_at,
-		       strategy_slug, capital, lots, underlying
+		       error_message, created_at, completed_at,
+		       strategy_slug, capital, lots, underlying,
+		       result_stats, chart_data
 		FROM backtest_runs
 		WHERE strategy_slug = $1 AND status = $2
 		ORDER BY created_at DESC LIMIT 1`, slug, models.BacktestCompleted)
