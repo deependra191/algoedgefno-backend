@@ -7,7 +7,6 @@ import (
 )
 
 // BacktestRun is the DB row for the backtest_runs table.
-// TradesJSON holds the raw jsonb column bytes; typing is deferred to B09.
 type BacktestRun struct {
 	ID              uuid.UUID
 	StrategyID      *uuid.UUID
@@ -29,4 +28,6 @@ type BacktestRun struct {
 	Capital         *float64
 	Lots            *int
 	Underlying      *string
+	ResultStatsJSON []byte
+	ChartDataJSON   []byte
 }

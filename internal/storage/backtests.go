@@ -52,9 +52,15 @@ func (s *BacktestStore) UpdateStatus(ctx context.Context, run *models.BacktestRu
 // UpdateResult persists final metrics and stamps completed_at — used for COMPLETED/FAILED.
 func (s *BacktestStore) UpdateResult(ctx context.Context, run *models.BacktestRun) error {
 	ent := toBacktestEntity(run)
-	var tradesJSON any
-	if ent.TradesJSON != nil {
+	var tradesJSON, resultStatsJSON, chartDataJSON any
+	if len(ent.TradesJSON) > 0 {
 		tradesJSON = string(ent.TradesJSON)
+	}
+	if len(ent.ResultStatsJSON) > 0 {
+		resultStatsJSON = string(ent.ResultStatsJSON)
+	}
+	if len(ent.ChartDataJSON) > 0 {
+		chartDataJSON = string(ent.ChartDataJSON)
 	}
 	_, err := s.pool.Exec(ctx, `
 		UPDATE backtest_runs SET
@@ -66,10 +72,13 @@ func (s *BacktestStore) UpdateResult(ctx context.Context, run *models.BacktestRu
 			max_drawdown  = $7,
 			trades_json   = $8::jsonb,
 			error_message = $9,
+			result_stats  = $10::jsonb,
+			chart_data    = $11::jsonb,
 			completed_at  = NOW()
 		WHERE id = $1`,
 		ent.ID, ent.Status, ent.NetPnl, ent.TotalTrades, ent.WinCount,
 		ent.LossCount, ent.MaxDrawdown, tradesJSON, ent.ErrorMessage,
+		resultStatsJSON, chartDataJSON,
 	)
 	return err
 }
@@ -78,10 +87,29 @@ func (s *BacktestStore) GetByID(ctx context.Context, id uuid.UUID) (*models.Back
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, strategy_id, instrument_token, from_ts, to_ts, candle_interval, status,
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
+		       error_message, created_at, completed_at,
+		       strategy_slug, capital, lots, underlying,
+		       result_stats, chart_data
+		FROM backtest_runs WHERE id = $1`, id)
+	ent, err := scanBacktestRun(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, models.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return toBacktestModel(ent), nil
+}
+
+// GetByIDWithTrades returns the run including the trades_json blob — use only for the trades endpoint.
+func (s *BacktestStore) GetByIDWithTrades(ctx context.Context, id uuid.UUID) (*models.BacktestRun, error) {
+	row := s.pool.QueryRow(ctx, `
+		SELECT id, strategy_id, instrument_token, from_ts, to_ts, candle_interval, status,
+		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
 		       trades_json, error_message, created_at, completed_at,
 		       strategy_slug, capital, lots, underlying
 		FROM backtest_runs WHERE id = $1`, id)
-	ent, err := scanBacktestRun(row)
+	ent, err := scanBacktestRunWithTrades(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, models.ErrNotFound
 	}
@@ -143,8 +171,9 @@ func (s *BacktestStore) LatestCompletedBySlug(ctx context.Context, slug string) 
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, strategy_id, instrument_token, from_ts, to_ts, candle_interval, status,
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
-		       trades_json, error_message, created_at, completed_at,
-		       strategy_slug, capital, lots, underlying
+		       error_message, created_at, completed_at,
+		       strategy_slug, capital, lots, underlying,
+		       result_stats, chart_data
 		FROM backtest_runs
 		WHERE strategy_slug = $1 AND status = $2
 		ORDER BY created_at DESC LIMIT 1`, slug, models.BacktestCompleted)

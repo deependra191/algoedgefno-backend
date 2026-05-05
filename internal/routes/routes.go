@@ -50,6 +50,7 @@ func Register(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, registry *p
 			protected.GET("/backtests", backtestHandler.List)
 			protected.POST("/backtests", backtestHandler.Submit)
 			protected.GET("/backtests/:id", backtestHandler.GetByID)
+			protected.GET("/backtests/:id/trades", backtestHandler.GetTrades)
 		}
 	}
 
