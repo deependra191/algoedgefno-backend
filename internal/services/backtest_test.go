@@ -50,6 +50,9 @@ func (m *mockBacktestRepo) ListByStrategy(_ context.Context, _ uuid.UUID) ([]mod
 func (m *mockBacktestRepo) LatestCompletedBySlug(_ context.Context, _ string) (*models.BacktestRun, error) {
 	return nil, models.ErrNotFound
 }
+func (m *mockBacktestRepo) GetByIDWithTrades(_ context.Context, _ uuid.UUID) (*models.BacktestRun, error) {
+	return m.getByIDResult, m.getByIDErr
+}
 func (m *mockBacktestRepo) ListAll(_ context.Context) ([]models.BacktestRun, error) {
 	return m.listResult, m.listErr
 }
@@ -106,8 +109,14 @@ type mockEngine struct {
 	err    error
 }
 
-func (m *mockEngine) RunBacktest(_ *models.Strategy, _ []models.Candle) (*models.BacktestResult, error) {
+func (m *mockEngine) RunBacktest(_ *models.Strategy, _ []models.Candle, _ float64) (*models.BacktestResult, error) {
 	return m.result, m.err
+}
+func (m *mockEngine) ComputeTradeStats(trades []models.Trade, from, to time.Time) *models.TradeStats {
+	return &models.TradeStats{}
+}
+func (m *mockEngine) BuildChartData(_ []models.Trade, _ float64) *models.ChartData {
+	return &models.ChartData{}
 }
 
 // -- helpers --
@@ -189,7 +198,10 @@ func newService(
 	ir *mockInstrumentRepo,
 	eng *mockEngine,
 ) *BacktestService {
-	return NewBacktestService(br, bl, cr, ir, eng)
+	svc := NewBacktestService(br, bl, cr, ir, eng)
+	// Run background tasks synchronously so tests can inspect final state.
+	svc.launch = func(fn func()) { fn() }
+	return svc
 }
 
 // -- tests --
@@ -268,15 +280,13 @@ func TestSubmit_NoCandleData(t *testing.T) {
 		&mockEngine{},
 	)
 
-	_, err := svc.Submit(context.Background(),defaultRequest())
+	// Candle check is synchronous — error propagates immediately, no run is created.
+	_, err := svc.Submit(context.Background(), defaultRequest())
 	if !errors.Is(err, ErrNoCandleData) {
 		t.Fatalf("expected ErrNoCandleData, got %v", err)
 	}
-	if len(br.capturedUpdateResult) == 0 {
-		t.Fatal("expected UpdateResult to be called on failure")
-	}
-	if br.capturedUpdateResult[0].Status != models.BacktestFailed {
-		t.Errorf("expected FAILED status, got %s", br.capturedUpdateResult[0].Status)
+	if br.capturedCreate != nil {
+		t.Error("run should not be created when candle check fails")
 	}
 }
 
@@ -290,15 +300,20 @@ func TestSubmit_EngineError(t *testing.T) {
 		&mockEngine{err: errors.New("engine failure")},
 	)
 
-	_, err := svc.Submit(context.Background(),defaultRequest())
-	if err == nil {
-		t.Fatal("expected error from engine failure")
+	// Submit returns RUNNING immediately; engine error is handled in the background.
+	// The sync launch in tests ensures the goroutine completes before we check.
+	run, err := svc.Submit(context.Background(), defaultRequest())
+	if err != nil {
+		t.Fatalf("unexpected error from Submit: %v", err)
+	}
+	if run.Status != models.BacktestRunning {
+		t.Errorf("expected returned run to be RUNNING, got %s", run.Status)
 	}
 	if len(br.capturedUpdateResult) == 0 {
 		t.Fatal("expected UpdateResult to be called on engine failure")
 	}
 	if br.capturedUpdateResult[0].Status != models.BacktestFailed {
-		t.Errorf("expected FAILED status, got %s", br.capturedUpdateResult[0].Status)
+		t.Errorf("expected FAILED status stored, got %s", br.capturedUpdateResult[0].Status)
 	}
 }
 
@@ -317,6 +332,11 @@ func TestSubmit_StatusTransitions(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
+	// Submit returns the run in RUNNING state immediately.
+	if run.Status != models.BacktestRunning {
+		t.Errorf("expected returned run to be RUNNING, got %s", run.Status)
+	}
+
 	if len(br.capturedUpdateStatus) != 1 {
 		t.Fatalf("expected 1 UpdateStatus call, got %d", len(br.capturedUpdateStatus))
 	}
@@ -324,15 +344,12 @@ func TestSubmit_StatusTransitions(t *testing.T) {
 		t.Errorf("expected RUNNING on UpdateStatus, got %s", br.capturedUpdateStatus[0].Status)
 	}
 
+	// Background execution (synchronous in tests) should have persisted COMPLETED.
 	if len(br.capturedUpdateResult) != 1 {
 		t.Fatalf("expected 1 UpdateResult call, got %d", len(br.capturedUpdateResult))
 	}
 	if br.capturedUpdateResult[0].Status != models.BacktestCompleted {
 		t.Errorf("expected COMPLETED on UpdateResult, got %s", br.capturedUpdateResult[0].Status)
-	}
-
-	if run.Status != models.BacktestCompleted {
-		t.Errorf("expected returned run to be COMPLETED, got %s", run.Status)
 	}
 }
 
@@ -352,20 +369,32 @@ func TestSubmit_Success_MetricsPopulated(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if run.NetPnl == nil || *run.NetPnl != engineResult.NetPnL {
-		t.Errorf("expected NetPnl %f, got %v", engineResult.NetPnL, run.NetPnl)
-	}
-	if run.TotalTrades == nil || *run.TotalTrades != engineResult.TotalTrades {
-		t.Errorf("expected TotalTrades %d, got %v", engineResult.TotalTrades, run.TotalTrades)
-	}
-	if run.WinCount == nil || *run.WinCount != engineResult.WinCount {
-		t.Errorf("expected WinCount %d, got %v", engineResult.WinCount, run.WinCount)
-	}
-	if run.LossCount == nil || *run.LossCount != engineResult.LossCount {
-		t.Errorf("expected LossCount %d, got %v", engineResult.LossCount, run.LossCount)
-	}
+	// Returned run is RUNNING — metrics are on the persisted UpdateResult call.
 	if run.InstrumentToken != "NIFTY"+models.ContinuousFuturesSuffix {
 		t.Errorf("expected InstrumentToken %s, got %s", "NIFTY"+models.ContinuousFuturesSuffix, run.InstrumentToken)
+	}
+
+	if len(br.capturedUpdateResult) == 0 {
+		t.Fatal("expected UpdateResult to have been called")
+	}
+	persisted := br.capturedUpdateResult[0]
+	if persisted.NetPnl == nil || *persisted.NetPnl != engineResult.NetPnL {
+		t.Errorf("expected persisted NetPnl %f, got %v", engineResult.NetPnL, persisted.NetPnl)
+	}
+	if persisted.TotalTrades == nil || *persisted.TotalTrades != engineResult.TotalTrades {
+		t.Errorf("expected persisted TotalTrades %d, got %v", engineResult.TotalTrades, persisted.TotalTrades)
+	}
+	if persisted.WinCount == nil || *persisted.WinCount != engineResult.WinCount {
+		t.Errorf("expected persisted WinCount %d, got %v", engineResult.WinCount, persisted.WinCount)
+	}
+	if persisted.LossCount == nil || *persisted.LossCount != engineResult.LossCount {
+		t.Errorf("expected persisted LossCount %d, got %v", engineResult.LossCount, persisted.LossCount)
+	}
+	if persisted.ResultStats == nil {
+		t.Error("expected ResultStats to be populated")
+	}
+	if persisted.ChartData == nil {
+		t.Error("expected ChartData to be populated")
 	}
 }
 

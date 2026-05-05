@@ -37,6 +37,9 @@ func (m *mockBacktestRepoForStrategy) LatestCompletedBySlug(_ context.Context, s
 	}
 	return nil, models.ErrNotFound
 }
+func (m *mockBacktestRepoForStrategy) GetByIDWithTrades(_ context.Context, _ uuid.UUID) (*models.BacktestRun, error) {
+	return nil, models.ErrNotFound
+}
 func (m *mockBacktestRepoForStrategy) ListAll(_ context.Context) ([]models.BacktestRun, error) {
 	return nil, nil
 }

@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,7 +23,8 @@ func NewBacktestHandler(backtestSvc *services.BacktestService) *BacktestHandler 
 	return &BacktestHandler{backtestSvc: backtestSvc}
 }
 
-// Submit runs a backtest for a built-in strategy with user-supplied inputs.
+// Submit validates the request, creates a run, and fires the engine asynchronously.
+// Returns HTTP 202 with {id, status} immediately; client polls GET /backtests/:id.
 func (h *BacktestHandler) Submit(c *gin.Context) {
 	var req backtestSubmitRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -70,7 +72,7 @@ func (h *BacktestHandler) Submit(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, toBacktestResultResponse(run))
+	c.JSON(http.StatusAccepted, toBacktestSubmitResponse(run))
 }
 
 // List returns all backtest runs ordered newest first.
@@ -86,7 +88,10 @@ func (h *BacktestHandler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, toBacktestListResponse(runs))
 }
 
-// GetByID returns a completed backtest run by its UUID.
+// GetByID returns the current state of a backtest run.
+// PENDING/RUNNING: returns id and status only.
+// COMPLETED: returns id, status, and the full result payload.
+// FAILED: returns id, status, and errorMessage.
 func (h *BacktestHandler) GetByID(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -104,5 +109,53 @@ func (h *BacktestHandler) GetByID(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, toBacktestResultResponse(run))
+	c.JSON(http.StatusOK, toBacktestStatusResponse(run))
+}
+
+// GetTrades returns a paginated list of individual trades for a completed backtest.
+// Query params: page (default 1), limit (default 50, max 200).
+func (h *BacktestHandler) GetTrades(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid backtest ID"})
+		return
+	}
+
+	run, err := h.backtestSvc.GetByIDWithTrades(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, models.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "backtest not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get backtest"})
+		return
+	}
+
+	if run.Status != models.BacktestCompleted {
+		c.JSON(http.StatusConflict, gin.H{"error": "backtest not completed"})
+		return
+	}
+
+	page, limit := parsePagination(c)
+	resp, err := toBacktestTradesPageResponse(run.Trades, page, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func parsePagination(c *gin.Context) (page, limit int) {
+	page = defaultTradesPage
+	limit = defaultTradesLimit
+	if v, err := strconv.Atoi(c.Query("page")); err == nil && v > 0 {
+		page = v
+	}
+	if v, err := strconv.Atoi(c.Query("limit")); err == nil && v > 0 {
+		if v > maxTradesLimit {
+			v = maxTradesLimit
+		}
+		limit = v
+	}
+	return
 }
