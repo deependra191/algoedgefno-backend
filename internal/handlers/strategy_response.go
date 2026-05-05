@@ -9,8 +9,8 @@ import (
 
 const (
 	constraintMaxDate      = "maxDate"
-	sectionLabelBuiltin    = "Strategies"
-	sectionLabelCustom     = "My Strategies"
+	sectionLabelBuiltin    = "FEATURED"
+	sectionLabelCustom     = "MY STRATEGIES"
 	placeholderTitleCustom = "Coming soon"
 	placeholderDescCustom  = "Your saved strategies will appear here."
 )
