@@ -77,7 +77,9 @@ func ComputeTradeStats(trades []models.Trade, from, to time.Time) *models.TradeS
 // Equity is the cumulative PnL from zero after each exit.
 // Drawdown is the percentage decline from the running equity peak
 // (0 = at peak; 6.8 = 6.8% below peak); computed as (peak−equity)/peak×100.
-func BuildChartData(trades []models.Trade) *models.ChartData {
+// When the equity peak has not yet gone positive, capital is used as the denominator
+// so that early losses are expressed as a percentage of the user's starting capital.
+func BuildChartData(trades []models.Trade, capital float64) *models.ChartData {
 	equity := make([]models.ChartPoint, len(trades))
 	drawdown := make([]models.ChartPoint, len(trades))
 
@@ -90,6 +92,8 @@ func BuildChartData(trades []models.Trade) *models.ChartData {
 		var dd float64
 		if peak > 0 {
 			dd = round2((peak - cumPnL) / peak * 100)
+		} else if capital > 0 && cumPnL < 0 {
+			dd = round2(-cumPnL / capital * 100)
 		}
 		equity[i] = models.ChartPoint{Ts: tr.ExitTimestamp, Value: round2(cumPnL)}
 		drawdown[i] = models.ChartPoint{Ts: tr.ExitTimestamp, Value: dd}
@@ -104,8 +108,8 @@ func (b *Backtester) ComputeTradeStats(trades []models.Trade, from, to time.Time
 }
 
 // BuildChartData implements models.BacktestEngine.
-func (b *Backtester) BuildChartData(trades []models.Trade) *models.ChartData {
-	return BuildChartData(trades)
+func (b *Backtester) BuildChartData(trades []models.Trade, capital float64) *models.ChartData {
+	return BuildChartData(trades, capital)
 }
 
 func computeStreaks(trades []models.Trade) (longestWin, longestLoss int) {

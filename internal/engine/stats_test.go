@@ -154,7 +154,7 @@ func TestComputeTradeStats_Streaks(t *testing.T) {
 }
 
 func TestBuildChartData_Empty(t *testing.T) {
-	cd := BuildChartData(nil)
+	cd := BuildChartData(nil, 0)
 	if len(cd.Equity) != 0 || len(cd.Drawdown) != 0 {
 		t.Error("expected empty slices for nil trades")
 	}
@@ -166,7 +166,7 @@ func TestBuildChartData_EquityCurve(t *testing.T) {
 		makeTrade(30, 60, -200),
 		makeTrade(60, 90, 500),
 	}
-	cd := BuildChartData(trades)
+	cd := BuildChartData(trades, 0)
 
 	if len(cd.Equity) != 3 {
 		t.Fatalf("expected 3 equity points, got %d", len(cd.Equity))
@@ -188,7 +188,7 @@ func TestBuildChartData_DrawdownAtPeak(t *testing.T) {
 		makeTrade(0, 30, 500),
 		makeTrade(30, 60, 300),
 	}
-	cd := BuildChartData(trades)
+	cd := BuildChartData(trades, 0)
 
 	for i, pt := range cd.Drawdown {
 		if pt.Value != 0 {
@@ -203,7 +203,7 @@ func TestBuildChartData_DrawdownCalculation(t *testing.T) {
 		makeTrade(0, 30, 1000),
 		makeTrade(30, 60, -200),
 	}
-	cd := BuildChartData(trades)
+	cd := BuildChartData(trades, 0)
 
 	if cd.Drawdown[0].Value != 0 {
 		t.Errorf("drawdown[0] want 0 (at peak), got %f", cd.Drawdown[0].Value)
@@ -214,6 +214,28 @@ func TestBuildChartData_DrawdownCalculation(t *testing.T) {
 	}
 }
 
+func TestBuildChartData_DrawdownFromZero(t *testing.T) {
+	// Equity starts negative (all losses) — drawdown must be non-zero, expressed
+	// relative to capital, not the zero peak.
+	trades := []models.Trade{
+		makeTrade(0, 30, -500),
+		makeTrade(30, 60, -300),
+	}
+	capital := 10000.0
+	cd := BuildChartData(trades, capital)
+
+	// After first trade: equity=-500, peak=0, dd = 500/10000*100 = 5%
+	expectedDD0 := round2(500.0 / capital * 100)
+	if cd.Drawdown[0].Value != expectedDD0 {
+		t.Errorf("drawdown[0] want %f, got %f", expectedDD0, cd.Drawdown[0].Value)
+	}
+	// After second trade: equity=-800, peak=0, dd = 800/10000*100 = 8%
+	expectedDD1 := round2(800.0 / capital * 100)
+	if cd.Drawdown[1].Value != expectedDD1 {
+		t.Errorf("drawdown[1] want %f, got %f", expectedDD1, cd.Drawdown[1].Value)
+	}
+}
+
 func TestBuildChartData_TimestampsAreExitTs(t *testing.T) {
 	exit1 := t0.Add(30 * time.Minute)
 	exit2 := t0.Add(60 * time.Minute)
@@ -221,7 +243,7 @@ func TestBuildChartData_TimestampsAreExitTs(t *testing.T) {
 		{EntryTimestamp: t0, ExitTimestamp: exit1, PnL: 100},
 		{EntryTimestamp: exit1, ExitTimestamp: exit2, PnL: 200},
 	}
-	cd := BuildChartData(trades)
+	cd := BuildChartData(trades, 0)
 
 	if !cd.Equity[0].Ts.Equal(exit1) {
 		t.Errorf("equity[0].Ts want %v, got %v", exit1, cd.Equity[0].Ts)

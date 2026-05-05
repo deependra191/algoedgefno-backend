@@ -109,13 +109,13 @@ type mockEngine struct {
 	err    error
 }
 
-func (m *mockEngine) RunBacktest(_ *models.Strategy, _ []models.Candle) (*models.BacktestResult, error) {
+func (m *mockEngine) RunBacktest(_ *models.Strategy, _ []models.Candle, _ float64) (*models.BacktestResult, error) {
 	return m.result, m.err
 }
 func (m *mockEngine) ComputeTradeStats(trades []models.Trade, from, to time.Time) *models.TradeStats {
 	return &models.TradeStats{}
 }
-func (m *mockEngine) BuildChartData(_ []models.Trade) *models.ChartData {
+func (m *mockEngine) BuildChartData(_ []models.Trade, _ float64) *models.ChartData {
 	return &models.ChartData{}
 }
 

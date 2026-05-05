@@ -74,15 +74,19 @@ type BacktestResult struct {
 type BacktestEngine interface {
 	// RunBacktest simulates strategy against the provided candle series and returns
 	// aggregated trade results. Candles must be in chronological order.
+	// capital is the user's starting capital and is used as the drawdown denominator
+	// when the equity curve has not yet gone positive (avoids division by zero).
 	// Returns an error only if the strategy configuration is invalid.
-	RunBacktest(strategy *Strategy, candles []Candle) (*BacktestResult, error)
+	RunBacktest(strategy *Strategy, candles []Candle, capital float64) (*BacktestResult, error)
 	// ComputeTradeStats derives performance statistics from a completed trade list.
 	// from and to are the backtest date range used to compute tradesPerWeek.
 	// Pointer fields in the result are nil when mathematically undefined.
 	ComputeTradeStats(trades []Trade, from, to time.Time) *TradeStats
 	// BuildChartData builds equity-curve and drawdown time series from a completed trade list.
 	// Each point is keyed by the trade's ExitTimestamp.
-	BuildChartData(trades []Trade) *ChartData
+	// capital is the user's starting capital and is used as the drawdown denominator
+	// when the running equity peak has not yet gone positive.
+	BuildChartData(trades []Trade, capital float64) *ChartData
 }
 
 // BacktestRepository is the storage contract for persisting backtest run records.

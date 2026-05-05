@@ -153,7 +153,11 @@ func (s *BacktestService) executeRun(run *models.BacktestRun, strategy *models.S
 		}
 	}()
 	ctx := context.Background()
-	result, err := s.engine.RunBacktest(strategy, candles)
+	capital := 0.0
+	if run.Capital != nil {
+		capital = *run.Capital
+	}
+	result, err := s.engine.RunBacktest(strategy, candles, capital)
 	if err != nil {
 		s.failRun(ctx, run, fmt.Errorf("engine error: %w", err))
 		return
@@ -228,7 +232,11 @@ func (s *BacktestService) applyResult(ctx context.Context, run *models.BacktestR
 	run.MaxDrawdown = &result.MaxDrawdown
 	run.Trades = tradesJSON
 	run.ResultStats = s.engine.ComputeTradeStats(result.Trades, run.FromTs, run.ToTs)
-	run.ChartData = s.engine.BuildChartData(result.Trades)
+	capital := 0.0
+	if run.Capital != nil {
+		capital = *run.Capital
+	}
+	run.ChartData = s.engine.BuildChartData(result.Trades, capital)
 	if err := s.backtestStore.UpdateResult(ctx, run); err != nil {
 		return fmt.Errorf("failed to save backtest results: %w", err)
 	}
