@@ -131,6 +131,7 @@ type BacktestRun struct {
 	CreatedAt       time.Time
 	CompletedAt     *time.Time
 	StrategySlug    *string
+	StrategyName    *string // transient: populated by service from builtins registry, never persisted
 	Capital         *float64
 	Lots            *int
 	Underlying      *string
