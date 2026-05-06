@@ -45,6 +45,11 @@ Android is a thin client — all computation happens here.
    - **Inline comments inside function bodies:** default to none. Only add when the WHY is non-obvious — a hidden constraint, a subtle invariant, a workaround for a specific bug, or ordering behaviour that would surprise a reader. Never explain WHAT the code does; well-named identifiers do that.
    - **Function/method doc comments:** required for (a) all exported functions and types, (b) any unexported function implementing a non-trivial algorithm, state machine, or multi-step process. Simple constructors (`NewX`), one-line helpers, and self-explanatory names do not need one.
    - **Interface vs. implementation:** the doc comment lives on the interface — it defines the contract (what the method guarantees, what it expects). Implementations only add a doc if the concrete algorithm has non-obvious specifics beyond the interface contract (e.g. ordering invariants, concurrency behaviour, known edge cases). Never copy-paste the interface doc onto the implementation.
+23. **PR target branch policy — never PR against `main` directly:**
+   - **During active feature work** (feature branch is open and under review, not yet merged): create child task PRs against the feature branch, not against `dev` or `main`.
+   - **Bug fixes and follow-ups after a feature has merged**: create PRs against `dev`.
+   - **`main` is reserved for `dev → main` integration PRs only** — never the target of a task or feature branch PR.
+   - **Branch from the same ref the PR will target** (`git checkout -b task/x origin/dev`) so the PR diff contains only the intended changes. Branching from `main` and PR-ing to `dev` happens to produce a clean diff only when `dev` and `main` are structurally identical, which is not guaranteed.
 
 ## Build commands
 
