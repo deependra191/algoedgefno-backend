@@ -127,8 +127,18 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 }
 
 // GetByID returns a single backtest run by its UUID. Does not include the trades blob.
+// StrategyName is populated from the builtins registry when the run references a built-in slug.
 func (s *BacktestService) GetByID(ctx context.Context, id uuid.UUID) (*models.BacktestRun, error) {
-	return s.backtestStore.GetByID(ctx, id)
+	run, err := s.backtestStore.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if run.StrategySlug != nil {
+		if b, ok := s.builtins.Get(*run.StrategySlug); ok {
+			run.StrategyName = &b.Name
+		}
+	}
+	return run, nil
 }
 
 // GetByIDWithTrades returns a single backtest run by its UUID including the raw trades blob.

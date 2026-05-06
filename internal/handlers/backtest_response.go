@@ -32,10 +32,15 @@ type backtestStatusResponse struct {
 	Result       *backtestResultPayload `json:"result,omitempty"`
 }
 
+type backtestStrategyResponse struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 // backtestResultPayload carries the full backtest result, present only on COMPLETED runs.
 type backtestResultPayload struct {
-	StrategySlug      string  `json:"strategySlug"`
-	Underlying        string  `json:"underlying"`
+	Strategy          backtestStrategyResponse `json:"strategy"`
+	Underlying        string                   `json:"underlying"`
 	Interval          string  `json:"interval"`
 	From              string  `json:"from"`
 	To                string  `json:"to"`
@@ -151,7 +156,10 @@ func toBacktestResultPayload(run *models.BacktestRun) *backtestResultPayload {
 	netPnl := derefFloat(run.NetPnl)
 
 	p := &backtestResultPayload{
-		StrategySlug:   derefStr(run.StrategySlug),
+		Strategy: backtestStrategyResponse{
+			ID:   derefStr(run.StrategySlug),
+			Name: derefStr(run.StrategyName),
+		},
 		Underlying:     derefStr(run.Underlying),
 		Interval:       run.CandleInterval,
 		From:           run.FromTs.UTC().Format(dateFormat),
