@@ -70,8 +70,9 @@ type BacktestResult struct {
 	MaxDrawdown float64
 }
 
-// EngineInputs carries all candle streams consumed by the backtest engine.
+// EngineInputs carries the strategy interval and candle streams consumed by the backtest engine.
 type EngineInputs struct {
+	Interval      string
 	SignalCandles []Candle
 	TradeCandles  []Candle
 }
@@ -81,8 +82,10 @@ type BacktestEngine interface {
 	// RunBacktest simulates strategy against the provided candle streams and returns
 	// aggregated trade results. Candle streams must be in chronological order.
 	// Signal candles generate entry and reversal decisions only. Trade candles are
-	// the canonical stream for lot size, instrument token, tick size, margin, expiry,
-	// rollover behavior, execution prices, exits, and mark-to-market.
+	// the canonical execution stream for prices, exits, and mark-to-market. Instrument
+	// metadata is resolved before the engine runs; v1 treats FUT*_CONT candles as a
+	// synthetic continuous execution stream, while explicit roll events can be added to
+	// EngineInputs later without exposing instrument taxonomy to the engine.
 	// Entry decisions use an inner join by signal timestamp and trade timestamp.
 	// A signal at T without a trade bar at T is skipped. Executions happen at the
 	// open of the next trade bar starting at or after T plus the strategy interval.

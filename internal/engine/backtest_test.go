@@ -48,6 +48,7 @@ func makeMomentumSignalCandles() []models.Candle {
 
 func sameStreamInputs(candles []models.Candle) models.EngineInputs {
 	return models.EngineInputs{
+		Interval:      models.CandleInterval5M,
 		SignalCandles: candles,
 		TradeCandles:  candles,
 	}
@@ -411,6 +412,7 @@ func TestRunBacktest_SplitStreamsExecuteAtNextTradeOpen(t *testing.T) {
 	}
 
 	result, err := NewBacktester().RunBacktest(s, models.EngineInputs{
+		Interval:      models.CandleInterval5M,
 		SignalCandles: signalCandles,
 		TradeCandles:  tradeCandles,
 	}, 0)
@@ -442,6 +444,7 @@ func TestRunBacktest_TradeGapAtSignalTimestampSkipsEntry(t *testing.T) {
 	}
 
 	result, err := NewBacktester().RunBacktest(s, models.EngineInputs{
+		Interval:      models.CandleInterval5M,
 		SignalCandles: signalCandles,
 		TradeCandles:  tradeCandles,
 	}, 0)
@@ -468,6 +471,7 @@ func TestRunBacktest_TradeSideExitWithoutSignalBar(t *testing.T) {
 	}
 
 	result, err := NewBacktester().RunBacktest(s, models.EngineInputs{
+		Interval:      models.CandleInterval5M,
 		SignalCandles: signalCandles,
 		TradeCandles:  tradeCandles,
 	}, 0)
@@ -483,5 +487,111 @@ func TestRunBacktest_TradeSideExitWithoutSignalBar(t *testing.T) {
 	}
 	if !trade.ExitTimestamp.Equal(signalTime.Add(10 * time.Minute)) {
 		t.Errorf("expected exit on trade-side-only bar, got %s", trade.ExitTimestamp)
+	}
+}
+
+func TestRunBacktest_SameInstrumentBaselineUsesNextBarOpen(t *testing.T) {
+	candles := makeMomentumSignalCandles()
+	signalTime := candles[len(candles)-1].Timestamp
+	nextBar := tradeCandlesAt([]time.Time{signalTime.Add(5 * time.Minute)}, []float64{250})[0]
+	candles = append(candles, nextBar)
+	s := &models.Strategy{
+		EntryConditionType: models.EntryConditionMomentum,
+		LotSize:            1,
+	}
+
+	result, err := NewBacktester().RunBacktest(s, sameStreamInputs(candles), 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.TotalTrades != 1 {
+		t.Fatalf("expected 1 trade, got %d", result.TotalTrades)
+	}
+	trade := result.Trades[0]
+	if !trade.EntryTimestamp.Equal(signalTime.Add(5 * time.Minute)) {
+		t.Errorf("expected same-stream baseline entry at next bar, got %s", trade.EntryTimestamp)
+	}
+	if trade.EntryPrice != 250 {
+		t.Errorf("expected entry at next bar open 250, got %f", trade.EntryPrice)
+	}
+}
+
+func TestRunBacktest_TradeSideTargetExitWithoutSignalBar(t *testing.T) {
+	signalCandles := makeMomentumSignalCandles()
+	signalTime := signalCandles[len(signalCandles)-1].Timestamp
+	tradeCandles := tradeCandlesAt(
+		[]time.Time{signalTime, signalTime.Add(5 * time.Minute), signalTime.Add(10 * time.Minute)},
+		[]float64{200, 250, 251},
+	)
+	tradeCandles[2].High = 280
+	s := &models.Strategy{
+		EntryConditionType: models.EntryConditionMomentum,
+		LotSize:            1,
+		TargetPct:          ptrFloat(5.0),
+	}
+
+	result, err := NewBacktester().RunBacktest(s, models.EngineInputs{
+		Interval:      models.CandleInterval5M,
+		SignalCandles: signalCandles,
+		TradeCandles:  tradeCandles,
+	}, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.TotalTrades != 1 {
+		t.Fatalf("expected 1 trade, got %d", result.TotalTrades)
+	}
+	trade := result.Trades[0]
+	if trade.ExitReason != ExitReasonTarget {
+		t.Fatalf("expected target exit on trade-side bar, got %s", trade.ExitReason)
+	}
+	if !trade.ExitTimestamp.Equal(signalTime.Add(10 * time.Minute)) {
+		t.Errorf("expected exit on trade-side-only bar, got %s", trade.ExitTimestamp)
+	}
+}
+
+func TestRunBacktest_DailyIntervalDoesNotInferWeekendGap(t *testing.T) {
+	base := time.Date(2025, 1, 3, 0, 0, 0, 0, time.UTC)
+	signalCandles := make([]models.Candle, 22)
+	nextTradingDay := base
+	for i := range signalCandles {
+		signalCandles[i] = models.Candle{
+			Timestamp: nextTradingDay,
+			Open:      100,
+			High:      101,
+			Low:       99,
+			Close:     100,
+		}
+		nextTradingDay = nextTradingDay.AddDate(0, 0, 1)
+		for nextTradingDay.Weekday() == time.Saturday || nextTradingDay.Weekday() == time.Sunday {
+			nextTradingDay = nextTradingDay.AddDate(0, 0, 1)
+		}
+	}
+	signalCandles[21].Close = 110
+	signalCandles[21].High = 111
+	signalTime := signalCandles[21].Timestamp
+	tradeCandles := tradeCandlesAt(
+		[]time.Time{signalTime, signalTime.AddDate(0, 0, 1)},
+		[]float64{200, 250},
+	)
+	s := &models.Strategy{
+		EntryConditionType: models.EntryConditionMomentum,
+		LotSize:            1,
+	}
+
+	result, err := NewBacktester().RunBacktest(s, models.EngineInputs{
+		Interval:      models.CandleInterval1D,
+		SignalCandles: signalCandles,
+		TradeCandles:  tradeCandles,
+	}, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.TotalTrades != 1 {
+		t.Fatalf("expected 1 trade, got %d", result.TotalTrades)
+	}
+	trade := result.Trades[0]
+	if !trade.EntryTimestamp.Equal(signalTime.AddDate(0, 0, 1)) {
+		t.Errorf("expected next-day entry using explicit 1d interval, got %s", trade.EntryTimestamp)
 	}
 }

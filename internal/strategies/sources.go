@@ -10,6 +10,7 @@ func (r fixedSourceResolver) Sources(_ models.StrategyParams) models.StrategySou
 	return r.sources
 }
 
+// indexSignalFuturesIndexTradeSources pairs clean index signals with continuous-futures execution.
 func indexSignalFuturesIndexTradeSources() models.StrategySourceResolver {
 	return fixedSourceResolver{
 		sources: models.StrategySources{

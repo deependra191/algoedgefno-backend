@@ -1,7 +1,7 @@
 package engine
 
 import (
-	"errors"
+	"fmt"
 	"math"
 	"time"
 
@@ -15,8 +15,6 @@ const (
 	ExitReasonSignalReversal = "signal_reversal"
 	ExitReasonEndOfData      = "end_of_data"
 )
-
-var errUnknownCandleInterval = errors.New("unknown candle interval")
 
 var _ models.BacktestEngine = (*Backtester)(nil)
 
@@ -42,7 +40,7 @@ func (b *Backtester) RunBacktest(strategy *models.Strategy, inputs models.Engine
 	if err != nil {
 		return nil, err
 	}
-	interval, err := candleIntervalDuration(inputs.SignalCandles, inputs.TradeCandles)
+	interval, err := intervalDuration(inputs.Interval)
 	if err != nil {
 		return nil, err
 	}
@@ -127,58 +125,45 @@ func scheduleSignals(signals []Signal, tradeCandles []models.Candle, interval ti
 		return nil
 	}
 
-	tradeTimestamps := make(map[time.Time]struct{}, len(tradeCandles))
-	for _, candle := range tradeCandles {
-		tradeTimestamps[candle.Timestamp] = struct{}{}
-	}
-
 	scheduled := make([]scheduledSignal, 0, len(signals))
-	tradeIdx := 0
+	matchTradeIdx := 0
+	executionTradeIdx := 0
 	for _, sig := range signals {
-		if _, ok := tradeTimestamps[sig.Timestamp]; !ok {
+		for matchTradeIdx < len(tradeCandles) && tradeCandles[matchTradeIdx].Timestamp.Before(sig.Timestamp) {
+			matchTradeIdx++
+		}
+		if matchTradeIdx >= len(tradeCandles) {
+			break
+		}
+		if !tradeCandles[matchTradeIdx].Timestamp.Equal(sig.Timestamp) {
 			continue
 		}
 		earliestExecution := sig.Timestamp.Add(interval)
-		for tradeIdx < len(tradeCandles) && tradeCandles[tradeIdx].Timestamp.Before(earliestExecution) {
-			tradeIdx++
+		if executionTradeIdx < matchTradeIdx {
+			executionTradeIdx = matchTradeIdx
 		}
-		if tradeIdx >= len(tradeCandles) {
+		for executionTradeIdx < len(tradeCandles) && tradeCandles[executionTradeIdx].Timestamp.Before(earliestExecution) {
+			executionTradeIdx++
+		}
+		if executionTradeIdx >= len(tradeCandles) {
 			break
 		}
 		scheduled = append(scheduled, scheduledSignal{
 			Signal:             sig,
-			ExecutionTimestamp: tradeCandles[tradeIdx].Timestamp,
+			ExecutionTimestamp: tradeCandles[executionTradeIdx].Timestamp,
 		})
 	}
 	return scheduled
 }
 
-func candleIntervalDuration(signalCandles []models.Candle, tradeCandles []models.Candle) (time.Duration, error) {
-	for _, candle := range signalCandles {
-		if d, ok := intervalDuration(candle.Interval); ok {
-			return d, nil
-		}
-	}
-	for _, candle := range tradeCandles {
-		if d, ok := intervalDuration(candle.Interval); ok {
-			return d, nil
-		}
-	}
-	if len(signalCandles) > 1 {
-		return signalCandles[1].Timestamp.Sub(signalCandles[0].Timestamp), nil
-	}
-	if len(tradeCandles) > 1 {
-		return tradeCandles[1].Timestamp.Sub(tradeCandles[0].Timestamp), nil
-	}
-	return 0, errUnknownCandleInterval
-}
-
-func intervalDuration(interval string) (time.Duration, bool) {
+func intervalDuration(interval string) (time.Duration, error) {
 	switch interval {
 	case models.CandleInterval1D:
-		return 24 * time.Hour, true
+		return 24 * time.Hour, nil
+	case models.CandleInterval5M:
+		return 5 * time.Minute, nil
 	default:
-		return 0, false
+		return 0, fmt.Errorf("unknown candle interval: %s", interval)
 	}
 }
 

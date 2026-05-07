@@ -2,10 +2,7 @@ package strategies
 
 import "github.com/deependra191/algoedgefno-backend/internal/models"
 
-const (
-	slugMACrossover     = "ma_crossover"
-	historicalDataStart = "2022-01-01"
-)
+const slugMACrossover = "ma_crossover"
 
 // MACrossover returns the built-in MA Crossover strategy definition.
 func MACrossover() *models.BuiltinStrategy {
@@ -36,8 +33,8 @@ func MACrossover() *models.BuiltinStrategy {
 					models.ConstraintMinDate: historicalDataStart,
 					// maxDate is filled dynamically by the service at request time
 				},
-				DefaultFrom: "2025-01-01",
-				DefaultTo:   "2025-12-31",
+				DefaultFrom: defaultBacktestFromDate,
+				DefaultTo:   defaultBacktestToDate,
 			},
 			{
 				Key:          "lots",

@@ -144,7 +144,10 @@ func (m *mockEngine) BuildChartData(_ []models.Trade, _ float64) *models.ChartDa
 
 // -- helpers --
 
-const testSlug = "ma_crossover"
+const (
+	testSlug                    = "ma_crossover"
+	unsupportedStrategyInterval = "1m"
+)
 
 func defaultBuiltin() *models.BuiltinStrategy {
 	return &models.BuiltinStrategy{
@@ -491,11 +494,58 @@ func TestSubmit_FetchesSignalAndTradeCandles(t *testing.T) {
 	if len(eng.capturedInputs.TradeCandles) != len(tradeCandles) {
 		t.Errorf("expected trade candles to reach engine")
 	}
+	if eng.capturedInputs.Interval != models.CandleInterval1D {
+		t.Errorf("expected engine interval %q, got %q", models.CandleInterval1D, eng.capturedInputs.Interval)
+	}
 	if br.capturedCreate.SignalInstrumentToken == nil || *br.capturedCreate.SignalInstrumentToken != instruments[0].Symbol {
 		t.Errorf("expected signal token to be persisted")
 	}
 	if br.capturedCreate.InstrumentToken != instruments[1].Symbol {
 		t.Errorf("expected trade token to remain canonical instrument token")
+	}
+}
+
+func TestSubmit_ContinuousFutureTradeCandlesCanCrossExpiryBoundary(t *testing.T) {
+	instruments := defaultInstruments()
+	expiryBoundary := time.Date(2025, 1, 30, 0, 0, 0, 0, time.UTC)
+	signalCandles := []models.Candle{
+		{Timestamp: expiryBoundary.AddDate(0, 0, -1), Open: 100, High: 101, Low: 99, Close: 100},
+		{Timestamp: expiryBoundary.AddDate(0, 0, 1), Open: 101, High: 102, Low: 100, Close: 101},
+	}
+	tradeCandles := []models.Candle{
+		{Timestamp: expiryBoundary.AddDate(0, 0, -1), Open: 200, High: 202, Low: 198, Close: 201},
+		{Timestamp: expiryBoundary.AddDate(0, 0, 1), Open: 205, High: 207, Low: 203, Close: 206},
+	}
+	cr := &mockCandleRepo{
+		resultByInstrument: map[uuid.UUID][]models.Candle{
+			instruments[0].ID: signalCandles,
+			instruments[1].ID: tradeCandles,
+		},
+	}
+	eng := &mockEngine{result: defaultEngineResult()}
+	svc := newService(
+		&mockBacktestRepo{},
+		defaultLookup(),
+		cr,
+		&mockInstrumentRepo{listResult: instruments},
+		eng,
+	)
+	req := defaultRequest()
+	req.From = expiryBoundary.AddDate(0, 0, -1)
+	req.To = expiryBoundary.AddDate(0, 0, 1)
+
+	_, err := svc.Submit(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cr.queries) != 2 {
+		t.Fatalf("expected 2 candle queries, got %d", len(cr.queries))
+	}
+	if cr.queries[1].InstrumentID != instruments[1].ID {
+		t.Errorf("expected continuous futures query for trade candles")
+	}
+	if len(eng.capturedInputs.TradeCandles) != len(tradeCandles) {
+		t.Errorf("expected trade candles across expiry boundary to reach engine")
 	}
 }
 
@@ -550,7 +600,7 @@ func TestSubmit_SameInstrumentSourcesPersistSameToken(t *testing.T) {
 
 func TestSubmit_InvalidSourceInterval(t *testing.T) {
 	builtin := defaultBuiltin()
-	builtin.CandleInterval = "1m"
+	builtin.CandleInterval = unsupportedStrategyInterval
 	lookup := &mockBuiltinLookup{
 		strategies: map[string]*models.BuiltinStrategy{testSlug: builtin},
 		order:      []string{testSlug},
@@ -559,6 +609,56 @@ func TestSubmit_InvalidSourceInterval(t *testing.T) {
 		&mockBacktestRepo{},
 		lookup,
 		&mockCandleRepo{},
+		&mockInstrumentRepo{listResult: defaultInstruments()},
+		&mockEngine{},
+	)
+
+	_, err := svc.Submit(context.Background(), defaultRequest())
+	if !errors.Is(err, ErrInvalidStrategySources) {
+		t.Fatalf("expected ErrInvalidStrategySources, got %v", err)
+	}
+}
+
+func TestSubmit_AmbiguousInstrumentResolution(t *testing.T) {
+	underlying := models.UnderlyingNifty
+	duplicateIndex := models.Instrument{
+		ID:             uuid.New(),
+		Symbol:         "NIFTY_ALT",
+		InstrumentType: models.InstrumentTypeIndex,
+		Underlying:     &underlying,
+		LotSize:        1,
+	}
+	instruments := append(defaultInstruments(), duplicateIndex)
+	svc := newService(
+		&mockBacktestRepo{},
+		defaultLookup(),
+		&mockCandleRepo{result: defaultCandles()},
+		&mockInstrumentRepo{listResult: instruments},
+		&mockEngine{},
+	)
+
+	_, err := svc.Submit(context.Background(), defaultRequest())
+	if !errors.Is(err, ErrInvalidStrategySources) {
+		t.Fatalf("expected ErrInvalidStrategySources, got %v", err)
+	}
+}
+
+func TestSubmit_RejectsNonContinuousFuturesSourceKindInV1(t *testing.T) {
+	builtin := defaultBuiltin()
+	builtin.SourceResolver = fixedTestSourceResolver{
+		sources: models.StrategySources{
+			Signal: models.InstrumentSpec{Kind: models.InstrumentKindIndex},
+			Trade:  models.InstrumentSpec{Kind: models.InstrumentKindFuturesIndex},
+		},
+	}
+	lookup := &mockBuiltinLookup{
+		strategies: map[string]*models.BuiltinStrategy{testSlug: builtin},
+		order:      []string{testSlug},
+	}
+	svc := newService(
+		&mockBacktestRepo{},
+		lookup,
+		&mockCandleRepo{result: defaultCandles()},
 		&mockInstrumentRepo{listResult: defaultInstruments()},
 		&mockEngine{},
 	)

@@ -18,10 +18,13 @@ const (
 
 // StrategyParams carries runtime strategy inputs that may affect source resolution.
 type StrategyParams struct {
+	// Underlying is the user-selected NSE underlying string, such as "NIFTY".
 	Underlying string
 }
 
 // InstrumentSpec declares the instrument class used by one side of a strategy.
+// Additional resolution hints can be added later for options, multi-leg, or
+// roll-aware strategies without changing the engine contract.
 type InstrumentSpec struct {
 	Kind InstrumentKind
 }
@@ -38,6 +41,7 @@ type StrategySourceResolver interface {
 }
 
 // ValidateStrategySourceIntervals checks that one strategy interval is supported by both source kinds.
+// The current built-in source declarations support only CandleInterval1D.
 func ValidateStrategySourceIntervals(sources StrategySources, interval string) error {
 	if !supportsStrategyInterval(sources.Signal.Kind, interval) {
 		return fmt.Errorf("signal source kind %s does not support interval %s", sources.Signal.Kind, interval)

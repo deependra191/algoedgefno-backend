@@ -23,8 +23,10 @@ var (
 )
 
 const (
-	underlyingInputKey  = "underlying"
-	errMsgInternalError = "internal error"
+	underlyingInputKey                    = "underlying"
+	errMsgInternalError                   = "internal error"
+	errMsgAmbiguousInstrumentResolution   = "ambiguous instrument resolution"
+	errMsgUnsupportedInstrumentResolution = "unsupported instrument kind for v1 source resolution"
 )
 
 // BacktestService orchestrates the full backtest lifecycle: create a run record,
@@ -106,6 +108,8 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 		return nil, err
 	}
 
+	// Runs intentionally snapshot the current trade lot size at submission time.
+	// Historical re-runs after exchange lot-size changes need explicit lot-size history.
 	engineStrategy := &models.Strategy{
 		Name:               builtin.Name,
 		Description:        builtin.Description,
@@ -127,7 +131,7 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 
 	// Return a snapshot of the RUNNING run before the goroutine can mutate it.
 	snapshot := *run
-	s.launch(func() { s.executeRun(run, engineStrategy, inputs) })
+	s.launch(func() { s.executeRun(run, engineStrategy, inputs, req.Capital) })
 
 	return &snapshot, nil
 }
@@ -161,7 +165,7 @@ func (s *BacktestService) ListAll(ctx context.Context) ([]models.BacktestRun, er
 // executeRun runs the engine and persists the result. It is called in a goroutine
 // and uses context.Background() since the originating HTTP request context will
 // have been cancelled by the time this executes.
-func (s *BacktestService) executeRun(run *models.BacktestRun, strategy *models.Strategy, inputs models.EngineInputs) {
+func (s *BacktestService) executeRun(run *models.BacktestRun, strategy *models.Strategy, inputs models.EngineInputs, capital float64) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("backtest %s: engine panic: %v", run.ID, r)
@@ -169,23 +173,24 @@ func (s *BacktestService) executeRun(run *models.BacktestRun, strategy *models.S
 		}
 	}()
 	ctx := context.Background()
-	capital := 0.0
-	if run.Capital != nil {
-		capital = *run.Capital
-	}
 	result, err := s.engine.RunBacktest(strategy, inputs, capital)
 	if err != nil {
 		s.failRun(ctx, run, fmt.Errorf("engine error: %w", err))
 		return
 	}
-	if err := s.applyResult(ctx, run, result); err != nil {
+	if err := s.applyResult(ctx, run, result, capital); err != nil {
 		log.Printf("backtest %s: failed to persist result: %v", run.ID, err)
 	}
 }
 
 // resolveInstrumentSpec finds the instrument matching the declared source kind and user's underlying.
-// Continuous futures rollover behavior is owned by the resolved trade-side instrument, not the engine.
+// V1 source resolution only supports kinds that resolve to one concrete instrument per underlying.
+// FUT*_CONT is treated as a synthetic continuous execution stream; explicit roll exits/re-entries
+// can be added later as engine inputs without moving instrument taxonomy into the engine.
 func (s *BacktestService) resolveInstrumentSpec(ctx context.Context, spec models.InstrumentSpec, underlying string, _ time.Time) (*models.Instrument, error) {
+	if !supportsSingleInstrumentResolution(spec.Kind) {
+		return nil, fmt.Errorf("%w: %s: %s", ErrInvalidStrategySources, errMsgUnsupportedInstrumentResolution, spec.Kind)
+	}
 	lookupType, err := instrumentTypeForKind(spec.Kind)
 	if err != nil {
 		return nil, err
@@ -201,29 +206,38 @@ func (s *BacktestService) resolveInstrumentSpec(ctx context.Context, spec models
 	if len(instruments) == 0 {
 		return nil, ErrNoInstrument
 	}
+	if len(instruments) > 1 {
+		return nil, fmt.Errorf("%w: %s for %s %s", ErrInvalidStrategySources, errMsgAmbiguousInstrumentResolution, underlying, lookupType)
+	}
 	return &instruments[0], nil
 }
 
 func instrumentTypeForKind(kind models.InstrumentKind) (string, error) {
-	switch kind {
-	case models.InstrumentKindIndex:
-		return models.InstrumentTypeIndex, nil
-	case models.InstrumentKindEquity:
-		return models.InstrumentTypeEquity, nil
-	case models.InstrumentKindFuturesIndex:
-		return models.InstrumentTypeFuturesIndex, nil
-	case models.InstrumentKindFuturesStock:
-		return models.InstrumentTypeFuturesStock, nil
-	case models.InstrumentKindFuturesIndexContinuous:
-		return models.InstrumentTypeFuturesIndexCont, nil
-	case models.InstrumentKindFuturesStockContinuous:
-		return models.InstrumentTypeFuturesStockCont, nil
-	case models.InstrumentKindOptionsIndex:
-		return models.InstrumentTypeOptionsIndex, nil
-	case models.InstrumentKindOptionsStock:
-		return models.InstrumentTypeOptionsStock, nil
+	instrumentType := string(kind)
+	switch instrumentType {
+	case models.InstrumentTypeIndex,
+		models.InstrumentTypeEquity,
+		models.InstrumentTypeFuturesIndex,
+		models.InstrumentTypeFuturesStock,
+		models.InstrumentTypeFuturesIndexCont,
+		models.InstrumentTypeFuturesStockCont,
+		models.InstrumentTypeOptionsIndex,
+		models.InstrumentTypeOptionsStock:
+		return instrumentType, nil
 	default:
 		return "", fmt.Errorf("%w: unknown instrument kind %s", ErrInvalidStrategySources, kind)
+	}
+}
+
+func supportsSingleInstrumentResolution(kind models.InstrumentKind) bool {
+	switch kind {
+	case models.InstrumentKindIndex,
+		models.InstrumentKindEquity,
+		models.InstrumentKindFuturesIndexContinuous,
+		models.InstrumentKindFuturesStockContinuous:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -252,6 +266,7 @@ func (s *BacktestService) fetchEngineInputs(
 	}
 
 	return models.EngineInputs{
+		Interval:      interval,
 		SignalCandles: signalCandles,
 		TradeCandles:  tradeCandles,
 	}, nil
@@ -301,7 +316,7 @@ func (s *BacktestService) createAndStartRun(
 
 // applyResult marshals trade data, computes derived stats and chart data,
 // stamps all metrics onto the run, and persists the final COMPLETED state.
-func (s *BacktestService) applyResult(ctx context.Context, run *models.BacktestRun, result *models.BacktestResult) error {
+func (s *BacktestService) applyResult(ctx context.Context, run *models.BacktestRun, result *models.BacktestResult, capital float64) error {
 	tradesJSON, err := json.Marshal(result.Trades)
 	if err != nil {
 		_, cause := s.failRun(ctx, run, fmt.Errorf("failed to marshal trade results: %w", err))
@@ -315,10 +330,6 @@ func (s *BacktestService) applyResult(ctx context.Context, run *models.BacktestR
 	run.MaxDrawdown = &result.MaxDrawdown
 	run.Trades = tradesJSON
 	run.ResultStats = s.engine.ComputeTradeStats(result.Trades, run.FromTs, run.ToTs)
-	capital := 0.0
-	if run.Capital != nil {
-		capital = *run.Capital
-	}
 	run.ChartData = s.engine.BuildChartData(result.Trades, capital)
 	if err := s.backtestStore.UpdateResult(ctx, run); err != nil {
 		return fmt.Errorf("failed to save backtest results: %w", err)

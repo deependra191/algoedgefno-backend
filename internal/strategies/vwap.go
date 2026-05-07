@@ -32,8 +32,8 @@ func VWAPCrossover() *models.BuiltinStrategy {
 				Constraints: map[string]any{
 					models.ConstraintMinDate: historicalDataStart,
 				},
-				DefaultFrom: "2025-01-01",
-				DefaultTo:   "2025-12-31",
+				DefaultFrom: defaultBacktestFromDate,
+				DefaultTo:   defaultBacktestToDate,
 			},
 			{
 				Key:          "lots",
