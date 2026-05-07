@@ -19,7 +19,7 @@ func MACrossover() *models.BuiltinStrategy {
 		},
 		Inputs: []models.StrategyInput{
 			{
-				Key:          "underlying",
+				Key:          models.StrategyInputKeyUnderlying,
 				Label:        "Underlying",
 				Type:         models.InputTypeSelect,
 				Options:      []string{models.UnderlyingNifty, models.UnderlyingBankNifty, models.UnderlyingFinNifty},

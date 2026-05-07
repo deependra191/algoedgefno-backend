@@ -165,7 +165,7 @@ func defaultBuiltin() *models.BuiltinStrategy {
 		},
 		Inputs: []models.StrategyInput{
 			{
-				Key:     "underlying",
+				Key:     models.StrategyInputKeyUnderlying,
 				Type:    models.InputTypeSelect,
 				Options: []string{models.UnderlyingNifty, models.UnderlyingBankNifty, models.UnderlyingFinNifty},
 			},

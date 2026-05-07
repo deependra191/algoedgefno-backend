@@ -14,6 +14,10 @@ const (
 	ExitReasonTimeExit       = "time_exit"
 	ExitReasonSignalReversal = "signal_reversal"
 	ExitReasonEndOfData      = "end_of_data"
+
+	candleInterval1DDuration = 24 * time.Hour
+	candleInterval5MDuration = 5 * time.Minute
+	errMsgUnknownInterval    = "unknown candle interval"
 )
 
 var _ models.BacktestEngine = (*Backtester)(nil)
@@ -159,11 +163,11 @@ func scheduleSignals(signals []Signal, tradeCandles []models.Candle, interval ti
 func intervalDuration(interval string) (time.Duration, error) {
 	switch interval {
 	case models.CandleInterval1D:
-		return 24 * time.Hour, nil
+		return candleInterval1DDuration, nil
 	case models.CandleInterval5M:
-		return 5 * time.Minute, nil
+		return candleInterval5MDuration, nil
 	default:
-		return 0, fmt.Errorf("unknown candle interval: %s", interval)
+		return 0, fmt.Errorf("%s: %s", errMsgUnknownInterval, interval)
 	}
 }
 

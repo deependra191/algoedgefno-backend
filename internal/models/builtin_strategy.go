@@ -38,6 +38,11 @@ const (
 	InputTypeCurrency  = "CURRENCY"
 )
 
+// Strategy input key constants used by built-ins and services.
+const (
+	StrategyInputKeyUnderlying = "underlying"
+)
+
 // Constraint key constants used in StrategyInput.Constraints maps.
 const (
 	ConstraintMin     = "min"

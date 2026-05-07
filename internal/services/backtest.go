@@ -23,7 +23,6 @@ var (
 )
 
 const (
-	underlyingInputKey                    = "underlying"
 	errMsgInternalError                   = "internal error"
 	errMsgAmbiguousInstrumentResolution   = "ambiguous instrument resolution"
 	errMsgUnsupportedInstrumentResolution = "unsupported instrument kind for v1 source resolution"
@@ -368,7 +367,7 @@ func safeErrorMessage(err error) string {
 // declared by the strategy, or nil if the strategy has no such input.
 func underlyingOptions(b *models.BuiltinStrategy) []string {
 	for _, inp := range b.Inputs {
-		if inp.Key == underlyingInputKey {
+		if inp.Key == models.StrategyInputKeyUnderlying {
 			return inp.Options
 		}
 	}
