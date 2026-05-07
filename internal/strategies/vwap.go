@@ -19,21 +19,21 @@ func VWAPCrossover() *models.BuiltinStrategy {
 		},
 		Inputs: []models.StrategyInput{
 			{
-				Key:          "underlying",
+				Key:          models.StrategyInputKeyUnderlying,
 				Label:        "Underlying",
 				Type:         models.InputTypeSelect,
 				Options:      []string{models.UnderlyingNifty, models.UnderlyingBankNifty, models.UnderlyingFinNifty},
 				DefaultValue: models.UnderlyingNifty,
 			},
 			{
-				Key:  "dateRange",
+				Key:   "dateRange",
 				Label: "Date range",
 				Type:  models.InputTypeDateRange,
 				Constraints: map[string]any{
 					models.ConstraintMinDate: historicalDataStart,
 				},
-				DefaultFrom: "2025-01-01",
-				DefaultTo:   "2025-12-31",
+				DefaultFrom: defaultBacktestFromDate,
+				DefaultTo:   defaultBacktestToDate,
 			},
 			{
 				Key:          "lots",
@@ -54,5 +54,6 @@ func VWAPCrossover() *models.BuiltinStrategy {
 		InstrumentType:     models.InstrumentTypeFuturesIndex,
 		ExpiryRule:         models.ExpiryRuleCurrentMonth,
 		CandleInterval:     models.CandleInterval1D,
+		SourceResolver:     indexSignalFuturesIndexTradeSources(),
 	}
 }

@@ -10,6 +10,7 @@ import (
 // CandleInterval constants for supported OHLCV bar resolutions.
 const (
 	CandleInterval1D = "1d"
+	CandleInterval5M = "5m"
 )
 
 // CandleFilter specifies the query parameters for fetching candles from the repository.

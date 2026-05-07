@@ -12,26 +12,27 @@ import (
 
 func toBacktestModel(e *entities.BacktestRun) *models.BacktestRun {
 	run := &models.BacktestRun{
-		ID:              e.ID,
-		StrategyID:      e.StrategyID,
-		InstrumentToken: e.InstrumentToken,
-		FromTs:          e.FromTs,
-		ToTs:            e.ToTs,
-		CandleInterval:  e.CandleInterval,
-		Status:          e.Status,
-		NetPnl:          e.NetPnl,
-		TotalTrades:     e.TotalTrades,
-		WinCount:        e.WinCount,
-		LossCount:       e.LossCount,
-		MaxDrawdown:     e.MaxDrawdown,
-		ErrorMessage:    e.ErrorMessage,
-		CreatedAt:       e.CreatedAt,
-		CompletedAt:     e.CompletedAt,
-		Trades:          json.RawMessage(e.TradesJSON),
-		StrategySlug:    e.StrategySlug,
-		Capital:         e.Capital,
-		Lots:            e.Lots,
-		Underlying:      e.Underlying,
+		ID:                    e.ID,
+		StrategyID:            e.StrategyID,
+		InstrumentToken:       e.InstrumentToken,
+		SignalInstrumentToken: e.SignalInstrumentToken,
+		FromTs:                e.FromTs,
+		ToTs:                  e.ToTs,
+		CandleInterval:        e.CandleInterval,
+		Status:                e.Status,
+		NetPnl:                e.NetPnl,
+		TotalTrades:           e.TotalTrades,
+		WinCount:              e.WinCount,
+		LossCount:             e.LossCount,
+		MaxDrawdown:           e.MaxDrawdown,
+		ErrorMessage:          e.ErrorMessage,
+		CreatedAt:             e.CreatedAt,
+		CompletedAt:           e.CompletedAt,
+		Trades:                json.RawMessage(e.TradesJSON),
+		StrategySlug:          e.StrategySlug,
+		Capital:               e.Capital,
+		Lots:                  e.Lots,
+		Underlying:            e.Underlying,
 	}
 	if len(e.ResultStatsJSON) > 0 {
 		var stats models.TradeStats
@@ -54,26 +55,27 @@ func toBacktestModel(e *entities.BacktestRun) *models.BacktestRun {
 
 func toBacktestEntity(r *models.BacktestRun) *entities.BacktestRun {
 	ent := &entities.BacktestRun{
-		ID:              r.ID,
-		StrategyID:      r.StrategyID,
-		InstrumentToken: r.InstrumentToken,
-		FromTs:          r.FromTs,
-		ToTs:            r.ToTs,
-		CandleInterval:  r.CandleInterval,
-		Status:          r.Status,
-		NetPnl:          r.NetPnl,
-		TotalTrades:     r.TotalTrades,
-		WinCount:        r.WinCount,
-		LossCount:       r.LossCount,
-		MaxDrawdown:     r.MaxDrawdown,
-		ErrorMessage:    r.ErrorMessage,
-		CreatedAt:       r.CreatedAt,
-		CompletedAt:     r.CompletedAt,
-		TradesJSON:      []byte(r.Trades),
-		StrategySlug:    r.StrategySlug,
-		Capital:         r.Capital,
-		Lots:            r.Lots,
-		Underlying:      r.Underlying,
+		ID:                    r.ID,
+		StrategyID:            r.StrategyID,
+		InstrumentToken:       r.InstrumentToken,
+		SignalInstrumentToken: r.SignalInstrumentToken,
+		FromTs:                r.FromTs,
+		ToTs:                  r.ToTs,
+		CandleInterval:        r.CandleInterval,
+		Status:                r.Status,
+		NetPnl:                r.NetPnl,
+		TotalTrades:           r.TotalTrades,
+		WinCount:              r.WinCount,
+		LossCount:             r.LossCount,
+		MaxDrawdown:           r.MaxDrawdown,
+		ErrorMessage:          r.ErrorMessage,
+		CreatedAt:             r.CreatedAt,
+		CompletedAt:           r.CompletedAt,
+		TradesJSON:            []byte(r.Trades),
+		StrategySlug:          r.StrategySlug,
+		Capital:               r.Capital,
+		Lots:                  r.Lots,
+		Underlying:            r.Underlying,
 	}
 	if r.ResultStats != nil {
 		if b, err := json.Marshal(r.ResultStats); err == nil {
@@ -97,7 +99,7 @@ func scanBacktestRun(row pgx.Row) (*entities.BacktestRun, error) {
 	var totalTrades, winCount, lossCount *int
 	var errMsg *string
 	err := row.Scan(
-		&r.ID, &r.StrategyID, &r.InstrumentToken, &r.FromTs, &r.ToTs,
+		&r.ID, &r.StrategyID, &r.InstrumentToken, &r.SignalInstrumentToken, &r.FromTs, &r.ToTs,
 		&r.CandleInterval, &r.Status,
 		&netPnl, &totalTrades, &winCount, &lossCount, &maxDrawdown,
 		&errMsg, &r.CreatedAt, &r.CompletedAt,
@@ -127,7 +129,7 @@ func scanBacktestRunWithTrades(row pgx.Row) (*entities.BacktestRun, error) {
 	var totalTrades, winCount, lossCount *int
 	var errMsg *string
 	err := row.Scan(
-		&r.ID, &r.StrategyID, &r.InstrumentToken, &r.FromTs, &r.ToTs,
+		&r.ID, &r.StrategyID, &r.InstrumentToken, &r.SignalInstrumentToken, &r.FromTs, &r.ToTs,
 		&r.CandleInterval, &r.Status,
 		&netPnl, &totalTrades, &winCount, &lossCount, &maxDrawdown,
 		&tradesBytes, &errMsg, &r.CreatedAt, &r.CompletedAt,
@@ -154,7 +156,7 @@ func scanBacktestRunRow(rows pgx.Rows) (*entities.BacktestRun, error) {
 	var totalTrades, winCount, lossCount *int
 	var errMsg *string
 	err := rows.Scan(
-		&r.ID, &r.StrategyID, &r.InstrumentToken, &r.FromTs, &r.ToTs,
+		&r.ID, &r.StrategyID, &r.InstrumentToken, &r.SignalInstrumentToken, &r.FromTs, &r.ToTs,
 		&r.CandleInterval, &r.Status,
 		&netPnl, &totalTrades, &winCount, &lossCount, &maxDrawdown,
 		&tradesBytes, &errMsg, &r.CreatedAt, &r.CompletedAt,
