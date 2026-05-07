@@ -56,6 +56,13 @@ func TestMACrossover_Fields(t *testing.T) {
 	if len(s.Logic) == 0 {
 		t.Error("expected at least one logic line")
 	}
+	sources := s.SourceResolver.Sources(models.StrategyParams{Underlying: models.UnderlyingNifty})
+	if sources.Signal.Kind != models.InstrumentKindIndex {
+		t.Errorf("expected signal kind %q, got %q", models.InstrumentKindIndex, sources.Signal.Kind)
+	}
+	if sources.Trade.Kind != models.InstrumentKindFuturesIndexContinuous {
+		t.Errorf("expected trade kind %q, got %q", models.InstrumentKindFuturesIndexContinuous, sources.Trade.Kind)
+	}
 }
 
 func TestRegistry_DuplicatePanics(t *testing.T) {

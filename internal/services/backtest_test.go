@@ -75,11 +75,17 @@ func (m *mockBuiltinLookup) All() []*models.BuiltinStrategy {
 }
 
 type mockCandleRepo struct {
-	result []models.Candle
-	err    error
+	resultByInstrument map[uuid.UUID][]models.Candle
+	result             []models.Candle
+	err                error
+	queries            []models.CandleFilter
 }
 
-func (m *mockCandleRepo) Query(_ context.Context, _ models.CandleFilter) ([]models.Candle, error) {
+func (m *mockCandleRepo) Query(_ context.Context, f models.CandleFilter) ([]models.Candle, error) {
+	m.queries = append(m.queries, f)
+	if m.resultByInstrument != nil {
+		return m.resultByInstrument[f.InstrumentID], m.err
+	}
 	return m.result, m.err
 }
 func (m *mockCandleRepo) InsertBatchIgnoreDuplicates(_ context.Context, _ []models.Candle) (int64, error) {
@@ -97,19 +103,36 @@ type mockInstrumentRepo struct {
 func (m *mockInstrumentRepo) GetByID(_ context.Context, _ uuid.UUID) (*models.Instrument, error) {
 	return nil, models.ErrNotFound
 }
-func (m *mockInstrumentRepo) List(_ context.Context, _ models.InstrumentFilter) ([]models.Instrument, error) {
-	return m.listResult, m.listErr
+func (m *mockInstrumentRepo) List(_ context.Context, f models.InstrumentFilter) ([]models.Instrument, error) {
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
+	result := make([]models.Instrument, 0, len(m.listResult))
+	for _, inst := range m.listResult {
+		if f.InstrumentType != nil && inst.InstrumentType != *f.InstrumentType {
+			continue
+		}
+		if f.Underlying != nil {
+			if inst.Underlying == nil || *inst.Underlying != *f.Underlying {
+				continue
+			}
+		}
+		result = append(result, inst)
+	}
+	return result, nil
 }
 func (m *mockInstrumentRepo) UpsertBatch(_ context.Context, _ []models.Instrument) error {
 	return nil
 }
 
 type mockEngine struct {
-	result *models.BacktestResult
-	err    error
+	result         *models.BacktestResult
+	err            error
+	capturedInputs models.EngineInputs
 }
 
-func (m *mockEngine) RunBacktest(_ *models.Strategy, _ []models.Candle, _ float64) (*models.BacktestResult, error) {
+func (m *mockEngine) RunBacktest(_ *models.Strategy, inputs models.EngineInputs, _ float64) (*models.BacktestResult, error) {
+	m.capturedInputs = inputs
 	return m.result, m.err
 }
 func (m *mockEngine) ComputeTradeStats(trades []models.Trade, from, to time.Time) *models.TradeStats {
@@ -131,6 +154,12 @@ func defaultBuiltin() *models.BuiltinStrategy {
 		InstrumentType:     models.InstrumentTypeFuturesIndex,
 		ExpiryRule:         models.ExpiryRuleCurrentMonth,
 		CandleInterval:     models.CandleInterval1D,
+		SourceResolver: fixedTestSourceResolver{
+			sources: models.StrategySources{
+				Signal: models.InstrumentSpec{Kind: models.InstrumentKindIndex},
+				Trade:  models.InstrumentSpec{Kind: models.InstrumentKindFuturesIndexContinuous},
+			},
+		},
 		Inputs: []models.StrategyInput{
 			{
 				Key:     "underlying",
@@ -139,6 +168,14 @@ func defaultBuiltin() *models.BuiltinStrategy {
 			},
 		},
 	}
+}
+
+type fixedTestSourceResolver struct {
+	sources models.StrategySources
+}
+
+func (r fixedTestSourceResolver) Sources(_ models.StrategyParams) models.StrategySources {
+	return r.sources
 }
 
 func defaultLookup() *mockBuiltinLookup {
@@ -153,8 +190,22 @@ func emptyLookup() *mockBuiltinLookup {
 }
 
 func defaultInstruments() []models.Instrument {
+	underlying := models.UnderlyingNifty
 	return []models.Instrument{
-		{ID: uuid.New(), Symbol: "NIFTY" + models.ContinuousFuturesSuffix, LotSize: 50},
+		{
+			ID:             uuid.New(),
+			Symbol:         "NIFTY",
+			InstrumentType: models.InstrumentTypeIndex,
+			Underlying:     &underlying,
+			LotSize:        1,
+		},
+		{
+			ID:             uuid.New(),
+			Symbol:         "NIFTY" + models.ContinuousFuturesSuffix,
+			InstrumentType: models.InstrumentTypeFuturesIndexCont,
+			Underlying:     &underlying,
+			LotSize:        50,
+		},
 	}
 }
 
@@ -164,7 +215,7 @@ func defaultCandles() []models.Candle {
 	for i := range candles {
 		candles[i] = models.Candle{
 			Timestamp: base.Add(time.Duration(i*5) * time.Minute),
-			Open: 100, High: 101, Low: 99, Close: 100,
+			Open:      100, High: 101, Low: 99, Close: 100,
 		}
 	}
 	return candles
@@ -217,7 +268,7 @@ func TestSubmit_StrategyNotFound(t *testing.T) {
 
 	req := defaultRequest()
 	req.StrategySlug = "nonexistent"
-	_, err := svc.Submit(context.Background(),req)
+	_, err := svc.Submit(context.Background(), req)
 	if !errors.Is(err, ErrStrategyNotFound) {
 		t.Fatalf("expected ErrStrategyNotFound, got %v", err)
 	}
@@ -232,7 +283,7 @@ func TestSubmit_InstrumentNotFound(t *testing.T) {
 		&mockEngine{},
 	)
 
-	_, err := svc.Submit(context.Background(),defaultRequest())
+	_, err := svc.Submit(context.Background(), defaultRequest())
 	if !errors.Is(err, ErrNoInstrument) {
 		t.Fatalf("expected ErrNoInstrument, got %v", err)
 	}
@@ -264,7 +315,7 @@ func TestSubmit_CreateFails(t *testing.T) {
 		&mockEngine{},
 	)
 
-	_, err := svc.Submit(context.Background(),defaultRequest())
+	_, err := svc.Submit(context.Background(), defaultRequest())
 	if err == nil {
 		t.Fatal("expected error on create failure")
 	}
@@ -373,6 +424,9 @@ func TestSubmit_Success_MetricsPopulated(t *testing.T) {
 	if run.InstrumentToken != "NIFTY"+models.ContinuousFuturesSuffix {
 		t.Errorf("expected InstrumentToken %s, got %s", "NIFTY"+models.ContinuousFuturesSuffix, run.InstrumentToken)
 	}
+	if run.SignalInstrumentToken == nil || *run.SignalInstrumentToken != "NIFTY" {
+		t.Errorf("expected SignalInstrumentToken %s, got %v", "NIFTY", run.SignalInstrumentToken)
+	}
 
 	if len(br.capturedUpdateResult) == 0 {
 		t.Fatal("expected UpdateResult to have been called")
@@ -395,6 +449,123 @@ func TestSubmit_Success_MetricsPopulated(t *testing.T) {
 	}
 	if persisted.ChartData == nil {
 		t.Error("expected ChartData to be populated")
+	}
+}
+
+func TestSubmit_FetchesSignalAndTradeCandles(t *testing.T) {
+	br := &mockBacktestRepo{}
+	instruments := defaultInstruments()
+	signalCandles := defaultCandles()
+	tradeCandles := defaultCandles()
+	cr := &mockCandleRepo{
+		resultByInstrument: map[uuid.UUID][]models.Candle{
+			instruments[0].ID: signalCandles,
+			instruments[1].ID: tradeCandles,
+		},
+	}
+	eng := &mockEngine{result: defaultEngineResult()}
+	svc := newService(
+		br,
+		defaultLookup(),
+		cr,
+		&mockInstrumentRepo{listResult: instruments},
+		eng,
+	)
+
+	_, err := svc.Submit(context.Background(), defaultRequest())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cr.queries) != 2 {
+		t.Fatalf("expected 2 candle queries, got %d", len(cr.queries))
+	}
+	if cr.queries[0].InstrumentID != instruments[0].ID {
+		t.Errorf("expected signal candle query for index instrument")
+	}
+	if cr.queries[1].InstrumentID != instruments[1].ID {
+		t.Errorf("expected trade candle query for continuous futures instrument")
+	}
+	if len(eng.capturedInputs.SignalCandles) != len(signalCandles) {
+		t.Errorf("expected signal candles to reach engine")
+	}
+	if len(eng.capturedInputs.TradeCandles) != len(tradeCandles) {
+		t.Errorf("expected trade candles to reach engine")
+	}
+	if br.capturedCreate.SignalInstrumentToken == nil || *br.capturedCreate.SignalInstrumentToken != instruments[0].Symbol {
+		t.Errorf("expected signal token to be persisted")
+	}
+	if br.capturedCreate.InstrumentToken != instruments[1].Symbol {
+		t.Errorf("expected trade token to remain canonical instrument token")
+	}
+}
+
+func TestSubmit_SameInstrumentSourcesPersistSameToken(t *testing.T) {
+	underlying := "RELIANCE"
+	builtin := defaultBuiltin()
+	builtin.InstrumentType = models.InstrumentTypeEquity
+	builtin.SourceResolver = fixedTestSourceResolver{
+		sources: models.StrategySources{
+			Signal: models.InstrumentSpec{Kind: models.InstrumentKindEquity},
+			Trade:  models.InstrumentSpec{Kind: models.InstrumentKindEquity},
+		},
+	}
+	builtin.Inputs[0].Options = []string{underlying}
+	lookup := &mockBuiltinLookup{
+		strategies: map[string]*models.BuiltinStrategy{testSlug: builtin},
+		order:      []string{testSlug},
+	}
+	instrument := models.Instrument{
+		ID:             uuid.New(),
+		Symbol:         underlying,
+		InstrumentType: models.InstrumentTypeEquity,
+		Underlying:     &underlying,
+		LotSize:        1,
+	}
+	cr := &mockCandleRepo{
+		resultByInstrument: map[uuid.UUID][]models.Candle{
+			instrument.ID: defaultCandles(),
+		},
+	}
+	svc := newService(
+		&mockBacktestRepo{},
+		lookup,
+		cr,
+		&mockInstrumentRepo{listResult: []models.Instrument{instrument}},
+		&mockEngine{result: defaultEngineResult()},
+	)
+	req := defaultRequest()
+	req.Underlying = underlying
+
+	run, err := svc.Submit(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if run.InstrumentToken != underlying {
+		t.Errorf("expected trade token %q, got %q", underlying, run.InstrumentToken)
+	}
+	if run.SignalInstrumentToken == nil || *run.SignalInstrumentToken != underlying {
+		t.Errorf("expected signal token %q, got %v", underlying, run.SignalInstrumentToken)
+	}
+}
+
+func TestSubmit_InvalidSourceInterval(t *testing.T) {
+	builtin := defaultBuiltin()
+	builtin.CandleInterval = "1m"
+	lookup := &mockBuiltinLookup{
+		strategies: map[string]*models.BuiltinStrategy{testSlug: builtin},
+		order:      []string{testSlug},
+	}
+	svc := newService(
+		&mockBacktestRepo{},
+		lookup,
+		&mockCandleRepo{},
+		&mockInstrumentRepo{listResult: defaultInstruments()},
+		&mockEngine{},
+	)
+
+	_, err := svc.Submit(context.Background(), defaultRequest())
+	if !errors.Is(err, ErrInvalidStrategySources) {
+		t.Fatalf("expected ErrInvalidStrategySources, got %v", err)
 	}
 }
 

@@ -63,7 +63,7 @@ func TestBacktestResultPayloadJSONShape(t *testing.T) {
 		"bestTrade", "capEnd", "capStart", "chart",
 		"from", "interval", "longestLossStreak", "longestWinStreak",
 		"lots", "maxDrawdownPct", "netPnl", "profitFactor", "returnPct",
-		"rewardRisk", "strategySlug", "to",
+		"rewardRisk", "strategy", "to",
 		"tradeCount", "tradesPerWeek", "underlying", "winRate", "worstTrade",
 	}
 	assertKeysEqual(t, keys, want)
@@ -90,6 +90,7 @@ func TestToBacktestStatusResponse_Completed(t *testing.T) {
 	dd := 0.05
 	lots := 2
 	slug := "ma_crossover"
+	strategyName := "MA Crossover"
 	underlying := "NIFTY"
 
 	run := &models.BacktestRun{
@@ -103,6 +104,7 @@ func TestToBacktestStatusResponse_Completed(t *testing.T) {
 		Capital:      &capital,
 		Lots:         &lots,
 		StrategySlug: &slug,
+		StrategyName: &strategyName,
 		Underlying:   &underlying,
 		FromTs:       time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
 		ToTs:         time.Date(2025, 6, 30, 0, 0, 0, 0, time.UTC),
@@ -127,6 +129,12 @@ func TestToBacktestStatusResponse_Completed(t *testing.T) {
 	}
 	if r.TradeCount != 22 {
 		t.Errorf("expected tradeCount 22, got %d", r.TradeCount)
+	}
+	if r.Strategy.ID != slug {
+		t.Errorf("expected strategy id %q, got %q", slug, r.Strategy.ID)
+	}
+	if r.Strategy.Name != strategyName {
+		t.Errorf("expected strategy name %q, got %q", strategyName, r.Strategy.Name)
 	}
 	if math.Abs(r.CapEnd-(capital+pnl)) > floatTolerance {
 		t.Errorf("expected capEnd %f, got %f", capital+pnl, r.CapEnd)

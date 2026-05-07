@@ -15,6 +15,7 @@ type BuiltinStrategy struct {
 	TargetPct          *float64
 	StopLossPct        *float64
 	TimeExitMinutes    *int
+	SourceResolver     StrategySourceResolver
 }
 
 // StrategyInput describes a single user-configurable input for a strategy's backtest form.
@@ -49,4 +50,3 @@ type BuiltinStrategyLookup interface {
 	Get(slug string) (*BuiltinStrategy, bool)
 	All() []*BuiltinStrategy
 }
-

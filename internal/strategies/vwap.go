@@ -26,7 +26,7 @@ func VWAPCrossover() *models.BuiltinStrategy {
 				DefaultValue: models.UnderlyingNifty,
 			},
 			{
-				Key:  "dateRange",
+				Key:   "dateRange",
 				Label: "Date range",
 				Type:  models.InputTypeDateRange,
 				Constraints: map[string]any{
@@ -54,5 +54,6 @@ func VWAPCrossover() *models.BuiltinStrategy {
 		InstrumentType:     models.InstrumentTypeFuturesIndex,
 		ExpiryRule:         models.ExpiryRuleCurrentMonth,
 		CandleInterval:     models.CandleInterval1D,
+		SourceResolver:     indexSignalFuturesIndexTradeSources(),
 	}
 }

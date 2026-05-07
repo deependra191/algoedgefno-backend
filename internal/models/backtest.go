@@ -70,14 +70,28 @@ type BacktestResult struct {
 	MaxDrawdown float64
 }
 
+// EngineInputs carries all candle streams consumed by the backtest engine.
+type EngineInputs struct {
+	SignalCandles []Candle
+	TradeCandles  []Candle
+}
+
 // BacktestEngine is the contract every backtest engine implementation must satisfy.
 type BacktestEngine interface {
-	// RunBacktest simulates strategy against the provided candle series and returns
-	// aggregated trade results. Candles must be in chronological order.
+	// RunBacktest simulates strategy against the provided candle streams and returns
+	// aggregated trade results. Candle streams must be in chronological order.
+	// Signal candles generate entry and reversal decisions only. Trade candles are
+	// the canonical stream for lot size, instrument token, tick size, margin, expiry,
+	// rollover behavior, execution prices, exits, and mark-to-market.
+	// Entry decisions use an inner join by signal timestamp and trade timestamp.
+	// A signal at T without a trade bar at T is skipped. Executions happen at the
+	// open of the next trade bar starting at or after T plus the strategy interval.
+	// Open positions evaluate exits on every trade-side bar, even when no signal
+	// candle exists for that timestamp.
 	// capital is the user's starting capital and is used as the drawdown denominator
 	// when the equity curve has not yet gone positive (avoids division by zero).
 	// Returns an error only if the strategy configuration is invalid.
-	RunBacktest(strategy *Strategy, candles []Candle, capital float64) (*BacktestResult, error)
+	RunBacktest(strategy *Strategy, inputs EngineInputs, capital float64) (*BacktestResult, error)
 	// ComputeTradeStats derives performance statistics from a completed trade list.
 	// from and to are the backtest date range used to compute tradesPerWeek.
 	// Pointer fields in the result are nil when mathematically undefined.
@@ -114,29 +128,30 @@ type BacktestRepository interface {
 
 // BacktestRun is the domain representation of a single backtest execution.
 type BacktestRun struct {
-	ID              uuid.UUID
-	StrategyID      *uuid.UUID
-	InstrumentToken string
-	FromTs          time.Time
-	ToTs            time.Time
-	CandleInterval  string
-	Status          string
-	NetPnl          *float64
-	TotalTrades     *int
-	WinCount        *int
-	LossCount       *int
-	MaxDrawdown     *float64
-	Trades          json.RawMessage
-	ErrorMessage    *string
-	CreatedAt       time.Time
-	CompletedAt     *time.Time
-	StrategySlug    *string
-	StrategyName    *string // transient: populated by service from builtins registry, never persisted
-	Capital         *float64
-	Lots            *int
-	Underlying      *string
-	ResultStats     *TradeStats
-	ChartData       *ChartData
+	ID                    uuid.UUID
+	StrategyID            *uuid.UUID
+	InstrumentToken       string
+	SignalInstrumentToken *string
+	FromTs                time.Time
+	ToTs                  time.Time
+	CandleInterval        string
+	Status                string
+	NetPnl                *float64
+	TotalTrades           *int
+	WinCount              *int
+	LossCount             *int
+	MaxDrawdown           *float64
+	Trades                json.RawMessage
+	ErrorMessage          *string
+	CreatedAt             time.Time
+	CompletedAt           *time.Time
+	StrategySlug          *string
+	StrategyName          *string // transient: populated by service from builtins registry, never persisted
+	Capital               *float64
+	Lots                  *int
+	Underlying            *string
+	ResultStats           *TradeStats
+	ChartData             *ChartData
 }
 
 // Backtest run status values stored in the status column of backtest_runs.

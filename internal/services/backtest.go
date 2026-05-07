@@ -15,10 +15,11 @@ import (
 )
 
 var (
-	ErrStrategyNotFound  = errors.New("strategy not found")
-	ErrNoInstrument      = errors.New("no instrument found for underlying")
-	ErrNoCandleData      = errors.New("no candle data available")
-	ErrInvalidUnderlying = errors.New("invalid underlying for strategy")
+	ErrStrategyNotFound       = errors.New("strategy not found")
+	ErrNoInstrument           = errors.New("no instrument found for underlying")
+	ErrNoCandleData           = errors.New("no candle data available")
+	ErrInvalidUnderlying      = errors.New("invalid underlying for strategy")
+	ErrInvalidStrategySources = errors.New("invalid strategy source declaration")
 )
 
 const (
@@ -82,22 +83,27 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 		return nil, ErrInvalidUnderlying
 	}
 
-	inst, err := s.resolveInstrument(ctx, builtin.InstrumentType, req.Underlying)
+	if builtin.SourceResolver == nil {
+		return nil, ErrInvalidStrategySources
+	}
+	params := models.StrategyParams{Underlying: req.Underlying}
+	sources := builtin.SourceResolver.Sources(params)
+	if err := models.ValidateStrategySourceIntervals(sources, builtin.CandleInterval); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidStrategySources, err)
+	}
+
+	signalInst, err := s.resolveInstrumentSpec(ctx, sources.Signal, req.Underlying, req.From)
+	if err != nil {
+		return nil, err
+	}
+	tradeInst, err := s.resolveInstrumentSpec(ctx, sources.Trade, req.Underlying, req.From)
 	if err != nil {
 		return nil, err
 	}
 
-	candles, err := s.candleStore.Query(ctx, models.CandleFilter{
-		InstrumentID: inst.ID,
-		From:         req.From,
-		To:           req.To,
-		Interval:     builtin.CandleInterval,
-	})
+	inputs, err := s.fetchEngineInputs(ctx, signalInst, tradeInst, builtin.CandleInterval, req.From, req.To)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch candle data: %w", err)
-	}
-	if len(candles) == 0 {
-		return nil, ErrNoCandleData
+		return nil, err
 	}
 
 	engineStrategy := &models.Strategy{
@@ -110,18 +116,18 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 		TargetPct:          builtin.TargetPct,
 		StopLossPct:        builtin.StopLossPct,
 		TimeExitMinutes:    builtin.TimeExitMinutes,
-		LotSize:            inst.LotSize,
+		LotSize:            tradeInst.LotSize,
 		NumberOfLots:       req.Lots,
 	}
 
-	run, err := s.createAndStartRun(ctx, inst, builtin, req)
+	run, err := s.createAndStartRun(ctx, signalInst, tradeInst, builtin, req)
 	if err != nil {
 		return nil, err
 	}
 
 	// Return a snapshot of the RUNNING run before the goroutine can mutate it.
 	snapshot := *run
-	s.launch(func() { s.executeRun(run, engineStrategy, candles) })
+	s.launch(func() { s.executeRun(run, engineStrategy, inputs) })
 
 	return &snapshot, nil
 }
@@ -155,7 +161,7 @@ func (s *BacktestService) ListAll(ctx context.Context) ([]models.BacktestRun, er
 // executeRun runs the engine and persists the result. It is called in a goroutine
 // and uses context.Background() since the originating HTTP request context will
 // have been cancelled by the time this executes.
-func (s *BacktestService) executeRun(run *models.BacktestRun, strategy *models.Strategy, candles []models.Candle) {
+func (s *BacktestService) executeRun(run *models.BacktestRun, strategy *models.Strategy, inputs models.EngineInputs) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("backtest %s: engine panic: %v", run.ID, r)
@@ -167,7 +173,7 @@ func (s *BacktestService) executeRun(run *models.BacktestRun, strategy *models.S
 	if run.Capital != nil {
 		capital = *run.Capital
 	}
-	result, err := s.engine.RunBacktest(strategy, candles, capital)
+	result, err := s.engine.RunBacktest(strategy, inputs, capital)
 	if err != nil {
 		s.failRun(ctx, run, fmt.Errorf("engine error: %w", err))
 		return
@@ -177,15 +183,12 @@ func (s *BacktestService) executeRun(run *models.BacktestRun, strategy *models.S
 	}
 }
 
-// resolveInstrument finds the instrument matching the strategy's type and user's underlying.
-// For futures types, it resolves to the continuous near-month instrument created during sync.
-func (s *BacktestService) resolveInstrument(ctx context.Context, instrumentType, underlying string) (*models.Instrument, error) {
-	lookupType := instrumentType
-	switch instrumentType {
-	case models.InstrumentTypeFuturesIndex:
-		lookupType = models.InstrumentTypeFuturesIndexCont
-	case models.InstrumentTypeFuturesStock:
-		lookupType = models.InstrumentTypeFuturesStockCont
+// resolveInstrumentSpec finds the instrument matching the declared source kind and user's underlying.
+// Continuous futures rollover behavior is owned by the resolved trade-side instrument, not the engine.
+func (s *BacktestService) resolveInstrumentSpec(ctx context.Context, spec models.InstrumentSpec, underlying string, _ time.Time) (*models.Instrument, error) {
+	lookupType, err := instrumentTypeForKind(spec.Kind)
+	if err != nil {
+		return nil, err
 	}
 
 	instruments, err := s.instrumentStore.List(ctx, models.InstrumentFilter{
@@ -201,20 +204,90 @@ func (s *BacktestService) resolveInstrument(ctx context.Context, instrumentType,
 	return &instruments[0], nil
 }
 
+func instrumentTypeForKind(kind models.InstrumentKind) (string, error) {
+	switch kind {
+	case models.InstrumentKindIndex:
+		return models.InstrumentTypeIndex, nil
+	case models.InstrumentKindEquity:
+		return models.InstrumentTypeEquity, nil
+	case models.InstrumentKindFuturesIndex:
+		return models.InstrumentTypeFuturesIndex, nil
+	case models.InstrumentKindFuturesStock:
+		return models.InstrumentTypeFuturesStock, nil
+	case models.InstrumentKindFuturesIndexContinuous:
+		return models.InstrumentTypeFuturesIndexCont, nil
+	case models.InstrumentKindFuturesStockContinuous:
+		return models.InstrumentTypeFuturesStockCont, nil
+	case models.InstrumentKindOptionsIndex:
+		return models.InstrumentTypeOptionsIndex, nil
+	case models.InstrumentKindOptionsStock:
+		return models.InstrumentTypeOptionsStock, nil
+	default:
+		return "", fmt.Errorf("%w: unknown instrument kind %s", ErrInvalidStrategySources, kind)
+	}
+}
+
+func (s *BacktestService) fetchEngineInputs(
+	ctx context.Context,
+	signalInst *models.Instrument,
+	tradeInst *models.Instrument,
+	interval string,
+	from time.Time,
+	to time.Time,
+) (models.EngineInputs, error) {
+	signalCandles, err := s.fetchCandles(ctx, signalInst.ID, interval, from, to)
+	if err != nil {
+		return models.EngineInputs{}, fmt.Errorf("failed to fetch signal candle data: %w", err)
+	}
+	if len(signalCandles) == 0 {
+		return models.EngineInputs{}, ErrNoCandleData
+	}
+
+	tradeCandles, err := s.fetchCandles(ctx, tradeInst.ID, interval, from, to)
+	if err != nil {
+		return models.EngineInputs{}, fmt.Errorf("failed to fetch trade candle data: %w", err)
+	}
+	if len(tradeCandles) == 0 {
+		return models.EngineInputs{}, ErrNoCandleData
+	}
+
+	return models.EngineInputs{
+		SignalCandles: signalCandles,
+		TradeCandles:  tradeCandles,
+	}, nil
+}
+
+func (s *BacktestService) fetchCandles(ctx context.Context, instrumentID uuid.UUID, interval string, from time.Time, to time.Time) ([]models.Candle, error) {
+	return s.candleStore.Query(ctx, models.CandleFilter{
+		InstrumentID: instrumentID,
+		From:         from,
+		To:           to,
+		Interval:     interval,
+	})
+}
+
 // createAndStartRun builds the BacktestRun record, persists it, and transitions
 // it to RUNNING. Returns the persisted run ready for engine execution.
-func (s *BacktestService) createAndStartRun(ctx context.Context, inst *models.Instrument, builtin *models.BuiltinStrategy, req BacktestRequest) (*models.BacktestRun, error) {
+func (s *BacktestService) createAndStartRun(
+	ctx context.Context,
+	signalInst *models.Instrument,
+	tradeInst *models.Instrument,
+	builtin *models.BuiltinStrategy,
+	req BacktestRequest,
+) (*models.BacktestRun, error) {
+	signalToken := signalInst.Symbol
 	run := &models.BacktestRun{
-		ID:              uuid.New(),
-		StrategySlug:    &req.StrategySlug,
-		InstrumentToken: inst.Symbol,
-		FromTs:          req.From,
-		ToTs:            req.To,
-		CandleInterval:  builtin.CandleInterval,
-		Status:          models.BacktestPending,
-		Capital:         &req.Capital,
-		Lots:            &req.Lots,
-		Underlying:      &req.Underlying,
+		ID:                    uuid.New(),
+		StrategySlug:          &req.StrategySlug,
+		InstrumentToken:       tradeInst.Symbol,
+		SignalInstrumentToken: &signalToken,
+		FromTs:                req.From,
+		ToTs:                  req.To,
+		CandleInterval:        builtin.CandleInterval,
+		Status:                models.BacktestPending,
+		Capital:               &req.Capital,
+		Lots:                  &req.Lots,
+		Underlying:            &req.Underlying,
 	}
 	if err := s.backtestStore.Create(ctx, run); err != nil {
 		return nil, fmt.Errorf("failed to create backtest run: %w", err)

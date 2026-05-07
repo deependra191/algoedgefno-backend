@@ -3,7 +3,7 @@ package strategies
 import "github.com/deependra191/algoedgefno-backend/internal/models"
 
 const (
-	slugMACrossover    = "ma_crossover"
+	slugMACrossover     = "ma_crossover"
 	historicalDataStart = "2022-01-01"
 )
 
@@ -58,5 +58,6 @@ func MACrossover() *models.BuiltinStrategy {
 		InstrumentType:     models.InstrumentTypeFuturesIndex,
 		ExpiryRule:         models.ExpiryRuleCurrentMonth,
 		CandleInterval:     models.CandleInterval1D,
+		SourceResolver:     indexSignalFuturesIndexTradeSources(),
 	}
 }

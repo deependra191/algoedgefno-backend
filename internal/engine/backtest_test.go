@@ -37,6 +37,37 @@ func makeUpDownCandles(upCount, downCount int) []models.Candle {
 	return makeCandleSeries(closes, 5)
 }
 
+func makeMomentumSignalCandles() []models.Candle {
+	closes := make([]float64, 21)
+	for i := 0; i < 20; i++ {
+		closes[i] = 100
+	}
+	closes[20] = 110
+	return makeCandleSeries(closes, 5)
+}
+
+func sameStreamInputs(candles []models.Candle) models.EngineInputs {
+	return models.EngineInputs{
+		SignalCandles: candles,
+		TradeCandles:  candles,
+	}
+}
+
+func tradeCandlesAt(times []time.Time, opens []float64) []models.Candle {
+	candles := make([]models.Candle, len(times))
+	for i := range times {
+		open := opens[i]
+		candles[i] = models.Candle{
+			Timestamp: times[i],
+			Open:      open,
+			High:      open + 1,
+			Low:       open - 1,
+			Close:     open + 0.5,
+		}
+	}
+	return candles
+}
+
 func TestEvaluate_UnknownCondition(t *testing.T) {
 	s := &models.Strategy{EntryConditionType: "INVALID"}
 	_, err := Evaluate(s, []models.Candle{{Close: 1}})
@@ -155,7 +186,7 @@ func TestRunBacktest_MACrossover(t *testing.T) {
 		LotSize:            1,
 	}
 
-	result, err := NewBacktester().RunBacktest(s, candles, 0)
+	result, err := NewBacktester().RunBacktest(s, sameStreamInputs(candles), 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -211,7 +242,7 @@ func TestRunBacktest_TargetHit(t *testing.T) {
 		TargetPct:          ptrFloat(5.0),
 	}
 
-	result, err := NewBacktester().RunBacktest(s, candles, 0)
+	result, err := NewBacktester().RunBacktest(s, sameStreamInputs(candles), 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -253,7 +284,7 @@ func TestRunBacktest_StopLossHit(t *testing.T) {
 		StopLossPct:        ptrFloat(3.0),
 	}
 
-	result, err := NewBacktester().RunBacktest(s, candles, 0)
+	result, err := NewBacktester().RunBacktest(s, sameStreamInputs(candles), 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -289,7 +320,7 @@ func TestRunBacktest_TimeExit(t *testing.T) {
 		TimeExitMinutes:    ptrInt(20),
 	}
 
-	result, err := NewBacktester().RunBacktest(s, candles, 0)
+	result, err := NewBacktester().RunBacktest(s, sameStreamInputs(candles), 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -316,7 +347,7 @@ func TestRunBacktest_MaxDrawdown(t *testing.T) {
 		LotSize:            1,
 	}
 
-	result, err := NewBacktester().RunBacktest(s, candles, 0)
+	result, err := NewBacktester().RunBacktest(s, sameStreamInputs(candles), 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -334,7 +365,7 @@ func TestRunBacktest_NoSignals(t *testing.T) {
 		LotSize:            1,
 	}
 
-	result, err := NewBacktester().RunBacktest(s, candles, 0)
+	result, err := NewBacktester().RunBacktest(s, sameStreamInputs(candles), 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -355,7 +386,7 @@ func TestRunBacktest_QuantityIsLotSizeTimesNumberOfLots(t *testing.T) {
 		NumberOfLots:       3,
 	}
 
-	result, err := NewBacktester().RunBacktest(s, candles, 0)
+	result, err := NewBacktester().RunBacktest(s, sameStreamInputs(candles), 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -364,5 +395,93 @@ func TestRunBacktest_QuantityIsLotSizeTimesNumberOfLots(t *testing.T) {
 		if tr.Quantity != 150 {
 			t.Errorf("expected quantity 150 (50*3), got %d", tr.Quantity)
 		}
+	}
+}
+
+func TestRunBacktest_SplitStreamsExecuteAtNextTradeOpen(t *testing.T) {
+	signalCandles := makeMomentumSignalCandles()
+	signalTime := signalCandles[len(signalCandles)-1].Timestamp
+	tradeCandles := tradeCandlesAt(
+		[]time.Time{signalTime, signalTime.Add(5 * time.Minute), signalTime.Add(10 * time.Minute)},
+		[]float64{200, 250, 260},
+	)
+	s := &models.Strategy{
+		EntryConditionType: models.EntryConditionMomentum,
+		LotSize:            1,
+	}
+
+	result, err := NewBacktester().RunBacktest(s, models.EngineInputs{
+		SignalCandles: signalCandles,
+		TradeCandles:  tradeCandles,
+	}, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.TotalTrades != 1 {
+		t.Fatalf("expected 1 trade, got %d", result.TotalTrades)
+	}
+	trade := result.Trades[0]
+	if !trade.EntryTimestamp.Equal(signalTime.Add(5 * time.Minute)) {
+		t.Errorf("expected entry at next trade bar, got %s", trade.EntryTimestamp)
+	}
+	if trade.EntryPrice != 250 {
+		t.Errorf("expected entry at next trade open 250, got %f", trade.EntryPrice)
+	}
+}
+
+func TestRunBacktest_TradeGapAtSignalTimestampSkipsEntry(t *testing.T) {
+	signalCandles := makeMomentumSignalCandles()
+	signalTime := signalCandles[len(signalCandles)-1].Timestamp
+	tradeCandles := tradeCandlesAt(
+		[]time.Time{signalTime.Add(5 * time.Minute), signalTime.Add(10 * time.Minute)},
+		[]float64{250, 260},
+	)
+	s := &models.Strategy{
+		EntryConditionType: models.EntryConditionMomentum,
+		LotSize:            1,
+	}
+
+	result, err := NewBacktester().RunBacktest(s, models.EngineInputs{
+		SignalCandles: signalCandles,
+		TradeCandles:  tradeCandles,
+	}, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.TotalTrades != 0 {
+		t.Errorf("expected no entry when trade bar is missing at signal timestamp, got %d trades", result.TotalTrades)
+	}
+}
+
+func TestRunBacktest_TradeSideExitWithoutSignalBar(t *testing.T) {
+	signalCandles := makeMomentumSignalCandles()
+	signalTime := signalCandles[len(signalCandles)-1].Timestamp
+	tradeCandles := tradeCandlesAt(
+		[]time.Time{signalTime, signalTime.Add(5 * time.Minute), signalTime.Add(10 * time.Minute)},
+		[]float64{200, 250, 240},
+	)
+	tradeCandles[2].Low = 200
+	s := &models.Strategy{
+		EntryConditionType: models.EntryConditionMomentum,
+		LotSize:            1,
+		StopLossPct:        ptrFloat(5.0),
+	}
+
+	result, err := NewBacktester().RunBacktest(s, models.EngineInputs{
+		SignalCandles: signalCandles,
+		TradeCandles:  tradeCandles,
+	}, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.TotalTrades != 1 {
+		t.Fatalf("expected 1 trade, got %d", result.TotalTrades)
+	}
+	trade := result.Trades[0]
+	if trade.ExitReason != ExitReasonStopLoss {
+		t.Fatalf("expected stop-loss exit on trade-side bar, got %s", trade.ExitReason)
+	}
+	if !trade.ExitTimestamp.Equal(signalTime.Add(10 * time.Minute)) {
+		t.Errorf("expected exit on trade-side-only bar, got %s", trade.ExitTimestamp)
 	}
 }

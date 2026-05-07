@@ -28,6 +28,12 @@ func (r *Registry) register(s *models.BuiltinStrategy) {
 	if _, exists := r.strategies[s.ID]; exists {
 		panic(fmt.Sprintf("strategies: duplicate slug %q", s.ID))
 	}
+	if s.SourceResolver == nil {
+		panic(fmt.Sprintf("strategies: missing source resolver for %q", s.ID))
+	}
+	if err := models.ValidateStrategySourceIntervals(s.SourceResolver.Sources(models.StrategyParams{}), s.CandleInterval); err != nil {
+		panic(fmt.Sprintf("strategies: invalid source intervals for %q: %v", s.ID, err))
+	}
 	r.strategies[s.ID] = s
 	r.order = append(r.order, s.ID)
 }

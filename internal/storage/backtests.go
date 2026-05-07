@@ -30,10 +30,10 @@ func (s *BacktestStore) Create(ctx context.Context, run *models.BacktestRun) err
 	ent := toBacktestEntity(run)
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO backtest_runs
-			(id, strategy_id, strategy_slug, instrument_token, from_ts, to_ts,
+			(id, strategy_id, strategy_slug, instrument_token, signal_instrument_token, from_ts, to_ts,
 			 candle_interval, status, capital, lots, underlying, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
-		ent.ID, ent.StrategyID, ent.StrategySlug, ent.InstrumentToken,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())`,
+		ent.ID, ent.StrategyID, ent.StrategySlug, ent.InstrumentToken, ent.SignalInstrumentToken,
 		ent.FromTs, ent.ToTs, ent.CandleInterval, ent.Status,
 		ent.Capital, ent.Lots, ent.Underlying,
 	)
@@ -85,7 +85,7 @@ func (s *BacktestStore) UpdateResult(ctx context.Context, run *models.BacktestRu
 
 func (s *BacktestStore) GetByID(ctx context.Context, id uuid.UUID) (*models.BacktestRun, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT id, strategy_id, instrument_token, from_ts, to_ts, candle_interval, status,
+		SELECT id, strategy_id, instrument_token, signal_instrument_token, from_ts, to_ts, candle_interval, status,
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
 		       error_message, created_at, completed_at,
 		       strategy_slug, capital, lots, underlying,
@@ -104,7 +104,7 @@ func (s *BacktestStore) GetByID(ctx context.Context, id uuid.UUID) (*models.Back
 // GetByIDWithTrades returns the run including the trades_json blob — use only for the trades endpoint.
 func (s *BacktestStore) GetByIDWithTrades(ctx context.Context, id uuid.UUID) (*models.BacktestRun, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT id, strategy_id, instrument_token, from_ts, to_ts, candle_interval, status,
+		SELECT id, strategy_id, instrument_token, signal_instrument_token, from_ts, to_ts, candle_interval, status,
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
 		       trades_json, error_message, created_at, completed_at,
 		       strategy_slug, capital, lots, underlying
@@ -121,7 +121,7 @@ func (s *BacktestStore) GetByIDWithTrades(ctx context.Context, id uuid.UUID) (*m
 
 func (s *BacktestStore) ListByStrategy(ctx context.Context, strategyID uuid.UUID) ([]models.BacktestRun, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, strategy_id, instrument_token, from_ts, to_ts, candle_interval, status,
+		SELECT id, strategy_id, instrument_token, signal_instrument_token, from_ts, to_ts, candle_interval, status,
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
 		       trades_json, error_message, created_at, completed_at,
 		       strategy_slug, capital, lots, underlying
@@ -145,7 +145,7 @@ func (s *BacktestStore) ListByStrategy(ctx context.Context, strategyID uuid.UUID
 // ListAll returns the most recent backtest runs, capped at 100 rows.
 func (s *BacktestStore) ListAll(ctx context.Context) ([]models.BacktestRun, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, strategy_id, instrument_token, from_ts, to_ts, candle_interval, status,
+		SELECT id, strategy_id, instrument_token, signal_instrument_token, from_ts, to_ts, candle_interval, status,
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
 		       trades_json, error_message, created_at, completed_at,
 		       strategy_slug, capital, lots, underlying
@@ -169,7 +169,7 @@ func (s *BacktestStore) ListAll(ctx context.Context) ([]models.BacktestRun, erro
 // LatestCompletedBySlug returns the most recent COMPLETED backtest for a built-in strategy slug.
 func (s *BacktestStore) LatestCompletedBySlug(ctx context.Context, slug string) (*models.BacktestRun, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT id, strategy_id, instrument_token, from_ts, to_ts, candle_interval, status,
+		SELECT id, strategy_id, instrument_token, signal_instrument_token, from_ts, to_ts, candle_interval, status,
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
 		       error_message, created_at, completed_at,
 		       strategy_slug, capital, lots, underlying,
