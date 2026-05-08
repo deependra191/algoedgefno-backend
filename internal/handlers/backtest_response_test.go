@@ -3,9 +3,13 @@ package handlers
 import (
 	"encoding/json"
 	"math"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
 	"github.com/deependra191/algoedgefno-backend/internal/models"
@@ -80,6 +84,39 @@ func TestBacktestTradeResponseJSONShape(t *testing.T) {
 	assertKeysEqual(t, keys, want)
 }
 
+func TestBacktestListResponseJSONShape(t *testing.T) {
+	resp := backtestListResponse{
+		Runs:  []backtestSummaryResponse{},
+		Page:  1,
+		Limit: 20,
+		Total: 0,
+	}
+	keys := jsonKeys(t, resp)
+	want := []string{"limit", "page", "runs", "total"}
+	assertKeysEqual(t, keys, want)
+}
+
+func TestBacktestSummaryResponseJSONShape(t *testing.T) {
+	resp := backtestSummaryResponse{
+		ID:          "abc",
+		Status:      models.BacktestCompleted,
+		CompletedAt: "2025-01-02T09:30:00Z",
+		Result: backtestSummaryResultResponse{
+			Strategy: backtestStrategyResponse{},
+		},
+	}
+	keys := jsonKeys(t, resp)
+	want := []string{"completedAt", "id", "result", "status"}
+	assertKeysEqual(t, keys, want)
+
+	resultKeys := jsonKeys(t, resp.Result)
+	resultWant := []string{
+		"capEnd", "capStart", "from", "interval", "maxDrawdownPct", "netPnl",
+		"returnPct", "strategy", "to", "tradeCount", "underlying", "winRate",
+	}
+	assertKeysEqual(t, resultKeys, resultWant)
+}
+
 func TestToBacktestStatusResponse_Completed(t *testing.T) {
 	id := uuid.New()
 	capital := 200000.0
@@ -141,6 +178,103 @@ func TestToBacktestStatusResponse_Completed(t *testing.T) {
 	}
 	if math.Abs(r.MaxDrawdownPct-5.0) > floatTolerance {
 		t.Errorf("expected maxDrawdownPct 5.0, got %f", r.MaxDrawdownPct)
+	}
+}
+
+func TestToBacktestListResponse_CompletedSummary(t *testing.T) {
+	run := validBacktestSummaryRun()
+	resp, err := toBacktestListResponse([]models.BacktestRun{run}, 1, 20, 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if resp.Page != 1 || resp.Limit != 20 || resp.Total != 1 {
+		t.Fatalf("unexpected pagination: page=%d limit=%d total=%d", resp.Page, resp.Limit, resp.Total)
+	}
+	if len(resp.Runs) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(resp.Runs))
+	}
+	got := resp.Runs[0]
+	if got.ID != run.ID.String() {
+		t.Errorf("expected ID %s, got %s", run.ID, got.ID)
+	}
+	if got.CompletedAt != run.CompletedAt.Format(time.RFC3339) {
+		t.Errorf("expected completedAt %s, got %s", run.CompletedAt.Format(time.RFC3339), got.CompletedAt)
+	}
+	if got.Result.Strategy.ID != *run.StrategySlug || got.Result.Strategy.Name != *run.StrategyName {
+		t.Errorf("unexpected strategy: %+v", got.Result.Strategy)
+	}
+	if math.Abs(got.Result.CapEnd-(*run.Capital+*run.NetPnl)) > floatTolerance {
+		t.Errorf("expected capEnd %f, got %f", *run.Capital+*run.NetPnl, got.Result.CapEnd)
+	}
+	if got.Result.WinRate == nil || *got.Result.WinRate != 50 {
+		t.Fatalf("expected winRate 50, got %v", got.Result.WinRate)
+	}
+	if got.Result.MaxDrawdownPct == nil || math.Abs(*got.Result.MaxDrawdownPct-5.0) > floatTolerance {
+		t.Fatalf("expected maxDrawdownPct 5.0, got %v", got.Result.MaxDrawdownPct)
+	}
+}
+
+func TestToBacktestSummaryResponse_RequiredFieldValidation(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*models.BacktestRun)
+	}{
+		{name: "missing strategy slug", mutate: func(r *models.BacktestRun) { r.StrategySlug = nil }},
+		{name: "blank strategy slug", mutate: func(r *models.BacktestRun) { r.StrategySlug = ptrString("") }},
+		{name: "missing strategy name", mutate: func(r *models.BacktestRun) { r.StrategyName = nil }},
+		{name: "blank strategy name", mutate: func(r *models.BacktestRun) { r.StrategyName = ptrString("") }},
+		{name: "missing underlying", mutate: func(r *models.BacktestRun) { r.Underlying = nil }},
+		{name: "blank underlying", mutate: func(r *models.BacktestRun) { r.Underlying = ptrString("") }},
+		{name: "missing capital", mutate: func(r *models.BacktestRun) { r.Capital = nil }},
+		{name: "missing net pnl", mutate: func(r *models.BacktestRun) { r.NetPnl = nil }},
+		{name: "missing total trades", mutate: func(r *models.BacktestRun) { r.TotalTrades = nil }},
+		{name: "missing completed at", mutate: func(r *models.BacktestRun) { r.CompletedAt = nil }},
+		{name: "nil id", mutate: func(r *models.BacktestRun) { r.ID = uuid.Nil }},
+		{name: "non completed status", mutate: func(r *models.BacktestRun) { r.Status = models.BacktestRunning }},
+		{name: "missing interval", mutate: func(r *models.BacktestRun) { r.CandleInterval = "" }},
+		{name: "missing from", mutate: func(r *models.BacktestRun) { r.FromTs = time.Time{} }},
+		{name: "missing to", mutate: func(r *models.BacktestRun) { r.ToTs = time.Time{} }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			run := validBacktestSummaryRun()
+			tt.mutate(&run)
+			if _, err := toBacktestSummaryResponse(&run); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+}
+
+func TestToBacktestSummaryResponse_NullableOptionalMetrics(t *testing.T) {
+	run := validBacktestSummaryRun()
+	run.WinCount = nil
+	run.MaxDrawdown = nil
+
+	resp, err := toBacktestSummaryResponse(&run)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Result.WinRate != nil {
+		t.Fatalf("expected nil winRate, got %v", resp.Result.WinRate)
+	}
+	if resp.Result.MaxDrawdownPct != nil {
+		t.Fatalf("expected nil maxDrawdownPct, got %v", resp.Result.MaxDrawdownPct)
+	}
+}
+
+func TestToBacktestSummaryResponse_WinRateNilWhenNoTrades(t *testing.T) {
+	run := validBacktestSummaryRun()
+	*run.TotalTrades = 0
+
+	resp, err := toBacktestSummaryResponse(&run)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Result.WinRate != nil {
+		t.Fatalf("expected nil winRate, got %v", resp.Result.WinRate)
 	}
 }
 
@@ -227,4 +361,99 @@ func TestBacktestSubmitRequestJSONShape(t *testing.T) {
 	keys := jsonKeys(t, resp)
 	want := []string{"inputs", "strategyId"}
 	assertKeysEqual(t, keys, want)
+}
+
+func TestParseBacktestListPagination(t *testing.T) {
+	tests := []struct {
+		name      string
+		rawQuery  string
+		wantPage  int
+		wantLimit int
+	}{
+		{name: "defaults", wantPage: 1, wantLimit: 20},
+		{name: "custom", rawQuery: "page=2&limit=30", wantPage: 2, wantLimit: 30},
+		{name: "caps limit", rawQuery: "page=3&limit=500", wantPage: 3, wantLimit: 100},
+		{name: "invalid falls back", rawQuery: "page=abc&limit=xyz", wantPage: 1, wantLimit: 20},
+		{name: "negative falls back", rawQuery: "page=-1&limit=-20", wantPage: 1, wantLimit: 20},
+		{name: "zero falls back", rawQuery: "page=0&limit=0", wantPage: 1, wantLimit: 20},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			page, limit := parseBacktestListPagination(testGinContext(tt.rawQuery))
+			if page != tt.wantPage || limit != tt.wantLimit {
+				t.Fatalf("expected page=%d limit=%d, got page=%d limit=%d", tt.wantPage, tt.wantLimit, page, limit)
+			}
+		})
+	}
+}
+
+func TestParseTradesPagination(t *testing.T) {
+	tests := []struct {
+		name      string
+		rawQuery  string
+		wantPage  int
+		wantLimit int
+	}{
+		{name: "defaults", wantPage: 1, wantLimit: 50},
+		{name: "custom", rawQuery: "page=2&limit=75", wantPage: 2, wantLimit: 75},
+		{name: "caps limit", rawQuery: "page=3&limit=500", wantPage: 3, wantLimit: 200},
+		{name: "invalid falls back", rawQuery: "page=abc&limit=xyz", wantPage: 1, wantLimit: 50},
+		{name: "negative falls back", rawQuery: "page=-1&limit=-20", wantPage: 1, wantLimit: 50},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			page, limit := parseTradesPagination(testGinContext(tt.rawQuery))
+			if page != tt.wantPage || limit != tt.wantLimit {
+				t.Fatalf("expected page=%d limit=%d, got page=%d limit=%d", tt.wantPage, tt.wantLimit, page, limit)
+			}
+		})
+	}
+}
+
+func validBacktestSummaryRun() models.BacktestRun {
+	return models.BacktestRun{
+		ID:             uuid.New(),
+		Status:         models.BacktestCompleted,
+		NetPnl:         ptrFloat(22400),
+		TotalTrades:    ptrInt(22),
+		WinCount:       ptrInt(11),
+		MaxDrawdown:    ptrFloat(0.05),
+		Capital:        ptrFloat(200000),
+		StrategySlug:   ptrString("ma_crossover"),
+		StrategyName:   ptrString("MA Crossover"),
+		Underlying:     ptrString("NIFTY"),
+		CandleInterval: models.CandleInterval1D,
+		FromTs:         time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		ToTs:           time.Date(2025, 6, 30, 0, 0, 0, 0, time.UTC),
+		CompletedAt:    ptrTime(time.Date(2025, 1, 2, 9, 30, 0, 0, time.UTC)),
+	}
+}
+
+func testGinContext(rawQuery string) *gin.Context {
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	target := "/api/v1/backtests"
+	if strings.TrimSpace(rawQuery) != "" {
+		target += "?" + rawQuery
+	}
+	c.Request = httptest.NewRequest(http.MethodGet, target, nil)
+	return c
+}
+
+func ptrString(v string) *string {
+	return &v
+}
+
+func ptrFloat(v float64) *float64 {
+	return &v
+}
+
+func ptrInt(v int) *int {
+	return &v
+}
+
+func ptrTime(v time.Time) *time.Time {
+	return &v
 }

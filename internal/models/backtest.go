@@ -125,8 +125,8 @@ type BacktestRepository interface {
 	// LatestCompletedBySlug returns the most recent COMPLETED backtest for a built-in strategy slug.
 	// Returns models.ErrNotFound if no completed run exists.
 	LatestCompletedBySlug(ctx context.Context, slug string) (*BacktestRun, error)
-	// ListAll returns all backtest runs ordered by created_at descending.
-	ListAll(ctx context.Context) ([]BacktestRun, error)
+	// ListCompleted returns completed backtest runs ordered by completed_at descending.
+	ListCompleted(ctx context.Context, page, limit int) ([]BacktestRun, int, error)
 }
 
 // BacktestRun is the domain representation of a single backtest execution.

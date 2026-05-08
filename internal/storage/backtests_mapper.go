@@ -148,10 +148,9 @@ func scanBacktestRunWithTrades(row pgx.Row) (*entities.BacktestRun, error) {
 	return &r, nil
 }
 
-// scanBacktestRunRow scans a row from list queries, which do not SELECT result_stats or chart_data.
+// scanBacktestRunRow scans a row from list queries, which do not SELECT large JSON blobs.
 func scanBacktestRunRow(rows pgx.Rows) (*entities.BacktestRun, error) {
 	var r entities.BacktestRun
-	var tradesBytes []byte
 	var netPnl, maxDrawdown *float64
 	var totalTrades, winCount, lossCount *int
 	var errMsg *string
@@ -159,13 +158,12 @@ func scanBacktestRunRow(rows pgx.Rows) (*entities.BacktestRun, error) {
 		&r.ID, &r.StrategyID, &r.InstrumentToken, &r.SignalInstrumentToken, &r.FromTs, &r.ToTs,
 		&r.CandleInterval, &r.Status,
 		&netPnl, &totalTrades, &winCount, &lossCount, &maxDrawdown,
-		&tradesBytes, &errMsg, &r.CreatedAt, &r.CompletedAt,
+		&errMsg, &r.CreatedAt, &r.CompletedAt,
 		&r.StrategySlug, &r.Capital, &r.Lots, &r.Underlying,
 	)
 	if err != nil {
 		return nil, err
 	}
-	r.TradesJSON = tradesBytes
 	r.NetPnl = netPnl
 	r.TotalTrades = totalTrades
 	r.WinCount = winCount

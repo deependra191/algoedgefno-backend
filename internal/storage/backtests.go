@@ -11,8 +11,6 @@ import (
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
-const defaultListLimit = 100
-
 var _ models.BacktestRepository = (*BacktestStore)(nil)
 
 type BacktestStore struct {
@@ -123,7 +121,7 @@ func (s *BacktestStore) ListByStrategy(ctx context.Context, strategyID uuid.UUID
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, strategy_id, instrument_token, signal_instrument_token, from_ts, to_ts, candle_interval, status,
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
-		       trades_json, error_message, created_at, completed_at,
+		       error_message, created_at, completed_at,
 		       strategy_slug, capital, lots, underlying
 		FROM backtest_runs WHERE strategy_id = $1 ORDER BY created_at DESC`, strategyID)
 	if err != nil {
@@ -142,16 +140,27 @@ func (s *BacktestStore) ListByStrategy(ctx context.Context, strategyID uuid.UUID
 	return result, rows.Err()
 }
 
-// ListAll returns the most recent backtest runs, capped at 100 rows.
-func (s *BacktestStore) ListAll(ctx context.Context) ([]models.BacktestRun, error) {
+// ListCompleted returns completed backtest runs ordered by completion time.
+func (s *BacktestStore) ListCompleted(ctx context.Context, page, limit int) ([]models.BacktestRun, int, error) {
+	var total int
+	if err := s.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM backtest_runs
+		WHERE status = $1 AND completed_at IS NOT NULL`, models.BacktestCompleted).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	offset := (page - 1) * limit
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, strategy_id, instrument_token, signal_instrument_token, from_ts, to_ts, candle_interval, status,
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
-		       trades_json, error_message, created_at, completed_at,
+		       error_message, created_at, completed_at,
 		       strategy_slug, capital, lots, underlying
-		FROM backtest_runs ORDER BY created_at DESC LIMIT $1`, defaultListLimit)
+		FROM backtest_runs
+		WHERE status = $1 AND completed_at IS NOT NULL
+		ORDER BY completed_at DESC, created_at DESC
+		LIMIT $2 OFFSET $3`, models.BacktestCompleted, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 
@@ -159,11 +168,11 @@ func (s *BacktestStore) ListAll(ctx context.Context) ([]models.BacktestRun, erro
 	for rows.Next() {
 		ent, err := scanBacktestRunRow(rows)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		result = append(result, *toBacktestModel(ent))
 	}
-	return result, rows.Err()
+	return result, total, rows.Err()
 }
 
 // LatestCompletedBySlug returns the most recent COMPLETED backtest for a built-in strategy slug.
