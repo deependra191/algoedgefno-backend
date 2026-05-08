@@ -86,7 +86,12 @@ func (h *BacktestHandler) List(c *gin.Context) {
 	if runs == nil {
 		runs = []models.BacktestRun{}
 	}
-	c.JSON(http.StatusOK, toBacktestListResponse(runs, page, limit, total))
+	resp, err := toBacktestListResponse(runs, page, limit, total)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to shape backtests list"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // GetByID returns the current state of a backtest run.

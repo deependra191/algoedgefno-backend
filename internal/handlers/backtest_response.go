@@ -2,8 +2,11 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"math"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
@@ -18,6 +21,8 @@ const (
 	defaultTradesLimit    = 50
 	maxTradesLimit        = 200
 )
+
+var errInvalidBacktestSummary = errors.New("invalid completed backtest summary")
 
 // backtestSubmitResponse is returned immediately by POST /backtests (HTTP 202).
 type backtestSubmitResponse struct {
@@ -272,47 +277,72 @@ func toBacktestTradesPageResponse(tradesJSON json.RawMessage, page, limit int) (
 	}, nil
 }
 
-func toBacktestListResponse(runs []models.BacktestRun, page, limit, total int) backtestListResponse {
+func toBacktestListResponse(runs []models.BacktestRun, page, limit, total int) (backtestListResponse, error) {
 	items := make([]backtestSummaryResponse, len(runs))
 	for i := range runs {
-		items[i] = toBacktestSummaryResponse(&runs[i])
+		item, err := toBacktestSummaryResponse(&runs[i])
+		if err != nil {
+			return backtestListResponse{}, err
+		}
+		items[i] = item
 	}
 	return backtestListResponse{
 		Runs:  items,
 		Page:  page,
 		Limit: limit,
 		Total: total,
-	}
+	}, nil
 }
 
-func toBacktestSummaryResponse(run *models.BacktestRun) backtestSummaryResponse {
-	capital := 0.0
-	if run.Capital != nil {
-		capital = *run.Capital
+func toBacktestSummaryResponse(run *models.BacktestRun) (backtestSummaryResponse, error) {
+	if err := validateBacktestSummary(run); err != nil {
+		return backtestSummaryResponse{}, err
 	}
-	netPnl := derefFloat(run.NetPnl)
 	return backtestSummaryResponse{
 		ID:          run.ID.String(),
 		Status:      run.Status,
 		CompletedAt: formatCompletedAt(run.CompletedAt),
 		Result: backtestSummaryResultResponse{
 			Strategy: backtestStrategyResponse{
-				ID:   derefStr(run.StrategySlug),
-				Name: derefStr(run.StrategyName),
+				ID:   *run.StrategySlug,
+				Name: *run.StrategyName,
 			},
-			Underlying:     derefStr(run.Underlying),
+			Underlying:     *run.Underlying,
 			Interval:       run.CandleInterval,
 			From:           run.FromTs.UTC().Format(dateFormat),
 			To:             run.ToTs.UTC().Format(dateFormat),
-			CapStart:       capital,
-			CapEnd:         round2(capital + netPnl),
-			NetPnl:         round2(netPnl),
+			CapStart:       *run.Capital,
+			CapEnd:         round2(*run.Capital + *run.NetPnl),
+			NetPnl:         round2(*run.NetPnl),
 			ReturnPct:      computeReturnPct(run),
-			TradeCount:     derefInt(run.TotalTrades),
+			TradeCount:     *run.TotalTrades,
 			WinRate:        computeWinRatePtr(run),
 			MaxDrawdownPct: computeMaxDrawdownPctPtr(run),
 		},
+	}, nil
+}
+
+func validateBacktestSummary(run *models.BacktestRun) error {
+	if run == nil ||
+		run.ID == uuid.Nil ||
+		run.Status != models.BacktestCompleted ||
+		run.CompletedAt == nil ||
+		isBlankPtr(run.StrategySlug) ||
+		isBlankPtr(run.StrategyName) ||
+		isBlankPtr(run.Underlying) ||
+		run.CandleInterval == "" ||
+		run.FromTs.IsZero() ||
+		run.ToTs.IsZero() ||
+		run.Capital == nil ||
+		run.NetPnl == nil ||
+		run.TotalTrades == nil {
+		return errInvalidBacktestSummary
 	}
+	return nil
+}
+
+func isBlankPtr(p *string) bool {
+	return p == nil || *p == ""
 }
 
 func computeWinRatePtr(run *models.BacktestRun) *int {
