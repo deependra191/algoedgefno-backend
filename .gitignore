@@ -20,3 +20,6 @@ Thumbs.db
 
 # Scratch
 scratch/
+.claire/
+.claude/
+.codex/
