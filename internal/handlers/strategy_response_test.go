@@ -51,7 +51,7 @@ func TestStrategyDetailResponseJSONShape(t *testing.T) {
 func TestStrategySectionResponseJSONShape(t *testing.T) {
 	resp := strategySectionResponse{
 		Key:        "BUILTIN",
-		Label:      "Strategies",
+		Label:      "FEATURED",
 		Strategies: []strategyListItemResponse{},
 	}
 	keys := jsonKeys(t, resp)

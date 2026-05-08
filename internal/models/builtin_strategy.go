@@ -15,6 +15,7 @@ type BuiltinStrategy struct {
 	TargetPct          *float64
 	StopLossPct        *float64
 	TimeExitMinutes    *int
+	SourceResolver     StrategySourceResolver
 }
 
 // StrategyInput describes a single user-configurable input for a strategy's backtest form.
@@ -37,6 +38,11 @@ const (
 	InputTypeCurrency  = "CURRENCY"
 )
 
+// Strategy input key constants used by built-ins and services.
+const (
+	StrategyInputKeyUnderlying = "underlying"
+)
+
 // Constraint key constants used in StrategyInput.Constraints maps.
 const (
 	ConstraintMin     = "min"
@@ -49,4 +55,3 @@ type BuiltinStrategyLookup interface {
 	Get(slug string) (*BuiltinStrategy, bool)
 	All() []*BuiltinStrategy
 }
-

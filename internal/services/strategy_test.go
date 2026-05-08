@@ -40,8 +40,8 @@ func (m *mockBacktestRepoForStrategy) LatestCompletedBySlug(_ context.Context, s
 func (m *mockBacktestRepoForStrategy) GetByIDWithTrades(_ context.Context, _ uuid.UUID) (*models.BacktestRun, error) {
 	return nil, models.ErrNotFound
 }
-func (m *mockBacktestRepoForStrategy) ListAll(_ context.Context) ([]models.BacktestRun, error) {
-	return nil, nil
+func (m *mockBacktestRepoForStrategy) ListCompleted(_ context.Context, _, _ int) ([]models.BacktestRun, int, error) {
+	return nil, 0, nil
 }
 
 type mockCandleRepoForStrategy struct {

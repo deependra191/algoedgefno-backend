@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"math"
 	"time"
 
@@ -13,6 +14,10 @@ const (
 	ExitReasonTimeExit       = "time_exit"
 	ExitReasonSignalReversal = "signal_reversal"
 	ExitReasonEndOfData      = "end_of_data"
+
+	candleInterval1DDuration = 24 * time.Hour
+	candleInterval5MDuration = 5 * time.Minute
+	errMsgUnknownInterval    = "unknown candle interval"
 )
 
 var _ models.BacktestEngine = (*Backtester)(nil)
@@ -24,19 +29,26 @@ func NewBacktester() *Backtester {
 	return &Backtester{}
 }
 
-// RunBacktest simulates a strategy against historical candles.
-// Each candle is processed in order:
-//  1. Exit the open trade if target/stop-loss/time-exit is hit.
-//  2. Process any signals at the same timestamp — reversals close + reopen, same-direction signals are ignored.
-//
-// Any trade still open at end of data is closed at the last candle's close price.
+// RunBacktest simulates a strategy against historical signal and trade candles.
+// Signals are generated from completed signal bars and executed at the open of
+// the next eligible trade bar. Exit checks and end-of-data closure are driven by
+// the trade-side candle stream.
 // capital is the user's starting capital used as the drawdown denominator when
 // the equity curve has not yet risen above zero (avoids division by zero).
-func (b *Backtester) RunBacktest(strategy *models.Strategy, candles []models.Candle, capital float64) (*models.BacktestResult, error) {
-	signals, err := Evaluate(strategy, candles)
+func (b *Backtester) RunBacktest(strategy *models.Strategy, inputs models.EngineInputs, capital float64) (*models.BacktestResult, error) {
+	if len(inputs.SignalCandles) == 0 || len(inputs.TradeCandles) == 0 {
+		return &models.BacktestResult{}, nil
+	}
+
+	signals, err := Evaluate(strategy, inputs.SignalCandles)
 	if err != nil {
 		return nil, err
 	}
+	interval, err := intervalDuration(inputs.Interval)
+	if err != nil {
+		return nil, err
+	}
+	scheduledSignals := scheduleSignals(signals, inputs.TradeCandles, interval)
 
 	lotSize := strategy.LotSize
 	if lotSize <= 0 {
@@ -53,10 +65,9 @@ func (b *Backtester) RunBacktest(strategy *models.Strategy, candles []models.Can
 	sigIdx := 0
 	equity, peakEquity, maxDrawdown := 0.0, 0.0, 0.0
 
-	for i := range candles {
-		candle := &candles[i]
+	for i := range inputs.TradeCandles {
+		candle := &inputs.TradeCandles[i]
 
-		// Exit takes priority: check before processing new signals at the same timestamp.
 		if openTrade != nil {
 			if reason, price := checkExitConditions(openTrade, candle, strategy); reason != "" {
 				closeTrade(openTrade, price, candle.Timestamp, reason, qty)
@@ -65,35 +76,31 @@ func (b *Backtester) RunBacktest(strategy *models.Strategy, candles []models.Can
 			}
 		}
 
-		// Walk signals that align to this candle's timestamp (there can be more than one).
-		for sigIdx < len(signals) && signals[sigIdx].Timestamp.Equal(candle.Timestamp) {
-			sig := signals[sigIdx]
+		for sigIdx < len(scheduledSignals) && scheduledSignals[sigIdx].ExecutionTimestamp.Equal(candle.Timestamp) {
+			sig := scheduledSignals[sigIdx]
 			sigIdx++
 
 			if openTrade != nil {
-				if !isReversal(openTrade.Side, sig.Side) {
-					// Same-direction signal while already in a trade — skip, no pyramiding.
+				if !isReversal(openTrade.Side, sig.Signal.Side) {
 					continue
 				}
-				// Opposite-direction signal: close current trade then fall through to open a new one.
-				closeTrade(openTrade, sig.Price, sig.Timestamp, ExitReasonSignalReversal, qty)
+				closeTrade(openTrade, candle.Open, candle.Timestamp, ExitReasonSignalReversal, qty)
 				recordTrade(result, *openTrade, &equity, &peakEquity, &maxDrawdown, capital)
 				openTrade = nil
 			}
 
 			openTrade = &models.Trade{
-				EntryTimestamp: sig.Timestamp,
-				Side:           sig.Side,
+				EntryTimestamp: candle.Timestamp,
+				Side:           sig.Signal.Side,
 				Quantity:       qty,
-				EntryPrice:     sig.Price,
-				Reason:         sig.Reason,
+				EntryPrice:     candle.Open,
+				Reason:         sig.Signal.Reason,
 			}
 		}
 	}
 
-	// Close any trade still open at end of data.
-	if openTrade != nil {
-		last := candles[len(candles)-1]
+	if openTrade != nil && len(inputs.TradeCandles) > 0 {
+		last := inputs.TradeCandles[len(inputs.TradeCandles)-1]
 		closeTrade(openTrade, last.Close, last.Timestamp, ExitReasonEndOfData, qty)
 		recordTrade(result, *openTrade, &equity, &peakEquity, &maxDrawdown, capital)
 	}
@@ -110,6 +117,58 @@ func (b *Backtester) RunBacktest(strategy *models.Strategy, candles []models.Can
 	result.MaxDrawdown = math.Round(maxDrawdown*10000) / 10000
 
 	return result, nil
+}
+
+type scheduledSignal struct {
+	Signal             Signal
+	ExecutionTimestamp time.Time
+}
+
+func scheduleSignals(signals []Signal, tradeCandles []models.Candle, interval time.Duration) []scheduledSignal {
+	if len(signals) == 0 || len(tradeCandles) == 0 {
+		return nil
+	}
+
+	scheduled := make([]scheduledSignal, 0, len(signals))
+	matchTradeIdx := 0
+	executionTradeIdx := 0
+	for _, sig := range signals {
+		for matchTradeIdx < len(tradeCandles) && tradeCandles[matchTradeIdx].Timestamp.Before(sig.Timestamp) {
+			matchTradeIdx++
+		}
+		if matchTradeIdx >= len(tradeCandles) {
+			break
+		}
+		if !tradeCandles[matchTradeIdx].Timestamp.Equal(sig.Timestamp) {
+			continue
+		}
+		earliestExecution := sig.Timestamp.Add(interval)
+		if executionTradeIdx < matchTradeIdx {
+			executionTradeIdx = matchTradeIdx
+		}
+		for executionTradeIdx < len(tradeCandles) && tradeCandles[executionTradeIdx].Timestamp.Before(earliestExecution) {
+			executionTradeIdx++
+		}
+		if executionTradeIdx >= len(tradeCandles) {
+			break
+		}
+		scheduled = append(scheduled, scheduledSignal{
+			Signal:             sig,
+			ExecutionTimestamp: tradeCandles[executionTradeIdx].Timestamp,
+		})
+	}
+	return scheduled
+}
+
+func intervalDuration(interval string) (time.Duration, error) {
+	switch interval {
+	case models.CandleInterval1D:
+		return candleInterval1DDuration, nil
+	case models.CandleInterval5M:
+		return candleInterval5MDuration, nil
+	default:
+		return 0, fmt.Errorf("%s: %s", errMsgUnknownInterval, interval)
+	}
 }
 
 // recordTrade appends a closed trade and updates the running equity and max-drawdown accumulators.

@@ -2,8 +2,11 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"math"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
@@ -11,10 +14,15 @@ import (
 const dateFormat = "2006-01-02"
 
 const (
-	defaultTradesPage  = 1
-	defaultTradesLimit = 50
-	maxTradesLimit     = 200
+	defaultBacktestsPage  = 1
+	defaultBacktestsLimit = 20
+	maxBacktestsLimit     = 100
+	defaultTradesPage     = 1
+	defaultTradesLimit    = 50
+	maxTradesLimit        = 200
 )
+
+var errInvalidBacktestSummary = errors.New("invalid completed backtest summary")
 
 // backtestSubmitResponse is returned immediately by POST /backtests (HTTP 202).
 type backtestSubmitResponse struct {
@@ -32,33 +40,38 @@ type backtestStatusResponse struct {
 	Result       *backtestResultPayload `json:"result,omitempty"`
 }
 
+type backtestStrategyResponse struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 // backtestResultPayload carries the full backtest result, present only on COMPLETED runs.
 type backtestResultPayload struct {
-	StrategySlug      string  `json:"strategySlug"`
-	Underlying        string  `json:"underlying"`
-	Interval          string  `json:"interval"`
-	From              string  `json:"from"`
-	To                string  `json:"to"`
-	Lots              int     `json:"lots"`
-	CapStart          float64 `json:"capStart"`
-	CapEnd            float64 `json:"capEnd"`
-	NetPnl            float64 `json:"netPnl"`
-	ReturnPct         float64 `json:"returnPct"`
-	TradeCount        int     `json:"tradeCount"`
-	WinRate           int     `json:"winRate"`
-	MaxDrawdownPct    float64 `json:"maxDrawdownPct"`
-	AvgWin            *float64 `json:"avgWin"`
-	AvgLoss           *float64 `json:"avgLoss"`
-	BestTrade         *float64 `json:"bestTrade"`
-	WorstTrade        *float64 `json:"worstTrade"`
-	AvgPnlPerTrade    *float64 `json:"avgPnlPerTrade"`
-	AvgHoldingMinutes *float64 `json:"avgHoldingMinutes"`
-	ProfitFactor      *float64 `json:"profitFactor"`
-	RewardRisk        *float64 `json:"rewardRisk"`
-	LongestWinStreak  int      `json:"longestWinStreak"`
-	LongestLossStreak int      `json:"longestLossStreak"`
-	TradesPerWeek     float64  `json:"tradesPerWeek"`
-	Chart             backtestChartResponse `json:"chart"`
+	Strategy          backtestStrategyResponse `json:"strategy"`
+	Underlying        string                   `json:"underlying"`
+	Interval          string                   `json:"interval"`
+	From              string                   `json:"from"`
+	To                string                   `json:"to"`
+	Lots              int                      `json:"lots"`
+	CapStart          float64                  `json:"capStart"`
+	CapEnd            float64                  `json:"capEnd"`
+	NetPnl            float64                  `json:"netPnl"`
+	ReturnPct         float64                  `json:"returnPct"`
+	TradeCount        int                      `json:"tradeCount"`
+	WinRate           int                      `json:"winRate"`
+	MaxDrawdownPct    float64                  `json:"maxDrawdownPct"`
+	AvgWin            *float64                 `json:"avgWin"`
+	AvgLoss           *float64                 `json:"avgLoss"`
+	BestTrade         *float64                 `json:"bestTrade"`
+	WorstTrade        *float64                 `json:"worstTrade"`
+	AvgPnlPerTrade    *float64                 `json:"avgPnlPerTrade"`
+	AvgHoldingMinutes *float64                 `json:"avgHoldingMinutes"`
+	ProfitFactor      *float64                 `json:"profitFactor"`
+	RewardRisk        *float64                 `json:"rewardRisk"`
+	LongestWinStreak  int                      `json:"longestWinStreak"`
+	LongestLossStreak int                      `json:"longestLossStreak"`
+	TradesPerWeek     float64                  `json:"tradesPerWeek"`
+	Chart             backtestChartResponse    `json:"chart"`
 }
 
 type backtestChartResponse struct {
@@ -92,21 +105,32 @@ type backtestTradeResponse struct {
 }
 
 type backtestListResponse struct {
-	Backtests []backtestSummaryResponse `json:"backtests"`
+	Runs  []backtestSummaryResponse `json:"runs"`
+	Page  int                       `json:"page"`
+	Limit int                       `json:"limit"`
+	Total int                       `json:"total"`
 }
 
 type backtestSummaryResponse struct {
-	ID           string  `json:"id"`
-	StrategySlug string  `json:"strategySlug"`
-	Underlying   string  `json:"underlying"`
-	From         string  `json:"from"`
-	To           string  `json:"to"`
-	Status       string  `json:"status"`
-	ReturnPct    float64 `json:"returnPct"`
-	WinRate      int     `json:"winRate"`
-	TradeCount   int     `json:"tradeCount"`
-	Capital      float64 `json:"capital"`
-	RanAt        string  `json:"ranAt"`
+	ID          string                        `json:"id"`
+	Status      string                        `json:"status"`
+	CompletedAt string                        `json:"completedAt"`
+	Result      backtestSummaryResultResponse `json:"result"`
+}
+
+type backtestSummaryResultResponse struct {
+	Strategy       backtestStrategyResponse `json:"strategy"`
+	Underlying     string                   `json:"underlying"`
+	Interval       string                   `json:"interval"`
+	From           string                   `json:"from"`
+	To             string                   `json:"to"`
+	CapStart       float64                  `json:"capStart"`
+	CapEnd         float64                  `json:"capEnd"`
+	NetPnl         float64                  `json:"netPnl"`
+	ReturnPct      float64                  `json:"returnPct"`
+	TradeCount     int                      `json:"tradeCount"`
+	WinRate        *int                     `json:"winRate"`
+	MaxDrawdownPct *float64                 `json:"maxDrawdownPct"`
 }
 
 type backtestSubmitRequest struct {
@@ -151,7 +175,10 @@ func toBacktestResultPayload(run *models.BacktestRun) *backtestResultPayload {
 	netPnl := derefFloat(run.NetPnl)
 
 	p := &backtestResultPayload{
-		StrategySlug:   derefStr(run.StrategySlug),
+		Strategy: backtestStrategyResponse{
+			ID:   derefStr(run.StrategySlug),
+			Name: derefStr(run.StrategyName),
+		},
 		Underlying:     derefStr(run.Underlying),
 		Interval:       run.CandleInterval,
 		From:           run.FromTs.UTC().Format(dateFormat),
@@ -250,40 +277,88 @@ func toBacktestTradesPageResponse(tradesJSON json.RawMessage, page, limit int) (
 	}, nil
 }
 
-func toBacktestListResponse(runs []models.BacktestRun) backtestListResponse {
+func toBacktestListResponse(runs []models.BacktestRun, page, limit, total int) (backtestListResponse, error) {
 	items := make([]backtestSummaryResponse, len(runs))
 	for i := range runs {
-		items[i] = toBacktestSummaryResponse(&runs[i])
+		item, err := toBacktestSummaryResponse(&runs[i])
+		if err != nil {
+			return backtestListResponse{}, err
+		}
+		items[i] = item
 	}
-	return backtestListResponse{Backtests: items}
+	return backtestListResponse{
+		Runs:  items,
+		Page:  page,
+		Limit: limit,
+		Total: total,
+	}, nil
 }
 
-func toBacktestSummaryResponse(run *models.BacktestRun) backtestSummaryResponse {
-	slug := ""
-	if run.StrategySlug != nil {
-		slug = *run.StrategySlug
-	}
-	underlying := ""
-	if run.Underlying != nil {
-		underlying = *run.Underlying
-	}
-	capital := 0.0
-	if run.Capital != nil {
-		capital = *run.Capital
+func toBacktestSummaryResponse(run *models.BacktestRun) (backtestSummaryResponse, error) {
+	if err := validateBacktestSummary(run); err != nil {
+		return backtestSummaryResponse{}, err
 	}
 	return backtestSummaryResponse{
-		ID:           run.ID.String(),
-		StrategySlug: slug,
-		Underlying:   underlying,
-		From:         run.FromTs.UTC().Format(dateFormat),
-		To:           run.ToTs.UTC().Format(dateFormat),
-		Status:       run.Status,
-		ReturnPct:    computeReturnPct(run),
-		WinRate:      computeWinRate(run),
-		TradeCount:   derefInt(run.TotalTrades),
-		Capital:      capital,
-		RanAt:        formatCompletedAt(run.CompletedAt),
+		ID:          run.ID.String(),
+		Status:      run.Status,
+		CompletedAt: formatCompletedAt(run.CompletedAt),
+		Result: backtestSummaryResultResponse{
+			Strategy: backtestStrategyResponse{
+				ID:   *run.StrategySlug,
+				Name: *run.StrategyName,
+			},
+			Underlying:     *run.Underlying,
+			Interval:       run.CandleInterval,
+			From:           run.FromTs.UTC().Format(dateFormat),
+			To:             run.ToTs.UTC().Format(dateFormat),
+			CapStart:       *run.Capital,
+			CapEnd:         round2(*run.Capital + *run.NetPnl),
+			NetPnl:         round2(*run.NetPnl),
+			ReturnPct:      computeReturnPct(run),
+			TradeCount:     *run.TotalTrades,
+			WinRate:        computeWinRatePtr(run),
+			MaxDrawdownPct: computeMaxDrawdownPctPtr(run),
+		},
+	}, nil
+}
+
+func validateBacktestSummary(run *models.BacktestRun) error {
+	if run == nil ||
+		run.ID == uuid.Nil ||
+		run.Status != models.BacktestCompleted ||
+		run.CompletedAt == nil ||
+		isBlankPtr(run.StrategySlug) ||
+		isBlankPtr(run.StrategyName) ||
+		isBlankPtr(run.Underlying) ||
+		run.CandleInterval == "" ||
+		run.FromTs.IsZero() ||
+		run.ToTs.IsZero() ||
+		run.Capital == nil ||
+		run.NetPnl == nil ||
+		run.TotalTrades == nil {
+		return errInvalidBacktestSummary
 	}
+	return nil
+}
+
+func isBlankPtr(p *string) bool {
+	return p == nil || *p == ""
+}
+
+func computeWinRatePtr(run *models.BacktestRun) *int {
+	if run.TotalTrades == nil || *run.TotalTrades == 0 || run.WinCount == nil {
+		return nil
+	}
+	winRate := *run.WinCount * 100 / *run.TotalTrades
+	return &winRate
+}
+
+func computeMaxDrawdownPctPtr(run *models.BacktestRun) *float64 {
+	if run.MaxDrawdown == nil {
+		return nil
+	}
+	maxDrawdownPct := round2(*run.MaxDrawdown * 100)
+	return &maxDrawdownPct
 }
 
 func round2(v float64) float64 {
