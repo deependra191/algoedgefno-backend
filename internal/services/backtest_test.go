@@ -21,10 +21,13 @@ type mockBacktestRepo struct {
 	getByIDErr      error
 	listResult      []models.BacktestRun
 	listErr         error
+	listTotal       int
 
 	capturedCreate       *models.BacktestRun
 	capturedUpdateStatus []*models.BacktestRun
 	capturedUpdateResult []*models.BacktestRun
+	capturedListPage     int
+	capturedListLimit    int
 }
 
 func (m *mockBacktestRepo) Create(_ context.Context, run *models.BacktestRun) error {
@@ -53,8 +56,14 @@ func (m *mockBacktestRepo) LatestCompletedBySlug(_ context.Context, _ string) (*
 func (m *mockBacktestRepo) GetByIDWithTrades(_ context.Context, _ uuid.UUID) (*models.BacktestRun, error) {
 	return m.getByIDResult, m.getByIDErr
 }
-func (m *mockBacktestRepo) ListAll(_ context.Context) ([]models.BacktestRun, error) {
-	return m.listResult, m.listErr
+func (m *mockBacktestRepo) ListCompleted(_ context.Context, page, limit int) ([]models.BacktestRun, int, error) {
+	m.capturedListPage = page
+	m.capturedListLimit = limit
+	total := m.listTotal
+	if total == 0 {
+		total = len(m.listResult)
+	}
+	return m.listResult, total, m.listErr
 }
 
 type mockBuiltinLookup struct {
@@ -737,5 +746,31 @@ func TestGetByID(t *testing.T) {
 	}
 	if run.ID != id {
 		t.Errorf("expected ID %s, got %s", id, run.ID)
+	}
+}
+
+func TestListCompleted_PopulatesStrategyNamesAndPassesPagination(t *testing.T) {
+	slug := testSlug
+	runs := []models.BacktestRun{
+		{ID: uuid.New(), Status: models.BacktestCompleted, StrategySlug: &slug},
+	}
+	br := &mockBacktestRepo{listResult: runs, listTotal: 8}
+	svc := newService(br, defaultLookup(), &mockCandleRepo{}, &mockInstrumentRepo{}, &mockEngine{})
+
+	result, total, err := svc.ListCompleted(context.Background(), 2, 20)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if total != 8 {
+		t.Errorf("expected total 8, got %d", total)
+	}
+	if br.capturedListPage != 2 || br.capturedListLimit != 20 {
+		t.Errorf("expected pagination 2/20, got %d/%d", br.capturedListPage, br.capturedListLimit)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(result))
+	}
+	if result[0].StrategyName == nil || *result[0].StrategyName != defaultBuiltin().Name {
+		t.Fatalf("expected strategy name %q, got %v", defaultBuiltin().Name, result[0].StrategyName)
 	}
 }

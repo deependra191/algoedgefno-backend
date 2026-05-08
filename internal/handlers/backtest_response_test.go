@@ -80,6 +80,39 @@ func TestBacktestTradeResponseJSONShape(t *testing.T) {
 	assertKeysEqual(t, keys, want)
 }
 
+func TestBacktestListResponseJSONShape(t *testing.T) {
+	resp := backtestListResponse{
+		Runs:  []backtestSummaryResponse{},
+		Page:  1,
+		Limit: 20,
+		Total: 0,
+	}
+	keys := jsonKeys(t, resp)
+	want := []string{"limit", "page", "runs", "total"}
+	assertKeysEqual(t, keys, want)
+}
+
+func TestBacktestSummaryResponseJSONShape(t *testing.T) {
+	resp := backtestSummaryResponse{
+		ID:          "abc",
+		Status:      models.BacktestCompleted,
+		CompletedAt: "2025-01-02T09:30:00Z",
+		Result: backtestSummaryResultResponse{
+			Strategy: backtestStrategyResponse{},
+		},
+	}
+	keys := jsonKeys(t, resp)
+	want := []string{"completedAt", "id", "result", "status"}
+	assertKeysEqual(t, keys, want)
+
+	resultKeys := jsonKeys(t, resp.Result)
+	resultWant := []string{
+		"capEnd", "capStart", "from", "interval", "maxDrawdownPct", "netPnl",
+		"returnPct", "strategy", "to", "tradeCount", "underlying", "winRate",
+	}
+	assertKeysEqual(t, resultKeys, resultWant)
+}
+
 func TestToBacktestStatusResponse_Completed(t *testing.T) {
 	id := uuid.New()
 	capital := 200000.0
@@ -141,6 +174,82 @@ func TestToBacktestStatusResponse_Completed(t *testing.T) {
 	}
 	if math.Abs(r.MaxDrawdownPct-5.0) > floatTolerance {
 		t.Errorf("expected maxDrawdownPct 5.0, got %f", r.MaxDrawdownPct)
+	}
+}
+
+func TestToBacktestListResponse_CompletedSummary(t *testing.T) {
+	id := uuid.New()
+	capital := 200000.0
+	pnl := 22400.0
+	totalTrades := 22
+	wins := 11
+	maxDrawdown := 0.05
+	slug := "ma_crossover"
+	strategyName := "MA Crossover"
+	underlying := "NIFTY"
+	completedAt := time.Date(2025, 1, 2, 9, 30, 0, 0, time.UTC)
+
+	resp := toBacktestListResponse([]models.BacktestRun{
+		{
+			ID:             id,
+			Status:         models.BacktestCompleted,
+			NetPnl:         &pnl,
+			TotalTrades:    &totalTrades,
+			WinCount:       &wins,
+			MaxDrawdown:    &maxDrawdown,
+			Capital:        &capital,
+			StrategySlug:   &slug,
+			StrategyName:   &strategyName,
+			Underlying:     &underlying,
+			CandleInterval: models.CandleInterval1D,
+			FromTs:         time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+			ToTs:           time.Date(2025, 6, 30, 0, 0, 0, 0, time.UTC),
+			CompletedAt:    &completedAt,
+		},
+	}, 1, 20, 1)
+
+	if resp.Page != 1 || resp.Limit != 20 || resp.Total != 1 {
+		t.Fatalf("unexpected pagination: page=%d limit=%d total=%d", resp.Page, resp.Limit, resp.Total)
+	}
+	if len(resp.Runs) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(resp.Runs))
+	}
+	run := resp.Runs[0]
+	if run.ID != id.String() {
+		t.Errorf("expected ID %s, got %s", id, run.ID)
+	}
+	if run.CompletedAt != completedAt.Format(time.RFC3339) {
+		t.Errorf("expected completedAt %s, got %s", completedAt.Format(time.RFC3339), run.CompletedAt)
+	}
+	if run.Result.Strategy.ID != slug || run.Result.Strategy.Name != strategyName {
+		t.Errorf("unexpected strategy: %+v", run.Result.Strategy)
+	}
+	if math.Abs(run.Result.CapEnd-(capital+pnl)) > floatTolerance {
+		t.Errorf("expected capEnd %f, got %f", capital+pnl, run.Result.CapEnd)
+	}
+	if run.Result.WinRate == nil || *run.Result.WinRate != 50 {
+		t.Fatalf("expected winRate 50, got %v", run.Result.WinRate)
+	}
+	if run.Result.MaxDrawdownPct == nil || math.Abs(*run.Result.MaxDrawdownPct-5.0) > floatTolerance {
+		t.Fatalf("expected maxDrawdownPct 5.0, got %v", run.Result.MaxDrawdownPct)
+	}
+}
+
+func TestToBacktestSummaryResponse_NullableOptionalMetrics(t *testing.T) {
+	run := &models.BacktestRun{
+		ID:          uuid.New(),
+		Status:      models.BacktestCompleted,
+		FromTs:      time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		ToTs:        time.Date(2025, 6, 30, 0, 0, 0, 0, time.UTC),
+		CompletedAt: ptrTime(time.Date(2025, 1, 2, 9, 30, 0, 0, time.UTC)),
+	}
+
+	resp := toBacktestSummaryResponse(run)
+	if resp.Result.WinRate != nil {
+		t.Fatalf("expected nil winRate, got %v", resp.Result.WinRate)
+	}
+	if resp.Result.MaxDrawdownPct != nil {
+		t.Fatalf("expected nil maxDrawdownPct, got %v", resp.Result.MaxDrawdownPct)
 	}
 }
 
@@ -227,4 +336,8 @@ func TestBacktestSubmitRequestJSONShape(t *testing.T) {
 	keys := jsonKeys(t, resp)
 	want := []string{"inputs", "strategyId"}
 	assertKeysEqual(t, keys, want)
+}
+
+func ptrTime(v time.Time) *time.Time {
+	return &v
 }

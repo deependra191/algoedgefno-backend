@@ -142,11 +142,7 @@ func (s *BacktestService) GetByID(ctx context.Context, id uuid.UUID) (*models.Ba
 	if err != nil {
 		return nil, err
 	}
-	if run.StrategySlug != nil {
-		if b, ok := s.builtins.Get(*run.StrategySlug); ok {
-			run.StrategyName = &b.Name
-		}
-	}
+	s.populateStrategyName(run)
 	return run, nil
 }
 
@@ -156,9 +152,25 @@ func (s *BacktestService) GetByIDWithTrades(ctx context.Context, id uuid.UUID) (
 	return s.backtestStore.GetByIDWithTrades(ctx, id)
 }
 
-// ListAll returns all backtest runs ordered newest first.
-func (s *BacktestService) ListAll(ctx context.Context) ([]models.BacktestRun, error) {
-	return s.backtestStore.ListAll(ctx)
+// ListCompleted returns completed backtest runs ordered by most recent completion first.
+func (s *BacktestService) ListCompleted(ctx context.Context, page, limit int) ([]models.BacktestRun, int, error) {
+	runs, total, err := s.backtestStore.ListCompleted(ctx, page, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	for i := range runs {
+		s.populateStrategyName(&runs[i])
+	}
+	return runs, total, nil
+}
+
+func (s *BacktestService) populateStrategyName(run *models.BacktestRun) {
+	if run.StrategySlug == nil {
+		return
+	}
+	if b, ok := s.builtins.Get(*run.StrategySlug); ok {
+		run.StrategyName = &b.Name
+	}
 }
 
 // executeRun runs the engine and persists the result. It is called in a goroutine

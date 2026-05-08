@@ -75,9 +75,10 @@ func (h *BacktestHandler) Submit(c *gin.Context) {
 	c.JSON(http.StatusAccepted, toBacktestSubmitResponse(run))
 }
 
-// List returns all backtest runs ordered newest first.
+// List returns completed backtest runs ordered by most recent completion first.
 func (h *BacktestHandler) List(c *gin.Context) {
-	runs, err := h.backtestSvc.ListAll(c.Request.Context())
+	page, limit := parseBacktestListPagination(c)
+	runs, total, err := h.backtestSvc.ListCompleted(c.Request.Context(), page, limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list backtests"})
 		return
@@ -85,7 +86,7 @@ func (h *BacktestHandler) List(c *gin.Context) {
 	if runs == nil {
 		runs = []models.BacktestRun{}
 	}
-	c.JSON(http.StatusOK, toBacktestListResponse(runs))
+	c.JSON(http.StatusOK, toBacktestListResponse(runs, page, limit, total))
 }
 
 // GetByID returns the current state of a backtest run.
@@ -136,7 +137,7 @@ func (h *BacktestHandler) GetTrades(c *gin.Context) {
 		return
 	}
 
-	page, limit := parsePagination(c)
+	page, limit := parseTradesPagination(c)
 	resp, err := toBacktestTradesPageResponse(run.Trades, page, limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
@@ -145,15 +146,23 @@ func (h *BacktestHandler) GetTrades(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-func parsePagination(c *gin.Context) (page, limit int) {
-	page = defaultTradesPage
-	limit = defaultTradesLimit
+func parseBacktestListPagination(c *gin.Context) (page, limit int) {
+	return parsePagination(c, defaultBacktestsPage, defaultBacktestsLimit, maxBacktestsLimit)
+}
+
+func parseTradesPagination(c *gin.Context) (page, limit int) {
+	return parsePagination(c, defaultTradesPage, defaultTradesLimit, maxTradesLimit)
+}
+
+func parsePagination(c *gin.Context, defaultPage, defaultLimit, maxLimit int) (page, limit int) {
+	page = defaultPage
+	limit = defaultLimit
 	if v, err := strconv.Atoi(c.Query("page")); err == nil && v > 0 {
 		page = v
 	}
 	if v, err := strconv.Atoi(c.Query("limit")); err == nil && v > 0 {
-		if v > maxTradesLimit {
-			v = maxTradesLimit
+		if v > maxLimit {
+			v = maxLimit
 		}
 		limit = v
 	}
