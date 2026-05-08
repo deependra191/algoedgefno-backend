@@ -53,15 +53,3 @@ Angel One is used once (or periodically manually) to seed historical intraday da
 ## Scope: backtesting first, watchlist during vendor trial
 
 Feature priority matches data availability. Backtesting is possible with historical data alone. Watchlist (live quotes) requires a live tick feed, which comes in Phase 3.
-
-## Auth and abuse-control decision
-
-V1 uses passwordless auth without phone OTP initially. Google sign-in is the primary login method.
-
-All costly APIs, including strategy save and backtest creation, require authentication. Backend authorization derives user identity from the verified auth token, never from request body fields.
-
-Backtest creation is quota-limited by user_id, IP, plan, and global daily caps. Free users have strict limits on daily backtests, concurrent runs, and date-range size.
-
-Backtests run asynchronously through a bounded worker queue so API traffic cannot directly create unbounded compute cost.
-
-Phone OTP is deferred until there is a clear product need because SMS OTP can create avoidable cost and abuse exposure.
