@@ -108,6 +108,175 @@ func TestValidateStartupIdentity_ProductionRejectsNonProductionDBIdentity(t *tes
 	}
 }
 
+func TestValidateStartupIdentity_ProductionRequiresMarkerInDBNameAndUser(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Config)
+	}{
+		{
+			name: "generic DB name and user",
+			mutate: func(cfg *Config) {
+				cfg.DBName = "algoedgefno"
+				cfg.DBUser = "algoedgefno_app"
+			},
+		},
+		{
+			name: "generic DB name with prod user",
+			mutate: func(cfg *Config) {
+				cfg.DBName = "algoedgefno_live"
+			},
+		},
+		{
+			name: "prod DB name with generic user",
+			mutate: func(cfg *Config) {
+				cfg.DBUser = "algoedgefno_app"
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validProductionConfig()
+			tt.mutate(cfg)
+
+			err := cfg.ValidateStartupIdentity()
+			if err == nil {
+				t.Fatal("ValidateStartupIdentity() error = nil")
+			}
+			assertErrorDoesNotLeakSensitiveValues(t, err, cfg)
+		})
+	}
+}
+
+func TestValidateStartupIdentity_StagingRequiresMarkerInDBNameAndUser(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Config)
+	}{
+		{
+			name: "empty DB name",
+			mutate: func(cfg *Config) {
+				cfg.DBName = ""
+			},
+		},
+		{
+			name: "empty DB user",
+			mutate: func(cfg *Config) {
+				cfg.DBUser = ""
+			},
+		},
+		{
+			name: "generic DB name and user",
+			mutate: func(cfg *Config) {
+				cfg.DBName = "algoedgefno"
+				cfg.DBUser = "algoedgefno_app"
+			},
+		},
+		{
+			name: "staging DB name with generic user",
+			mutate: func(cfg *Config) {
+				cfg.DBUser = "algoedgefno_app"
+			},
+		},
+		{
+			name: "generic DB name with staging user",
+			mutate: func(cfg *Config) {
+				cfg.DBName = "algoedgefno"
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validStagingConfig()
+			tt.mutate(cfg)
+
+			err := cfg.ValidateStartupIdentity()
+			if err == nil {
+				t.Fatal("ValidateStartupIdentity() error = nil")
+			}
+			assertErrorDoesNotLeakSensitiveValues(t, err, cfg)
+		})
+	}
+}
+
+func TestValidateStartupIdentity_StagingRejectsDefaultOrEmptySecrets(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Config)
+	}{
+		{
+			name: "empty app secret token",
+			mutate: func(cfg *Config) {
+				cfg.AppSecretToken = ""
+			},
+		},
+		{
+			name: "default app secret token",
+			mutate: func(cfg *Config) {
+				cfg.AppSecretToken = defaultAppSecretToken
+			},
+		},
+		{
+			name: "empty jwt secret",
+			mutate: func(cfg *Config) {
+				cfg.JWTSecret = ""
+			},
+		},
+		{
+			name: "default jwt secret",
+			mutate: func(cfg *Config) {
+				cfg.JWTSecret = defaultJWTSecret
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validStagingConfig()
+			tt.mutate(cfg)
+
+			err := cfg.ValidateStartupIdentity()
+			if err == nil {
+				t.Fatal("ValidateStartupIdentity() error = nil")
+			}
+			assertErrorDoesNotLeakSensitiveValues(t, err, cfg)
+		})
+	}
+}
+
+func TestValidateStartupIdentity_GenericDBHostAllowedWhenNameAndUserAreEnvironmentSpecific(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *Config
+	}{
+		{
+			name: "production with generic host",
+			cfg: func() *Config {
+				cfg := validProductionConfig()
+				cfg.DBHost = "postgres"
+				return cfg
+			}(),
+		},
+		{
+			name: "staging with generic host",
+			cfg: func() *Config {
+				cfg := validStagingConfig()
+				cfg.DBHost = "postgres"
+				return cfg
+			}(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.cfg.ValidateStartupIdentity(); err != nil {
+				t.Fatalf("ValidateStartupIdentity() error = %v", err)
+			}
+		})
+	}
+}
+
 func TestValidateStartupIdentity_StagingRejectsProductionDBIdentity(t *testing.T) {
 	tests := []struct {
 		name   string

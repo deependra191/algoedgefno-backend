@@ -152,6 +152,12 @@ func (cfg *Config) validateProductionIdentity() error {
 	if matchesAnyIdentityPart([]string{cfg.DBName, cfg.DBUser, cfg.DBHost}, nonProductionIdentityMarkers()) {
 		return fmt.Errorf("production database identity must not match staging, development, or test")
 	}
+	if !containsAnyMarker(cfg.DBName, productionIdentityMarkers()) {
+		return fmt.Errorf("production DB_NAME must contain a production marker (prod or production)")
+	}
+	if !containsAnyMarker(cfg.DBUser, productionIdentityMarkers()) {
+		return fmt.Errorf("production DB_USER must contain a production marker (prod or production)")
+	}
 	if cfg.AutoMigrate {
 		return fmt.Errorf("production AUTO_MIGRATE must be disabled")
 	}
@@ -162,8 +168,20 @@ func (cfg *Config) validateProductionIdentity() error {
 }
 
 func (cfg *Config) validateStagingIdentity() error {
+	if cfg.AppSecretToken == "" || cfg.AppSecretToken == defaultAppSecretToken {
+		return fmt.Errorf("staging APP_SECRET_TOKEN must be set to a non-example value")
+	}
+	if cfg.JWTSecret == "" || cfg.JWTSecret == defaultJWTSecret {
+		return fmt.Errorf("staging JWT_SECRET must be set to a non-example value")
+	}
 	if matchesAnyIdentityPart([]string{cfg.DBName, cfg.DBUser, cfg.DBHost}, productionIdentityMarkers()) {
 		return fmt.Errorf("staging database identity must not match production")
+	}
+	if !containsAnyMarker(cfg.DBName, stagingIdentityMarkers()) {
+		return fmt.Errorf("staging DB_NAME must contain a staging marker (staging or stage)")
+	}
+	if !containsAnyMarker(cfg.DBUser, stagingIdentityMarkers()) {
+		return fmt.Errorf("staging DB_USER must contain a staging marker (staging or stage)")
 	}
 	return nil
 }
@@ -234,13 +252,27 @@ func productionIdentityMarkers() []string {
 	return []string{"production", "prod"}
 }
 
+func stagingIdentityMarkers() []string {
+	return []string{"staging", "stage"}
+}
+
 func matchesAnyIdentityPart(parts []string, markers []string) bool {
 	for _, part := range parts {
-		normalized := strings.ToLower(strings.TrimSpace(part))
-		for _, marker := range markers {
-			if strings.Contains(normalized, marker) {
-				return true
-			}
+		if containsAnyMarker(part, markers) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsAnyMarker(part string, markers []string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(part))
+	if normalized == "" {
+		return false
+	}
+	for _, marker := range markers {
+		if strings.Contains(normalized, marker) {
+			return true
 		}
 	}
 	return false
