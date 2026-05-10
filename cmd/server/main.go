@@ -17,6 +17,9 @@ import (
 
 func main() {
 	cfg := config.Load()
+	if err := cfg.ValidateStartupIdentity(); err != nil {
+		log.Fatalf("startup validation failed: %v", err)
+	}
 
 	pool := database.Connect(cfg)
 	defer pool.Close()
