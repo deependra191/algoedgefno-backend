@@ -40,7 +40,6 @@ const (
 	defaultMigrationsPath = "file://migrations"
 	defaultNSEUserAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 	defaultNSEAcceptHTML  = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-
 )
 
 // Environment identifies the runtime environment selected by APP_ENV.
@@ -152,13 +151,13 @@ func newFromEnv(lookup func(string) (string, bool)) (*Config, error) {
 		}
 	}
 
-	if cfg.DBUser == "" {
+	if strings.TrimSpace(cfg.DBUser) == "" {
 		return nil, fmt.Errorf("%s is required (or supply DATABASE_URL)", envVarDBUser)
 	}
-	if cfg.DBPass == "" {
+	if strings.TrimSpace(cfg.DBPass) == "" {
 		return nil, fmt.Errorf("%s is required (or supply DATABASE_URL)", envVarDBPassword)
 	}
-	if cfg.DBName == "" {
+	if strings.TrimSpace(cfg.DBName) == "" {
 		return nil, fmt.Errorf("%s is required (or supply DATABASE_URL)", envVarDBName)
 	}
 
@@ -215,17 +214,17 @@ func (cfg *Config) validateStagingIdentity() error {
 }
 
 func parseEnvironment(raw string) (Environment, error) {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "production", "prod":
+	switch strings.TrimSpace(raw) {
+	case "production":
 		return EnvProduction, nil
-	case "staging", "stage":
+	case "staging":
 		return EnvStaging, nil
-	case "development", "dev", "local":
+	case "development":
 		return EnvDevelopment, nil
-	case "test", "testing":
+	case "test":
 		return EnvTest, nil
 	default:
-		return "", fmt.Errorf("unsupported environment %q", raw)
+		return "", fmt.Errorf("APP_ENV %q is not valid: use one of production, staging, development, test", raw)
 	}
 }
 

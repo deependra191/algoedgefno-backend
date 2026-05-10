@@ -439,36 +439,92 @@ func TestNewFromEnv_MissingOrBlankAppEnvFails(t *testing.T) {
 	}
 }
 
-func TestNewFromEnv_InvalidAppEnvFails(t *testing.T) {
-	_, err := newFromEnv(mapLookup(map[string]string{
-		"APP_ENV": "unknown",
-	}))
-	if err == nil {
-		t.Fatal("newFromEnv() error = nil, want error for invalid APP_ENV")
+func TestNewFromEnv_AppEnvRejectsAliasesAndUnknownValues(t *testing.T) {
+	for _, appEnv := range []string{"prod", "stage", "dev", "local", "testing", "unknown", "DEVELOPMENT", "Production"} {
+		t.Run(appEnv, func(t *testing.T) {
+			_, err := newFromEnv(mapLookup(map[string]string{"APP_ENV": appEnv}))
+			if err == nil {
+				t.Fatalf("newFromEnv() error = nil for APP_ENV=%q, want error", appEnv)
+			}
+		})
+	}
+}
+
+func TestNewFromEnv_AppEnvCanonicalValuesAccepted(t *testing.T) {
+	for _, appEnv := range []string{"production", "staging", "development", "test"} {
+		t.Run(appEnv, func(t *testing.T) {
+			_, err := newFromEnv(mapLookup(map[string]string{
+				"APP_ENV":          appEnv,
+				"JWT_SECRET":       testJWTSecret,
+				"APP_SECRET_TOKEN": testAppSecretToken,
+				"DB_USER":          "algoedge_app",
+				"DB_PASSWORD":      testDBPassword,
+				"DB_NAME":          "algoedgefno",
+			}))
+			if err != nil {
+				t.Fatalf("newFromEnv() error = %v for APP_ENV=%q", err, appEnv)
+			}
+		})
 	}
 }
 
 func TestNewFromEnv_MissingSecretsFails(t *testing.T) {
 	tests := []struct {
-		name   string
-		remove string
+		name string
+		env  func() map[string]string
 	}{
-		{"missing JWT_SECRET", "JWT_SECRET"},
-		{"blank JWT_SECRET", ""},
-		{"missing APP_SECRET_TOKEN", "APP_SECRET_TOKEN"},
+		{
+			name: "missing JWT_SECRET",
+			env: func() map[string]string {
+				m := minDevEnv()
+				delete(m, "JWT_SECRET")
+				return m
+			},
+		},
+		{
+			name: "blank JWT_SECRET",
+			env: func() map[string]string {
+				m := minDevEnv()
+				m["JWT_SECRET"] = "   "
+				return m
+			},
+		},
+		{
+			name: "missing APP_SECRET_TOKEN",
+			env: func() map[string]string {
+				m := minDevEnv()
+				delete(m, "APP_SECRET_TOKEN")
+				return m
+			},
+		},
+		{
+			name: "blank APP_SECRET_TOKEN",
+			env: func() map[string]string {
+				m := minDevEnv()
+				m["APP_SECRET_TOKEN"] = "   "
+				return m
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			env := minDevEnv()
-			if tt.remove != "" {
-				delete(env, tt.remove)
-			} else {
-				env["JWT_SECRET"] = ""
+			_, err := newFromEnv(mapLookup(tt.env()))
+			if err == nil {
+				t.Fatal("newFromEnv() error = nil, want error")
 			}
+		})
+	}
+}
+
+func TestNewFromEnv_WhitespaceDBFieldsFails(t *testing.T) {
+	for _, key := range []string{"DB_USER", "DB_PASSWORD", "DB_NAME"} {
+		t.Run(key, func(t *testing.T) {
+			env := minDevEnv()
+			env[key] = "   "
 			_, err := newFromEnv(mapLookup(env))
 			if err == nil {
-				t.Fatalf("newFromEnv() error = nil, want error")
+				t.Fatalf("newFromEnv() error = nil for whitespace-only %s", key)
 			}
 		})
 	}
