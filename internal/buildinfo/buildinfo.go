@@ -1,7 +1,8 @@
 // Package buildinfo exposes build-time metadata injected via -ldflags -X at image build time.
 // Override at build time with:
 //
-//	go build -ldflags "-X github.com/deependra191/algoedgefno-backend/internal/buildinfo.CommitSHA=$(git rev-parse HEAD) \
+//	go build -ldflags "-X github.com/deependra191/algoedgefno-backend/internal/buildinfo.AppVersion=1.2.3 \
+//	  -X github.com/deependra191/algoedgefno-backend/internal/buildinfo.CommitSHA=$(git rev-parse HEAD) \
 //	  -X github.com/deependra191/algoedgefno-backend/internal/buildinfo.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
 //	  ./cmd/server
 package buildinfo

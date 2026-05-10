@@ -22,9 +22,10 @@ func (s *HealthStore) Ping(ctx context.Context) error {
 }
 
 // QueryDBIdentity returns the identity stored in the environment_identity table.
+// The schema enforces exactly one row, so no LIMIT is needed.
 func (s *HealthStore) QueryDBIdentity(ctx context.Context) (string, error) {
 	var identity string
-	err := s.pool.QueryRow(ctx, `SELECT identity FROM environment_identity LIMIT 1`).Scan(&identity)
+	err := s.pool.QueryRow(ctx, `SELECT identity FROM environment_identity`).Scan(&identity)
 	return identity, err
 }
 
