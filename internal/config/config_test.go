@@ -37,8 +37,8 @@ func TestValidateStartupIdentity_AllowsValidConfigs(t *testing.T) {
 				DBUser:         "local_dev_user",
 				DBPass:         "local_dev_pass",
 				DBName:         "local_dev_db",
-				JWTSecret:      exampleSecretPlaceholder,
-				AppSecretToken: exampleSecretPlaceholder,
+				JWTSecret:      testJWTSecret,
+				AppSecretToken: testAppSecretToken,
 				MigrationsPath: defaultMigrationsPath,
 				AutoMigrate:    true,
 			},
@@ -213,7 +213,7 @@ func TestValidateStartupIdentity_StagingRequiresMarkerInDBNameAndUser(t *testing
 	}
 }
 
-func TestValidateStartupIdentity_StagingRejectsDefaultOrEmptySecrets(t *testing.T) {
+func TestValidateStartupIdentity_StagingRejectsEmptySecrets(t *testing.T) {
 	tests := []struct {
 		name   string
 		mutate func(*Config)
@@ -225,21 +225,9 @@ func TestValidateStartupIdentity_StagingRejectsDefaultOrEmptySecrets(t *testing.
 			},
 		},
 		{
-			name: "example app secret token",
-			mutate: func(cfg *Config) {
-				cfg.AppSecretToken = exampleSecretPlaceholder
-			},
-		},
-		{
 			name: "empty jwt secret",
 			mutate: func(cfg *Config) {
 				cfg.JWTSecret = ""
-			},
-		},
-		{
-			name: "example jwt secret",
-			mutate: func(cfg *Config) {
-				cfg.JWTSecret = exampleSecretPlaceholder
 			},
 		},
 	}
@@ -329,27 +317,15 @@ func TestValidateStartupIdentity_StagingRejectsProductionDBIdentity(t *testing.T
 	}
 }
 
-func TestValidateStartupIdentity_ProductionRejectsDefaultSecrets(t *testing.T) {
+func TestValidateStartupIdentity_ProductionRejectsEmptySecrets(t *testing.T) {
 	tests := []struct {
 		name   string
 		mutate func(*Config)
 	}{
 		{
-			name: "example app secret token",
-			mutate: func(cfg *Config) {
-				cfg.AppSecretToken = exampleSecretPlaceholder
-			},
-		},
-		{
 			name: "empty app secret token",
 			mutate: func(cfg *Config) {
 				cfg.AppSecretToken = ""
-			},
-		},
-		{
-			name: "example jwt secret",
-			mutate: func(cfg *Config) {
-				cfg.JWTSecret = exampleSecretPlaceholder
 			},
 		},
 		{

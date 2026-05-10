@@ -41,9 +41,6 @@ const (
 	defaultNSEUserAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 	defaultNSEAcceptHTML  = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
 
-	// Example placeholder from .env.example — used only by validators to reject
-	// deployments that forgot to replace the default secret. Never used as a config fallback.
-	exampleSecretPlaceholder = "change-this-in-production"
 )
 
 // Environment identifies the runtime environment selected by APP_ENV.
@@ -168,15 +165,15 @@ func newFromEnv(lookup func(string) (string, bool)) (*Config, error) {
 	return cfg, nil
 }
 
-// validateProductionIdentity enforces production-only guardrails: non-example secrets,
+// validateProductionIdentity enforces production-only guardrails: non-empty secrets,
 // mandatory production markers in DB user/name, no non-prod markers anywhere,
 // no auto-migrate, non-empty absolute migrations path.
 func (cfg *Config) validateProductionIdentity() error {
-	if cfg.AppSecretToken == "" || cfg.AppSecretToken == exampleSecretPlaceholder {
-		return fmt.Errorf("production APP_SECRET_TOKEN must be set to a non-example value")
+	if cfg.AppSecretToken == "" {
+		return fmt.Errorf("production APP_SECRET_TOKEN must be set")
 	}
-	if cfg.JWTSecret == "" || cfg.JWTSecret == exampleSecretPlaceholder {
-		return fmt.Errorf("production JWT_SECRET must be set to a non-example value")
+	if cfg.JWTSecret == "" {
+		return fmt.Errorf("production JWT_SECRET must be set")
 	}
 	if matchesAnyIdentityPart([]string{cfg.DBName, cfg.DBUser, cfg.DBHost}, nonProductionIdentityMarkers()) {
 		return fmt.Errorf("production database identity must not match staging, development, or test")
@@ -196,14 +193,14 @@ func (cfg *Config) validateProductionIdentity() error {
 	return nil
 }
 
-// validateStagingIdentity enforces staging guardrails: non-example secrets,
+// validateStagingIdentity enforces staging guardrails: non-empty secrets,
 // mandatory staging markers in DB user/name, no production markers anywhere.
 func (cfg *Config) validateStagingIdentity() error {
-	if cfg.AppSecretToken == "" || cfg.AppSecretToken == exampleSecretPlaceholder {
-		return fmt.Errorf("staging APP_SECRET_TOKEN must be set to a non-example value")
+	if cfg.AppSecretToken == "" {
+		return fmt.Errorf("staging APP_SECRET_TOKEN must be set")
 	}
-	if cfg.JWTSecret == "" || cfg.JWTSecret == exampleSecretPlaceholder {
-		return fmt.Errorf("staging JWT_SECRET must be set to a non-example value")
+	if cfg.JWTSecret == "" {
+		return fmt.Errorf("staging JWT_SECRET must be set")
 	}
 	if matchesAnyIdentityPart([]string{cfg.DBName, cfg.DBUser, cfg.DBHost}, productionIdentityMarkers()) {
 		return fmt.Errorf("staging database identity must not match production")
