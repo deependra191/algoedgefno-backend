@@ -214,15 +214,11 @@ func (cfg *Config) validateStagingIdentity() error {
 }
 
 func parseEnvironment(raw string) (Environment, error) {
-	switch strings.TrimSpace(raw) {
-	case "production":
-		return EnvProduction, nil
-	case "staging":
-		return EnvStaging, nil
-	case "development":
-		return EnvDevelopment, nil
-	case "test":
-		return EnvTest, nil
+	env := Environment(strings.TrimSpace(raw))
+
+	switch env {
+	case EnvProduction, EnvStaging, EnvDevelopment, EnvTest:
+		return env, nil
 	default:
 		return "", fmt.Errorf("APP_ENV %q is not valid: use one of production, staging, development, test", raw)
 	}
