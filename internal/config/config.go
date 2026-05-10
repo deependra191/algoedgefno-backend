@@ -18,21 +18,35 @@ const (
 	EnvDevelopment Environment = "development"
 	EnvTest        Environment = "test"
 
-	envVarAppEnv          = "APP_ENV"
-	envVarEnv             = "ENV"
-	envVarAutoMigrate     = "AUTO_MIGRATE"
-	envVarDatabaseURL     = "DATABASE_URL"
-	defaultJWTSecret      = "change-this-in-production"
-	defaultAppSecretToken = "change-this-in-production"
+	envVarAppEnv         = "APP_ENV"
+	envVarAutoMigrate    = "AUTO_MIGRATE"
+	envVarDatabaseURL    = "DATABASE_URL"
+	envVarPort           = "PORT"
+	envVarDBHost         = "DB_HOST"
+	envVarDBPort         = "DB_PORT"
+	envVarDBUser         = "DB_USER"
+	envVarDBPassword     = "DB_PASSWORD"
+	envVarDBName         = "DB_NAME"
+	envVarJWTSecret      = "JWT_SECRET"
+	envVarAppSecretToken = "APP_SECRET_TOKEN"
+	envVarMigrationsPath = "MIGRATIONS_PATH"
+	envVarNSEUserAgent   = "NSE_USER_AGENT"
+	envVarNSEAcceptHTML  = "NSE_ACCEPT_HTML"
+
+	// Operational defaults — safe to use as config fallbacks.
+	defaultPort           = "8080"
 	defaultDBHost         = "localhost"
 	defaultDBPort         = "5432"
-	defaultDBUser         = "algoedge"
-	defaultDBPassword     = "algoedge"
-	defaultDBName         = "algoedgefno"
 	defaultMigrationsPath = "file://migrations"
+	defaultNSEUserAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+	defaultNSEAcceptHTML  = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+
+	// Example placeholder from .env.example — used only by validators to reject
+	// deployments that forgot to replace the default secret. Never used as a config fallback.
+	exampleSecretPlaceholder = "change-this-in-production"
 )
 
-// Environment identifies the runtime environment selected by ENV or APP_ENV.
+// Environment identifies the runtime environment selected by APP_ENV.
 type Environment string
 
 // Config contains environment-backed application configuration.
@@ -94,7 +108,11 @@ func (cfg *Config) ShouldRunMigrations() bool {
 }
 
 func newFromEnv(lookup func(string) (string, bool)) (*Config, error) {
-	env, err := parseEnvironment(getEnvFrom(lookup, envVarAppEnv, getEnvFrom(lookup, envVarEnv, string(EnvDevelopment))))
+	rawEnv, err := requireEnvFrom(lookup, envVarAppEnv)
+	if err != nil {
+		return nil, err
+	}
+	env, err := parseEnvironment(rawEnv)
 	if err != nil {
 		return nil, err
 	}
@@ -104,21 +122,31 @@ func newFromEnv(lookup func(string) (string, bool)) (*Config, error) {
 		return nil, err
 	}
 
+	jwtSecret, err := requireEnvFrom(lookup, envVarJWTSecret)
+	if err != nil {
+		return nil, err
+	}
+
+	appSecretToken, err := requireEnvFrom(lookup, envVarAppSecretToken)
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &Config{
-		Port:           getEnvFrom(lookup, "PORT", "8080"),
+		Port:           getEnvFrom(lookup, envVarPort, defaultPort),
 		DatabaseURL:    getEnvFrom(lookup, envVarDatabaseURL, ""),
-		DBHost:         getEnvFrom(lookup, "DB_HOST", defaultDBHost),
-		DBPort:         getEnvFrom(lookup, "DB_PORT", defaultDBPort),
-		DBUser:         getEnvFrom(lookup, "DB_USER", ""),
-		DBPass:         getEnvFrom(lookup, "DB_PASSWORD", ""),
-		DBName:         getEnvFrom(lookup, "DB_NAME", ""),
-		JWTSecret:      getEnvFrom(lookup, "JWT_SECRET", defaultJWTSecret),
-		AppSecretToken: getEnvFrom(lookup, "APP_SECRET_TOKEN", ""),
+		DBHost:         getEnvFrom(lookup, envVarDBHost, defaultDBHost),
+		DBPort:         getEnvFrom(lookup, envVarDBPort, defaultDBPort),
+		DBUser:         getEnvFrom(lookup, envVarDBUser, ""),
+		DBPass:         getEnvFrom(lookup, envVarDBPassword, ""),
+		DBName:         getEnvFrom(lookup, envVarDBName, ""),
+		JWTSecret:      jwtSecret,
+		AppSecretToken: appSecretToken,
 		Env:            env,
-		MigrationsPath: getEnvFrom(lookup, "MIGRATIONS_PATH", defaultMigrationsPath),
+		MigrationsPath: getEnvFrom(lookup, envVarMigrationsPath, defaultMigrationsPath),
 		AutoMigrate:    autoMigrate,
-		NSEUserAgent:   getEnvFrom(lookup, "NSE_USER_AGENT", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"),
-		NSEAcceptHTML:  getEnvFrom(lookup, "NSE_ACCEPT_HTML", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"),
+		NSEUserAgent:   getEnvFrom(lookup, envVarNSEUserAgent, defaultNSEUserAgent),
+		NSEAcceptHTML:  getEnvFrom(lookup, envVarNSEAcceptHTML, defaultNSEAcceptHTML),
 	}
 
 	if cfg.DatabaseURL != "" {
@@ -127,27 +155,28 @@ func newFromEnv(lookup func(string) (string, bool)) (*Config, error) {
 		}
 	}
 
+	if cfg.DBUser == "" {
+		return nil, fmt.Errorf("%s is required (or supply DATABASE_URL)", envVarDBUser)
+	}
+	if cfg.DBPass == "" {
+		return nil, fmt.Errorf("%s is required (or supply DATABASE_URL)", envVarDBPassword)
+	}
+	if cfg.DBName == "" {
+		return nil, fmt.Errorf("%s is required (or supply DATABASE_URL)", envVarDBName)
+	}
+
 	return cfg, nil
 }
 
+// validateProductionIdentity enforces production-only guardrails: non-example secrets,
+// mandatory production markers in DB user/name, no non-prod markers anywhere,
+// no auto-migrate, non-empty absolute migrations path.
 func (cfg *Config) validateProductionIdentity() error {
-	if cfg.AppSecretToken == "" || cfg.AppSecretToken == defaultAppSecretToken {
+	if cfg.AppSecretToken == "" || cfg.AppSecretToken == exampleSecretPlaceholder {
 		return fmt.Errorf("production APP_SECRET_TOKEN must be set to a non-example value")
 	}
-	if cfg.JWTSecret == "" || cfg.JWTSecret == defaultJWTSecret {
+	if cfg.JWTSecret == "" || cfg.JWTSecret == exampleSecretPlaceholder {
 		return fmt.Errorf("production JWT_SECRET must be set to a non-example value")
-	}
-	if cfg.DBUser == "" || cfg.DBPass == "" || cfg.DBName == "" {
-		return fmt.Errorf("production DB_USER, DB_PASSWORD, and DB_NAME must be set")
-	}
-	if cfg.DBUser == defaultDBUser {
-		return fmt.Errorf("production DB_USER must not use the local example default")
-	}
-	if cfg.DBPass == defaultDBPassword {
-		return fmt.Errorf("production DB_PASSWORD must not use the local example default")
-	}
-	if cfg.DBName == defaultDBName {
-		return fmt.Errorf("production DB_NAME must not use the local example default")
 	}
 	if matchesAnyIdentityPart([]string{cfg.DBName, cfg.DBUser, cfg.DBHost}, nonProductionIdentityMarkers()) {
 		return fmt.Errorf("production database identity must not match staging, development, or test")
@@ -161,17 +190,19 @@ func (cfg *Config) validateProductionIdentity() error {
 	if cfg.AutoMigrate {
 		return fmt.Errorf("production AUTO_MIGRATE must be disabled")
 	}
-	if cfg.MigrationsPath != "" && !isAbsoluteMigrationsPath(cfg.MigrationsPath) {
-		return fmt.Errorf("production MIGRATIONS_PATH must be an absolute path")
+	if cfg.MigrationsPath == "" || !isAbsoluteMigrationsPath(cfg.MigrationsPath) {
+		return fmt.Errorf("production MIGRATIONS_PATH must be a non-empty absolute path")
 	}
 	return nil
 }
 
+// validateStagingIdentity enforces staging guardrails: non-example secrets,
+// mandatory staging markers in DB user/name, no production markers anywhere.
 func (cfg *Config) validateStagingIdentity() error {
-	if cfg.AppSecretToken == "" || cfg.AppSecretToken == defaultAppSecretToken {
+	if cfg.AppSecretToken == "" || cfg.AppSecretToken == exampleSecretPlaceholder {
 		return fmt.Errorf("staging APP_SECRET_TOKEN must be set to a non-example value")
 	}
-	if cfg.JWTSecret == "" || cfg.JWTSecret == defaultJWTSecret {
+	if cfg.JWTSecret == "" || cfg.JWTSecret == exampleSecretPlaceholder {
 		return fmt.Errorf("staging JWT_SECRET must be set to a non-example value")
 	}
 	if matchesAnyIdentityPart([]string{cfg.DBName, cfg.DBUser, cfg.DBHost}, productionIdentityMarkers()) {
@@ -203,6 +234,14 @@ func parseEnvironment(raw string) (Environment, error) {
 
 func defaultAutoMigrate(env Environment) bool {
 	return env == EnvDevelopment || env == EnvTest
+}
+
+func requireEnvFrom(lookup func(string) (string, bool), key string) (string, error) {
+	v, ok := lookup(key)
+	if !ok || strings.TrimSpace(v) == "" {
+		return "", fmt.Errorf("%s is required", key)
+	}
+	return v, nil
 }
 
 func getBoolEnvFrom(lookup func(string) (string, bool), key string, fallback bool) (bool, error) {

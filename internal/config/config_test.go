@@ -11,21 +11,34 @@ const (
 	testDBPassword     = "test-db-password-not-the-example"
 )
 
+// minDevEnv returns the minimal env map for a development environment, avoiding repetition of
+// required-field boilerplate in tests that focus on a single behaviour.
+func minDevEnv() map[string]string {
+	return map[string]string{
+		"APP_ENV":          "development",
+		"JWT_SECRET":       testJWTSecret,
+		"APP_SECRET_TOKEN": testAppSecretToken,
+		"DB_USER":          "algoedge_dev",
+		"DB_PASSWORD":      testDBPassword,
+		"DB_NAME":          "algoedgefno_dev",
+	}
+}
+
 func TestValidateStartupIdentity_AllowsValidConfigs(t *testing.T) {
 	tests := []struct {
 		name string
 		cfg  *Config
 	}{
 		{
-			name: "development local defaults",
+			name: "development allows any credentials",
 			cfg: &Config{
 				Env:            EnvDevelopment,
 				DBHost:         defaultDBHost,
-				DBUser:         defaultDBUser,
-				DBPass:         defaultDBPassword,
-				DBName:         defaultDBName,
-				JWTSecret:      defaultJWTSecret,
-				AppSecretToken: defaultAppSecretToken,
+				DBUser:         "local_dev_user",
+				DBPass:         "local_dev_pass",
+				DBName:         "local_dev_db",
+				JWTSecret:      exampleSecretPlaceholder,
+				AppSecretToken: exampleSecretPlaceholder,
 				MigrationsPath: defaultMigrationsPath,
 				AutoMigrate:    true,
 			},
@@ -212,9 +225,9 @@ func TestValidateStartupIdentity_StagingRejectsDefaultOrEmptySecrets(t *testing.
 			},
 		},
 		{
-			name: "default app secret token",
+			name: "example app secret token",
 			mutate: func(cfg *Config) {
-				cfg.AppSecretToken = defaultAppSecretToken
+				cfg.AppSecretToken = exampleSecretPlaceholder
 			},
 		},
 		{
@@ -224,9 +237,9 @@ func TestValidateStartupIdentity_StagingRejectsDefaultOrEmptySecrets(t *testing.
 			},
 		},
 		{
-			name: "default jwt secret",
+			name: "example jwt secret",
 			mutate: func(cfg *Config) {
-				cfg.JWTSecret = defaultJWTSecret
+				cfg.JWTSecret = exampleSecretPlaceholder
 			},
 		},
 	}
@@ -322,9 +335,9 @@ func TestValidateStartupIdentity_ProductionRejectsDefaultSecrets(t *testing.T) {
 		mutate func(*Config)
 	}{
 		{
-			name: "default app secret token",
+			name: "example app secret token",
 			mutate: func(cfg *Config) {
-				cfg.AppSecretToken = defaultAppSecretToken
+				cfg.AppSecretToken = exampleSecretPlaceholder
 			},
 		},
 		{
@@ -334,9 +347,9 @@ func TestValidateStartupIdentity_ProductionRejectsDefaultSecrets(t *testing.T) {
 			},
 		},
 		{
-			name: "default jwt secret",
+			name: "example jwt secret",
 			mutate: func(cfg *Config) {
-				cfg.JWTSecret = defaultJWTSecret
+				cfg.JWTSecret = exampleSecretPlaceholder
 			},
 		},
 		{
@@ -361,27 +374,21 @@ func TestValidateStartupIdentity_ProductionRejectsDefaultSecrets(t *testing.T) {
 	}
 }
 
-func TestValidateStartupIdentity_ProductionRejectsUnsafeDefaultDBCredentials(t *testing.T) {
+func TestValidateStartupIdentity_ProductionRejectsNonProdDBIdentityInUserAndName(t *testing.T) {
 	tests := []struct {
 		name   string
 		mutate func(*Config)
 	}{
 		{
-			name: "default database user",
+			name: "generic database user without prod marker",
 			mutate: func(cfg *Config) {
-				cfg.DBUser = defaultDBUser
+				cfg.DBUser = "algoedge_app"
 			},
 		},
 		{
-			name: "default database password",
+			name: "generic database name without prod marker",
 			mutate: func(cfg *Config) {
-				cfg.DBPass = defaultDBPassword
-			},
-		},
-		{
-			name: "default database name",
-			mutate: func(cfg *Config) {
-				cfg.DBName = defaultDBName
+				cfg.DBName = "algoedgefno"
 			},
 		},
 	}
@@ -406,6 +413,7 @@ func TestValidateStartupIdentity_ProductionMigrationValidation(t *testing.T) {
 		migrationsPath string
 		autoMigrate    bool
 	}{
+		{name: "empty migrations path", migrationsPath: ""},
 		{name: "relative file URL", migrationsPath: defaultMigrationsPath},
 		{name: "relative path", migrationsPath: "migrations"},
 		{name: "auto migrate enabled", migrationsPath: "file:///opt/algoedgefno/migrations", autoMigrate: true},
@@ -426,9 +434,121 @@ func TestValidateStartupIdentity_ProductionMigrationValidation(t *testing.T) {
 	}
 }
 
-func TestNewFromEnvPrefersAPPEnvAndParsesDatabaseURL(t *testing.T) {
+func TestNewFromEnv_MissingOrBlankAppEnvFails(t *testing.T) {
+	tests := []struct {
+		name string
+		env  map[string]string
+	}{
+		{
+			name: "APP_ENV missing",
+			env:  map[string]string{},
+		},
+		{
+			name: "APP_ENV blank",
+			env:  map[string]string{"APP_ENV": "   "},
+		},
+		{
+			name: "ENV=development without APP_ENV",
+			env:  map[string]string{"ENV": "development"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := newFromEnv(mapLookup(tt.env))
+			if err == nil {
+				t.Fatal("newFromEnv() error = nil, want error for missing APP_ENV")
+			}
+		})
+	}
+}
+
+func TestNewFromEnv_InvalidAppEnvFails(t *testing.T) {
+	_, err := newFromEnv(mapLookup(map[string]string{
+		"APP_ENV": "unknown",
+	}))
+	if err == nil {
+		t.Fatal("newFromEnv() error = nil, want error for invalid APP_ENV")
+	}
+}
+
+func TestNewFromEnv_MissingSecretsFails(t *testing.T) {
+	tests := []struct {
+		name   string
+		remove string
+	}{
+		{"missing JWT_SECRET", "JWT_SECRET"},
+		{"blank JWT_SECRET", ""},
+		{"missing APP_SECRET_TOKEN", "APP_SECRET_TOKEN"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := minDevEnv()
+			if tt.remove != "" {
+				delete(env, tt.remove)
+			} else {
+				env["JWT_SECRET"] = ""
+			}
+			_, err := newFromEnv(mapLookup(env))
+			if err == nil {
+				t.Fatalf("newFromEnv() error = nil, want error")
+			}
+		})
+	}
+}
+
+func TestNewFromEnv_MissingDBFieldsFails(t *testing.T) {
+	tests := []struct {
+		name   string
+		remove string
+	}{
+		{"missing DB_USER", "DB_USER"},
+		{"missing DB_PASSWORD", "DB_PASSWORD"},
+		{"missing DB_NAME", "DB_NAME"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := minDevEnv()
+			delete(env, tt.remove)
+			_, err := newFromEnv(mapLookup(env))
+			if err == nil {
+				t.Fatalf("newFromEnv() error = nil, want error for missing %s", tt.remove)
+			}
+		})
+	}
+}
+
+func TestNewFromEnv_DatabaseURLSatisfiesDBFields(t *testing.T) {
 	cfg, err := newFromEnv(mapLookup(map[string]string{
-		"ENV":              "production",
+		"APP_ENV":          "development",
+		"JWT_SECRET":       testJWTSecret,
+		"APP_SECRET_TOKEN": testAppSecretToken,
+		"DATABASE_URL":     "postgresql://dev_user:dev_pass@dev-db:5433/algoedgefno_dev?sslmode=disable",
+	}))
+	if err != nil {
+		t.Fatalf("newFromEnv() error = %v", err)
+	}
+	if cfg.DBUser != "dev_user" {
+		t.Fatalf("DBUser = %q, want dev_user", cfg.DBUser)
+	}
+	if cfg.DBPass != "dev_pass" {
+		t.Fatalf("DBPass = %q, want dev_pass", cfg.DBPass)
+	}
+	if cfg.DBName != "algoedgefno_dev" {
+		t.Fatalf("DBName = %q, want algoedgefno_dev", cfg.DBName)
+	}
+	if cfg.DBHost != "dev-db" {
+		t.Fatalf("DBHost = %q, want dev-db", cfg.DBHost)
+	}
+	if cfg.DBPort != "5433" {
+		t.Fatalf("DBPort = %q, want 5433", cfg.DBPort)
+	}
+}
+
+func TestNewFromEnvParsesAPPEnvAndDatabaseURL(t *testing.T) {
+	cfg, err := newFromEnv(mapLookup(map[string]string{
 		"APP_ENV":          "staging",
 		"DATABASE_URL":     "postgresql://staging_user:staging_password@staging-db:6543/algoedgefno_staging?sslmode=disable",
 		"AUTO_MIGRATE":     "true",
@@ -477,7 +597,12 @@ func TestNewFromEnvAutoMigrateDefaults(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg, err := newFromEnv(mapLookup(map[string]string{
-				"ENV": tt.env,
+				"APP_ENV":          tt.env,
+				"JWT_SECRET":       testJWTSecret,
+				"APP_SECRET_TOKEN": testAppSecretToken,
+				"DB_USER":          "algoedge_app",
+				"DB_PASSWORD":      testDBPassword,
+				"DB_NAME":          "algoedgefno",
 			}))
 			if err != nil {
 				t.Fatalf("newFromEnv() error = %v", err)
