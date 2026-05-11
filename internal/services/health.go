@@ -12,6 +12,9 @@ import (
 // readinessTimeout caps how long a single readiness probe may wait for DB responses.
 const readinessTimeout = 2 * time.Second
 
+// versionQueryTimeout caps the migration-version metadata query in GET /version.
+const versionQueryTimeout = 2 * time.Second
+
 // ReadinessChecks holds the per-check status returned on a successful readiness probe.
 // Database is always "ok". DatabaseIdentity is "ok" for production and staging,
 // or "skipped" for development and test environments.
@@ -56,7 +59,11 @@ func (s *HealthService) CheckReadiness(ctx context.Context) (ReadinessChecks, er
 	return ReadinessChecks{Database: "ok", DatabaseIdentity: "skipped"}, nil
 }
 
-// MigrationVersion returns the highest successfully applied migration version.
+// MigrationVersion returns the highest successfully applied migration version
+// within a bounded timeout. Errors are returned to the caller; the handler
+// treats them as best-effort and omits the field rather than exposing DB details.
 func (s *HealthService) MigrationVersion(ctx context.Context) (int64, error) {
+	ctx, cancel := context.WithTimeout(ctx, versionQueryTimeout)
+	defer cancel()
 	return s.repo.MigrationVersion(ctx)
 }
