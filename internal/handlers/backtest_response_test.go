@@ -65,10 +65,10 @@ func TestBacktestResultPayloadJSONShape(t *testing.T) {
 	want := []string{
 		"avgHoldingMinutes", "avgLoss", "avgPnlPerTrade", "avgWin",
 		"bestTrade", "capEnd", "capStart", "chart",
-		"from", "interval", "longestLossStreak", "longestWinStreak",
+		"from", "grossPnl", "interval", "longestLossStreak", "longestWinStreak",
 		"lots", "maxDrawdownPct", "netPnl", "profitFactor", "returnPct",
 		"rewardRisk", "strategy", "to",
-		"tradeCount", "tradesPerWeek", "underlying", "winRate", "worstTrade",
+		"totalCharges", "tradeCount", "tradesPerWeek", "underlying", "winRate", "worstTrade",
 	}
 	assertKeysEqual(t, keys, want)
 }
@@ -80,7 +80,11 @@ func TestBacktestTradeResponseJSONShape(t *testing.T) {
 		Pnl: 250.0, Reason: "MA crossover bullish", ExitReason: "target",
 	}
 	keys := jsonKeys(t, resp)
-	want := []string{"entryPrice", "entryTs", "exitPrice", "exitReason", "exitTs", "pnl", "quantity", "reason", "side"}
+	want := []string{
+		"brokerage", "entryPrice", "entryTs", "exchangeFees", "exitPrice", "exitReason", "exitTs",
+		"grossPnl", "gst", "pnl", "quantity", "reason", "sebiFees", "side", "slippage", "stampDuty",
+		"stt", "totalCharges",
+	}
 	assertKeysEqual(t, keys, want)
 }
 
@@ -111,8 +115,8 @@ func TestBacktestSummaryResponseJSONShape(t *testing.T) {
 
 	resultKeys := jsonKeys(t, resp.Result)
 	resultWant := []string{
-		"capEnd", "capStart", "from", "interval", "maxDrawdownPct", "netPnl",
-		"returnPct", "strategy", "to", "tradeCount", "underlying", "winRate",
+		"capEnd", "capStart", "from", "grossPnl", "interval", "maxDrawdownPct", "netPnl",
+		"returnPct", "strategy", "to", "totalCharges", "tradeCount", "underlying", "winRate",
 	}
 	assertKeysEqual(t, resultKeys, resultWant)
 }
@@ -312,7 +316,9 @@ func TestToBacktestTradesPageResponse_Pagination(t *testing.T) {
 			EntryTimestamp: time.Date(2025, 1, i+1, 9, 15, 0, 0, time.UTC),
 			ExitTimestamp:  time.Date(2025, 1, i+1, 9, 30, 0, 0, time.UTC),
 			Side:           models.OrderSideBuy,
-			PnL:            float64(i+1) * 100,
+			GrossPnL:       float64(i+1) * 100,
+			TotalCharges:   float64(i+1) * 5,
+			NetPnL:         float64(i+1)*100 - float64(i+1)*5,
 		}
 	}
 	raw, _ := json.Marshal(trades)
@@ -345,6 +351,67 @@ func TestToBacktestTradesPageResponse_Pagination(t *testing.T) {
 	}
 	if len(resp.Trades) != 0 {
 		t.Errorf("expected 0 trades past end, got %d", len(resp.Trades))
+	}
+}
+
+// TestToBacktestTradesPageResponse_ChargeInvariant guarantees each emitted trade
+// satisfies pnl == grossPnl − totalCharges within float-rounding tolerance.
+// Catches reordering of mapper fields and accidental Pnl ← GrossPnL wiring.
+func TestToBacktestTradesPageResponse_ChargeInvariant(t *testing.T) {
+	tr := models.Trade{
+		EntryTimestamp: time.Date(2025, 1, 2, 9, 15, 0, 0, time.UTC),
+		ExitTimestamp:  time.Date(2025, 1, 2, 9, 30, 0, 0, time.UTC),
+		Side:           models.OrderSideBuy,
+		Quantity:       50,
+		EntryPrice:     100,
+		ExitPrice:      120,
+		GrossPnL:       1000,
+		Slippage:       11,
+		Brokerage:      40,
+		STT:            9,
+		ExchangeFees:   3.91,
+		SEBIFees:       0.011,
+		GST:            7.91,
+		StampDuty:      0.15,
+		TotalCharges:   72,
+		NetPnL:         928,
+	}
+	raw, _ := json.Marshal([]models.Trade{tr})
+
+	resp, err := toBacktestTradesPageResponse(raw, 1, 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Trades) != 1 {
+		t.Fatalf("expected 1 trade, got %d", len(resp.Trades))
+	}
+	got := resp.Trades[0]
+	if math.Abs(got.Pnl-(got.GrossPnl-got.TotalCharges)) > 0.01 {
+		t.Errorf("invariant violated: pnl=%.4f grossPnl=%.4f totalCharges=%.4f",
+			got.Pnl, got.GrossPnl, got.TotalCharges)
+	}
+	if got.Pnl != tr.NetPnL {
+		t.Errorf("pnl JSON field must be sourced from NetPnL: got=%.4f want=%.4f", got.Pnl, tr.NetPnL)
+	}
+}
+
+// TestToBacktestSummaryResponse_PreB14NilCharges asserts that runs persisted before
+// the B14 migration (GrossPnl/TotalCharges columns NULL) still render successfully,
+// with both fields rendering as 0 in the response.
+func TestToBacktestSummaryResponse_PreB14NilCharges(t *testing.T) {
+	run := validBacktestSummaryRun()
+	run.GrossPnl = nil
+	run.TotalCharges = nil
+
+	resp, err := toBacktestSummaryResponse(&run)
+	if err != nil {
+		t.Fatalf("expected nil-charge run to render successfully, got error: %v", err)
+	}
+	if resp.Result.GrossPnl != 0 {
+		t.Errorf("expected grossPnl 0 for pre-B14 run, got %v", resp.Result.GrossPnl)
+	}
+	if resp.Result.TotalCharges != 0 {
+		t.Errorf("expected totalCharges 0 for pre-B14 run, got %v", resp.Result.TotalCharges)
 	}
 }
 

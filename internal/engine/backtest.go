@@ -23,10 +23,17 @@ const (
 var _ models.BacktestEngine = (*Backtester)(nil)
 
 // Backtester is the standard implementation of models.BacktestEngine.
-type Backtester struct{}
+// It deducts a per-trade Indian retail cost stack (slippage, brokerage, statutory
+// charges, GST, stamp) via the injected ChargeCalculator before computing NetPnL.
+type Backtester struct {
+	charges models.ChargeCalculator
+}
 
-func NewBacktester() *Backtester {
-	return &Backtester{}
+// NewBacktester constructs a Backtester with the given ChargeCalculator.
+// charges must be non-nil; passing nil produces a panic on the first trade closure,
+// which is the correct failure mode for a wiring bug.
+func NewBacktester(charges models.ChargeCalculator) *Backtester {
+	return &Backtester{charges: charges}
 }
 
 // RunBacktest simulates a strategy against historical signal and trade candles.
@@ -64,13 +71,14 @@ func (b *Backtester) RunBacktest(strategy *models.Strategy, inputs models.Engine
 	var openTrade *models.Trade
 	sigIdx := 0
 	equity, peakEquity, maxDrawdown := 0.0, 0.0, 0.0
+	segment := strategy.InstrumentType
 
 	for i := range inputs.TradeCandles {
 		candle := &inputs.TradeCandles[i]
 
 		if openTrade != nil {
 			if reason, price := checkExitConditions(openTrade, candle, strategy); reason != "" {
-				closeTrade(openTrade, price, candle.Timestamp, reason, qty)
+				b.closeTrade(openTrade, price, candle.Timestamp, reason, qty, segment)
 				recordTrade(result, *openTrade, &equity, &peakEquity, &maxDrawdown, capital)
 				openTrade = nil
 			}
@@ -84,7 +92,7 @@ func (b *Backtester) RunBacktest(strategy *models.Strategy, inputs models.Engine
 				if !isReversal(openTrade.Side, sig.Signal.Side) {
 					continue
 				}
-				closeTrade(openTrade, candle.Open, candle.Timestamp, ExitReasonSignalReversal, qty)
+				b.closeTrade(openTrade, candle.Open, candle.Timestamp, ExitReasonSignalReversal, qty, segment)
 				recordTrade(result, *openTrade, &equity, &peakEquity, &maxDrawdown, capital)
 				openTrade = nil
 			}
@@ -101,16 +109,18 @@ func (b *Backtester) RunBacktest(strategy *models.Strategy, inputs models.Engine
 
 	if openTrade != nil && len(inputs.TradeCandles) > 0 {
 		last := inputs.TradeCandles[len(inputs.TradeCandles)-1]
-		closeTrade(openTrade, last.Close, last.Timestamp, ExitReasonEndOfData, qty)
+		b.closeTrade(openTrade, last.Close, last.Timestamp, ExitReasonEndOfData, qty, segment)
 		recordTrade(result, *openTrade, &equity, &peakEquity, &maxDrawdown, capital)
 	}
 
 	result.TotalTrades = len(result.Trades)
 	for _, tr := range result.Trades {
-		result.NetPnL += tr.PnL
-		if tr.PnL > 0 {
+		result.GrossPnL += tr.GrossPnL
+		result.TotalCharges += tr.TotalCharges
+		result.NetPnL += tr.NetPnL
+		if tr.NetPnL > 0 {
 			result.WinCount++
-		} else if tr.PnL < 0 {
+		} else if tr.NetPnL < 0 {
 			result.LossCount++
 		}
 	}
@@ -176,7 +186,7 @@ func intervalDuration(interval string) (time.Duration, error) {
 // peak is still at zero (i.e. no profitable trade has been closed yet).
 func recordTrade(result *models.BacktestResult, trade models.Trade, equity, peakEquity, maxDrawdown *float64, capital float64) {
 	result.Trades = append(result.Trades, trade)
-	*equity += trade.PnL
+	*equity += trade.NetPnL
 	if *equity > *peakEquity {
 		*peakEquity = *equity
 	}
@@ -238,16 +248,29 @@ func checkExitConditions(trade *models.Trade, candle *models.Candle, strategy *m
 	return "", 0
 }
 
-// closeTrade mutates trade in place with exit fields and computes PnL.
-// PnL is positive for a profitable long (exitPrice > entryPrice) and
-// for a profitable short (entryPrice > exitPrice).
-func closeTrade(trade *models.Trade, exitPrice float64, exitTime time.Time, reason string, qty int) {
+// closeTrade mutates trade in place with exit fields, the frictionless GrossPnL,
+// the full charge breakdown from the injected ChargeCalculator, and the
+// post-charges NetPnL. GrossPnL is positive for a profitable long (exitPrice >
+// entryPrice) and for a profitable short (entryPrice > exitPrice); NetPnL =
+// GrossPnL − TotalCharges.
+func (b *Backtester) closeTrade(trade *models.Trade, exitPrice float64, exitTime time.Time, reason string, qty int, segment string) {
 	trade.ExitTimestamp = exitTime
 	trade.ExitPrice = exitPrice
 	trade.ExitReason = reason
 	if trade.Side == models.OrderSideBuy {
-		trade.PnL = (exitPrice - trade.EntryPrice) * float64(qty)
+		trade.GrossPnL = (exitPrice - trade.EntryPrice) * float64(qty)
 	} else {
-		trade.PnL = (trade.EntryPrice - exitPrice) * float64(qty)
+		trade.GrossPnL = (trade.EntryPrice - exitPrice) * float64(qty)
 	}
+
+	cb := b.charges.Compute(segment, trade.Side, trade.EntryPrice, exitPrice, qty)
+	trade.Slippage = cb.Slippage
+	trade.Brokerage = cb.Brokerage
+	trade.STT = cb.STT
+	trade.ExchangeFees = cb.ExchangeFees
+	trade.SEBIFees = cb.SEBIFees
+	trade.GST = cb.GST
+	trade.StampDuty = cb.StampDuty
+	trade.TotalCharges = cb.Total
+	trade.NetPnL = trade.GrossPnL - cb.Total
 }
