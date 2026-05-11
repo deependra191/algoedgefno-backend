@@ -691,3 +691,89 @@ func assertErrorDoesNotLeakSensitiveValues(t *testing.T, err error, cfg *Config)
 		}
 	}
 }
+
+func TestNewFromEnv_KillSwitchDefaults(t *testing.T) {
+	cfg, err := newFromEnv(mapLookup(minDevEnv()))
+	if err != nil {
+		t.Fatalf("newFromEnv() error = %v", err)
+	}
+	if !cfg.BacktestEnabled {
+		t.Error("BacktestEnabled default should be true")
+	}
+	if cfg.BacktestMaxDays != defaultBacktestMaxDays {
+		t.Errorf("BacktestMaxDays default = %d, want %d", cfg.BacktestMaxDays, defaultBacktestMaxDays)
+	}
+	if cfg.BacktestMaxCandles != defaultBacktestMaxCandles {
+		t.Errorf("BacktestMaxCandles default = %d, want %d", cfg.BacktestMaxCandles, defaultBacktestMaxCandles)
+	}
+	if !cfg.SyncEnabled {
+		t.Error("SyncEnabled default should be true")
+	}
+}
+
+func TestNewFromEnv_KillSwitchesCanBeOverridden(t *testing.T) {
+	env := minDevEnv()
+	env["BACKTEST_ENABLED"] = "false"
+	env["BACKTEST_MAX_DAYS"] = "90"
+	env["BACKTEST_MAX_CANDLES"] = "5000"
+	env["SYNC_ENABLED"] = "false"
+
+	cfg, err := newFromEnv(mapLookup(env))
+	if err != nil {
+		t.Fatalf("newFromEnv() error = %v", err)
+	}
+	if cfg.BacktestEnabled {
+		t.Error("BacktestEnabled should be false")
+	}
+	if cfg.BacktestMaxDays != 90 {
+		t.Errorf("BacktestMaxDays = %d, want 90", cfg.BacktestMaxDays)
+	}
+	if cfg.BacktestMaxCandles != 5000 {
+		t.Errorf("BacktestMaxCandles = %d, want 5000", cfg.BacktestMaxCandles)
+	}
+	if cfg.SyncEnabled {
+		t.Error("SyncEnabled should be false")
+	}
+}
+
+func TestNewFromEnv_ZeroDisablesLimits(t *testing.T) {
+	env := minDevEnv()
+	env["BACKTEST_MAX_DAYS"] = "0"
+	env["BACKTEST_MAX_CANDLES"] = "0"
+
+	cfg, err := newFromEnv(mapLookup(env))
+	if err != nil {
+		t.Fatalf("newFromEnv() error = %v", err)
+	}
+	if cfg.BacktestMaxDays != 0 {
+		t.Errorf("BacktestMaxDays = %d, want 0 (no limit)", cfg.BacktestMaxDays)
+	}
+	if cfg.BacktestMaxCandles != 0 {
+		t.Errorf("BacktestMaxCandles = %d, want 0 (no limit)", cfg.BacktestMaxCandles)
+	}
+}
+
+func TestNewFromEnv_InvalidKillSwitchValuesFail(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+		val  string
+	}{
+		{"non-boolean BACKTEST_ENABLED", "BACKTEST_ENABLED", "yes"},
+		{"non-integer BACKTEST_MAX_DAYS", "BACKTEST_MAX_DAYS", "one-year"},
+		{"negative BACKTEST_MAX_DAYS", "BACKTEST_MAX_DAYS", "-1"},
+		{"non-integer BACKTEST_MAX_CANDLES", "BACKTEST_MAX_CANDLES", "many"},
+		{"non-boolean SYNC_ENABLED", "SYNC_ENABLED", "1.0"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := minDevEnv()
+			env[tt.key] = tt.val
+			_, err := newFromEnv(mapLookup(env))
+			if err == nil {
+				t.Fatalf("newFromEnv() error = nil, want error for %s=%q", tt.key, tt.val)
+			}
+		})
+	}
+}

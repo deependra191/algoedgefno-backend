@@ -254,6 +254,12 @@ func defaultRequest() BacktestRequest {
 	}
 }
 
+// defaultLimits returns permissive limits suitable for unit tests that focus on
+// non-limit behaviour; all checks pass and the kill switch is open.
+func defaultLimits() BacktestLimits {
+	return BacktestLimits{BacktestsEnabled: true, MaxDays: NoDayLimit, MaxCandles: NoCandleLimit}
+}
+
 func newService(
 	br *mockBacktestRepo,
 	bl *mockBuiltinLookup,
@@ -261,7 +267,7 @@ func newService(
 	ir *mockInstrumentRepo,
 	eng *mockEngine,
 ) *BacktestService {
-	svc := NewBacktestService(br, bl, cr, ir, eng)
+	svc := NewBacktestService(br, bl, cr, ir, eng, defaultLimits())
 	// Run background tasks synchronously so tests can inspect final state.
 	svc.launch = func(fn func()) { fn() }
 	return svc
@@ -772,5 +778,118 @@ func TestListCompleted_PopulatesStrategyNamesAndPassesPagination(t *testing.T) {
 	}
 	if result[0].StrategyName == nil || *result[0].StrategyName != defaultBuiltin().Name {
 		t.Fatalf("expected strategy name %q, got %v", defaultBuiltin().Name, result[0].StrategyName)
+	}
+}
+
+func TestSubmit_KillSwitchDisabled(t *testing.T) {
+	svc := NewBacktestService(
+		&mockBacktestRepo{},
+		defaultLookup(),
+		&mockCandleRepo{},
+		&mockInstrumentRepo{listResult: defaultInstruments()},
+		&mockEngine{},
+		BacktestLimits{BacktestsEnabled: false},
+	)
+	svc.launch = func(fn func()) { fn() }
+
+	_, err := svc.Submit(context.Background(), defaultRequest())
+	if !errors.Is(err, ErrBacktestDisabled) {
+		t.Fatalf("expected ErrBacktestDisabled, got %v", err)
+	}
+}
+
+func TestSubmit_DateRangeExceeded(t *testing.T) {
+	svc := NewBacktestService(
+		&mockBacktestRepo{},
+		defaultLookup(),
+		&mockCandleRepo{},
+		&mockInstrumentRepo{listResult: defaultInstruments()},
+		&mockEngine{},
+		BacktestLimits{BacktestsEnabled: true, MaxDays: 30},
+	)
+	svc.launch = func(fn func()) { fn() }
+
+	req := defaultRequest()
+	// defaultRequest spans Jan 1 – Jun 30 = 181 inclusive days, exceeds MaxDays=30.
+	_, err := svc.Submit(context.Background(), req)
+	if !errors.Is(err, ErrBacktestDateRangeExceeded) {
+		t.Fatalf("expected ErrBacktestDateRangeExceeded, got %v", err)
+	}
+}
+
+func TestSubmit_DateRangeAtExactLimit_Passes(t *testing.T) {
+	svc := NewBacktestService(
+		&mockBacktestRepo{},
+		defaultLookup(),
+		&mockCandleRepo{result: defaultCandles()},
+		&mockInstrumentRepo{listResult: defaultInstruments()},
+		&mockEngine{result: defaultEngineResult()},
+		BacktestLimits{BacktestsEnabled: true, MaxDays: 181},
+	)
+	svc.launch = func(fn func()) { fn() }
+
+	req := defaultRequest()
+	// defaultRequest spans Jan 1 – Jun 30 = 181 inclusive days; MaxDays=181 must pass.
+	_, err := svc.Submit(context.Background(), req)
+	if errors.Is(err, ErrBacktestDateRangeExceeded) {
+		t.Fatal("expected request with exactly MaxDays to pass, but got ErrBacktestDateRangeExceeded")
+	}
+}
+
+func TestSubmit_CandleCountExceeded(t *testing.T) {
+	candles := defaultCandles() // 5 candles
+
+	svc := NewBacktestService(
+		&mockBacktestRepo{},
+		defaultLookup(),
+		&mockCandleRepo{result: candles},
+		&mockInstrumentRepo{listResult: defaultInstruments()},
+		&mockEngine{},
+		BacktestLimits{BacktestsEnabled: true, MaxCandles: 3},
+	)
+	svc.launch = func(fn func()) { fn() }
+
+	_, err := svc.Submit(context.Background(), defaultRequest())
+	if !errors.Is(err, ErrBacktestCandleCountExceeded) {
+		t.Fatalf("expected ErrBacktestCandleCountExceeded, got %v", err)
+	}
+}
+
+func TestSubmit_CandleCountAtExactLimit_Passes(t *testing.T) {
+	candles := defaultCandles() // 5 candles
+
+	svc := NewBacktestService(
+		&mockBacktestRepo{},
+		defaultLookup(),
+		&mockCandleRepo{result: candles},
+		&mockInstrumentRepo{listResult: defaultInstruments()},
+		&mockEngine{result: defaultEngineResult()},
+		BacktestLimits{BacktestsEnabled: true, MaxCandles: 5},
+	)
+	svc.launch = func(fn func()) { fn() }
+
+	_, err := svc.Submit(context.Background(), defaultRequest())
+	if errors.Is(err, ErrBacktestCandleCountExceeded) {
+		t.Fatal("expected request with exactly MaxCandles to pass, but got ErrBacktestCandleCountExceeded")
+	}
+}
+
+func TestSubmit_NoDayLimit_AllowsLargeRange(t *testing.T) {
+	svc := NewBacktestService(
+		&mockBacktestRepo{},
+		defaultLookup(),
+		&mockCandleRepo{result: defaultCandles()},
+		&mockInstrumentRepo{listResult: defaultInstruments()},
+		&mockEngine{result: defaultEngineResult()},
+		BacktestLimits{BacktestsEnabled: true, MaxDays: NoDayLimit, MaxCandles: NoCandleLimit},
+	)
+	svc.launch = func(fn func()) { fn() }
+
+	req := defaultRequest()
+	req.From = time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	req.To = time.Date(2025, 12, 31, 0, 0, 0, 0, time.UTC)
+	_, err := svc.Submit(context.Background(), req)
+	if errors.Is(err, ErrBacktestDateRangeExceeded) {
+		t.Fatal("expected no date-range check when MaxDays=0, but got ErrBacktestDateRangeExceeded")
 	}
 }
