@@ -21,10 +21,11 @@ import (
 func main() {
 	cfg := config.Load()
 
-	// Configure structured logging before any further log output so that startup
-	// failures also emit structured records. The returned logger carries env/version/commit
-	// as base attributes on every record. It is also registered as slog.Default() so that
-	// all package-level slog calls (e.g. slog.Info, slog.Error) share the same handler and
+	// Configure structured logging immediately after config loading so that startup
+	// validation and runtime failures emit structured records. (config.Load() itself
+	// may emit stdlib log output before this point.) The returned logger carries
+	// env/version/commit as base attributes on every record. It is also registered as
+	// slog.Default() so that all package-level slog calls share the same handler and
 	// base attributes — the local variable is kept only to pass the same instance to
 	// middleware.Logger, which accepts an injected logger for test isolation.
 	logger := slog.New(logging.NewHandler(cfg.Env, os.Stderr)).With(
@@ -60,12 +61,13 @@ func main() {
 	}
 
 	r := gin.New()
-	// Middleware order matters: Recovery first so that even a panic in RequestID or Logger
-	// is caught and the client receives a 500 rather than a broken connection. RequestID
-	// must run before Logger so the ID is available in the Gin context when Logger reads it.
-	r.Use(gin.Recovery())
+	// Middleware order matters: Logger wraps Recovery so that when a handler panics,
+	// Recovery catches it (sets 500) and returns normally, allowing Logger's post-c.Next()
+	// code to run and emit a log record with the correct status and request_id.
+	// RequestID runs first so the ID is in context before Logger reads it.
 	r.Use(middleware.RequestID())
 	r.Use(middleware.Logger(logger))
+	r.Use(gin.Recovery())
 	r.Use(cors.Default())
 
 	routes.Register(r, pool, cfg, registry)

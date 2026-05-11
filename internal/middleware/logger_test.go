@@ -2,9 +2,11 @@ package middleware_test
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -150,4 +152,85 @@ func TestLogger_StatusLogged(t *testing.T) {
 	if got := int(attr.Value.Int64()); got != http.StatusNotFound {
 		t.Errorf("logged status: got %d want %d", got, http.StatusNotFound)
 	}
+}
+
+// TestLogger_PanicLogsStatus500AndRequestID verifies that when a handler panics,
+// Logger still emits exactly one record with status=500 and the correct request_id.
+// This requires the middleware chain order RequestID → Logger → Recovery → handler:
+// Recovery catches the panic and returns normally, so Logger's post-c.Next() code runs.
+func TestLogger_PanicLogsStatus500AndRequestID(t *testing.T) {
+	h := &recordingHandler{}
+	l := slog.New(h)
+	want := uuid.New().String()
+
+	r := gin.New()
+	r.Use(middleware.RequestID())
+	r.Use(middleware.Logger(l))
+	r.Use(gin.RecoveryWithWriter(io.Discard)) // discard gin's panic output in test
+	r.GET("/panic", func(_ *gin.Context) { panic("boom") })
+
+	req := httptest.NewRequest(http.MethodGet, "/panic", nil)
+	req.Header.Set(middleware.RequestIDHeader, want)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 from panicking handler, got %d", w.Code)
+	}
+
+	h.mu.Lock()
+	n := len(h.records)
+	h.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("expected exactly 1 log record, got %d", n)
+	}
+
+	statusAttr, ok := h.attrByKey("status")
+	if !ok {
+		t.Fatal("status not logged")
+	}
+	if got := int(statusAttr.Value.Int64()); got != http.StatusInternalServerError {
+		t.Errorf("logged status: got %d want 500", got)
+	}
+
+	ridAttr, ok := h.attrByKey("request_id")
+	if !ok {
+		t.Fatal("request_id not logged")
+	}
+	if got := ridAttr.Value.String(); got != want {
+		t.Errorf("logged request_id: got %q want %q", got, want)
+	}
+}
+
+// TestLogger_QueryStringNotLogged verifies that query parameters are never included
+// in the logged path. The logger uses URL.Path (not RequestURI) precisely to avoid
+// logging tokens or other sensitive data passed as query strings.
+func TestLogger_QueryStringNotLogged(t *testing.T) {
+	h := &recordingHandler{}
+	l := slog.New(h)
+	r := newLoggerRouter(l)
+
+	req := httptest.NewRequest(http.MethodGet, "/?token=secret", nil)
+	r.ServeHTTP(httptest.NewRecorder(), req)
+
+	pathAttr, ok := h.attrByKey("path")
+	if !ok {
+		t.Fatal("path not logged")
+	}
+	if got := pathAttr.Value.String(); got != "/" {
+		t.Errorf("logged path: got %q want \"/\" — query string must not be included", got)
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.records) == 0 {
+		t.Fatal("no log records captured")
+	}
+	h.records[len(h.records)-1].Attrs(func(a slog.Attr) bool {
+		v := a.Value.String()
+		if strings.Contains(v, "secret") {
+			t.Errorf("query param value %q leaked in attr %q", v, a.Key)
+		}
+		return true
+	})
 }
