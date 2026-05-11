@@ -3,11 +3,14 @@ package main
 import (
 	"context"
 	"flag"
-	"log"
+	"log/slog"
+	"os"
 	"time"
 
+	"github.com/deependra191/algoedgefno-backend/internal/buildinfo"
 	"github.com/deependra191/algoedgefno-backend/internal/config"
 	"github.com/deependra191/algoedgefno-backend/internal/database"
+	"github.com/deependra191/algoedgefno-backend/internal/logging"
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 	"github.com/deependra191/algoedgefno-backend/internal/providers"
 	"github.com/deependra191/algoedgefno-backend/internal/providers/nse"
@@ -29,8 +32,16 @@ func main() {
 	flag.Parse()
 
 	cfg := config.Load()
+
+	slog.SetDefault(slog.New(logging.NewHandler(cfg.Env, os.Stderr)).With(
+		"env", string(cfg.Env),
+		"version", buildinfo.AppVersion,
+		"commit", buildinfo.CommitSHA,
+	))
+
 	if err := cfg.ValidateStartupIdentity(); err != nil {
-		log.Fatalf("startup validation failed: %v", err)
+		slog.Error("startup validation failed", "error", err)
+		os.Exit(1)
 	}
 
 	pool := database.Connect(cfg)
@@ -43,17 +54,19 @@ func main() {
 	if *fromStr != "" {
 		from, err := time.Parse(dateLayout, *fromStr)
 		if err != nil {
-			log.Fatalf("invalid -from date %q: %v", *fromStr, err)
+			slog.Error("invalid -from date", "value", *fromStr, "error", err)
+			os.Exit(1)
 		}
 		to := time.Now().UTC().Truncate(24 * time.Hour)
 		if *toStr != "" {
 			to, err = time.Parse(dateLayout, *toStr)
 			if err != nil {
-				log.Fatalf("invalid -to date %q: %v", *toStr, err)
+				slog.Error("invalid -to date", "value", *toStr, "error", err)
+				os.Exit(1)
 			}
 		}
 
-		log.Printf("backfilling NSE EOD data from %s to %s...", from.Format(dateLayout), to.Format(dateLayout))
+		slog.Info("backfilling NSE EOD data", "from", from.Format(dateLayout), "to", to.Format(dateLayout))
 		var totalRecords, succeeded, failed int
 		var failedDays []string
 		for day := from; !day.After(to); day = nextTradingDay(day) {
@@ -63,17 +76,17 @@ func main() {
 			if err != nil {
 				failed++
 				failedDays = append(failedDays, day.Format(dateLayout))
-				log.Printf("[%s] failed: %v — skipping", day.Format(dateLayout), err)
+				slog.Warn("sync failed for date, skipping", "date", day.Format(dateLayout), "error", err)
 			} else {
 				succeeded++
 				totalRecords += run.RecordsProcessed
-				log.Printf("[%s] synced %d records (running total: %d)", day.Format(dateLayout), run.RecordsProcessed, totalRecords)
+				slog.Info("synced date", "date", day.Format(dateLayout), "records", run.RecordsProcessed, "total_records", totalRecords)
 			}
 			time.Sleep(time.Duration(*delaySec) * time.Second)
 		}
-		log.Printf("backfill complete: %d days synced, %d days failed (likely holidays), %d total records", succeeded, failed, totalRecords)
+		slog.Info("backfill complete", "days_synced", succeeded, "days_failed", failed, "total_records", totalRecords)
 		if len(failedDays) > 0 {
-			log.Printf("failed days: %v", failedDays)
+			slog.Info("failed days (likely holidays)", "days", failedDays)
 		}
 		return
 	}
@@ -82,16 +95,18 @@ func main() {
 		// Manual single-day override.
 		t, err := time.Parse(dateLayout, *dateStr)
 		if err != nil {
-			log.Fatalf("invalid date %q: %v", *dateStr, err)
+			slog.Error("invalid -date value", "value", *dateStr, "error", err)
+			os.Exit(1)
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
 		defer cancel()
-		log.Printf("syncing NSE EOD data for %s...", *dateStr)
+		slog.Info("syncing NSE EOD data", "date", *dateStr)
 		run, err := syncForDate(ctx, instrumentStore, candleStore, syncRunStore, cfg, t)
 		if err != nil {
-			log.Fatalf("sync failed: %v", err)
+			slog.Error("sync failed", "error", err)
+			os.Exit(1)
 		}
-		log.Printf("sync completed: %d records processed", run.RecordsProcessed)
+		slog.Info("sync complete", "records_processed", run.RecordsProcessed)
 		return
 	}
 
@@ -102,19 +117,21 @@ func main() {
 	lastSynced, err := candleStore.LastSyncedDate(queryCtx, nse.ProviderName)
 	queryCancel()
 	if err != nil {
-		log.Fatalf("failed to get last synced date: %v", err)
+		slog.Error("failed to get last synced date", "error", err)
+		os.Exit(1)
 	}
 	if lastSynced.IsZero() {
-		log.Fatal("no data found — run a backfill first: go run ./cmd/sync -from YYYY-MM-DD")
+		slog.Error("no data found", "hint", "run a backfill first: go run ./cmd/sync -from YYYY-MM-DD")
+		os.Exit(1)
 	}
 
 	today := time.Now().UTC().Truncate(24 * time.Hour)
 	if !lastSynced.Before(today) {
-		log.Println("already up to date, nothing to sync")
+		slog.Info("already up to date, nothing to sync")
 		return
 	}
 
-	log.Printf("daily catchup: last synced %s, syncing to %s...", lastSynced.Format(dateLayout), today.Format(dateLayout))
+	slog.Info("daily catchup starting", "last_synced", lastSynced.Format(dateLayout), "syncing_to", today.Format(dateLayout))
 	var totalRecords, succeeded, failed int
 	var failedDays []string
 	for day := lastSynced.AddDate(0, 0, 1); !day.After(today); day = day.AddDate(0, 0, 1) {
@@ -124,17 +141,17 @@ func main() {
 		if err != nil {
 			failed++
 			failedDays = append(failedDays, day.Format(dateLayout))
-			log.Printf("[%s] failed: %v — skipping", day.Format(dateLayout), err)
+			slog.Warn("sync failed for date, skipping", "date", day.Format(dateLayout), "error", err)
 		} else {
 			succeeded++
 			totalRecords += run.RecordsProcessed
-			log.Printf("[%s] synced %d records", day.Format(dateLayout), run.RecordsProcessed)
+			slog.Info("synced date", "date", day.Format(dateLayout), "records", run.RecordsProcessed)
 		}
 		time.Sleep(time.Duration(*delaySec) * time.Second)
 	}
-	log.Printf("daily catchup complete: %d days synced, %d days failed (holidays/weekends), %d total records", succeeded, failed, totalRecords)
+	slog.Info("daily catchup complete", "days_synced", succeeded, "days_failed", failed, "total_records", totalRecords)
 	if len(failedDays) > 0 {
-		log.Printf("failed days: %v", failedDays)
+		slog.Info("failed days (holidays/weekends)", "days", failedDays)
 	}
 }
 
