@@ -94,7 +94,7 @@ func TestLogger_RequestIDFromContext(t *testing.T) {
 	req.Header.Set(middleware.RequestIDHeader, want)
 	r.ServeHTTP(httptest.NewRecorder(), req)
 
-	attr, ok := h.attrByKey("request_id")
+	attr, ok := h.attrByKey(middleware.LogAttrRequestID)
 	if !ok {
 		t.Fatal("request_id not logged")
 	}
@@ -193,7 +193,7 @@ func TestLogger_PanicLogsStatus500AndRequestID(t *testing.T) {
 		t.Errorf("logged status: got %d want 500", got)
 	}
 
-	ridAttr, ok := h.attrByKey("request_id")
+	ridAttr, ok := h.attrByKey(middleware.LogAttrRequestID)
 	if !ok {
 		t.Fatal("request_id not logged")
 	}
