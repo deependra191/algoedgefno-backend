@@ -58,6 +58,12 @@ func (h *BacktestHandler) Submit(c *gin.Context) {
 	})
 	if err != nil {
 		switch {
+		case errors.Is(err, services.ErrBacktestDisabled):
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "backtests are disabled"})
+		case errors.Is(err, services.ErrBacktestDateRangeExceeded):
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "date range exceeds maximum allowed"})
+		case errors.Is(err, services.ErrBacktestCandleCountExceeded):
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "candle count exceeds maximum allowed"})
 		case errors.Is(err, services.ErrStrategyNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"error": "strategy not found"})
 		case errors.Is(err, services.ErrInvalidUnderlying):

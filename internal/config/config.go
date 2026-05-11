@@ -33,6 +33,12 @@ const (
 	envVarNSEUserAgent   = "NSE_USER_AGENT"
 	envVarNSEAcceptHTML  = "NSE_ACCEPT_HTML"
 
+	envVarBacktestEnabled    = "BACKTEST_ENABLED"
+	envVarBacktestMaxDays    = "BACKTEST_MAX_DAYS"
+	envVarBacktestMaxCandles = "BACKTEST_MAX_CANDLES"
+	envVarSyncEnabled        = "SYNC_ENABLED"
+	envVarLiveTickEnabled    = "LIVE_TICK_ENABLED"
+
 	// Operational defaults — safe to use as config fallbacks.
 	defaultPort           = "8080"
 	defaultDBHost         = "localhost"
@@ -40,6 +46,14 @@ const (
 	defaultMigrationsPath = "file://migrations"
 	defaultNSEUserAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 	defaultNSEAcceptHTML  = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+
+	// defaultBacktestMaxDays and defaultBacktestMaxCandles are conservative production limits.
+	// Staging env files should set lower values. 0 means no limit.
+	defaultBacktestEnabled    = true
+	defaultBacktestMaxDays    = 730
+	defaultBacktestMaxCandles = 20000
+	defaultSyncEnabled        = true
+	defaultLiveTickEnabled    = false
 )
 
 // Environment identifies the runtime environment selected by APP_ENV.
@@ -65,6 +79,18 @@ type Config struct {
 	// Override via NSE_USER_AGENT / NSE_ACCEPT_HTML if NSE tightens their checks.
 	NSEUserAgent  string
 	NSEAcceptHTML string
+
+	// Kill switches and cost-control limits.
+	// BacktestEnabled gates all backtest submissions; set false to disable globally.
+	// BacktestMaxDays is the maximum date range in days; 0 means no limit.
+	// BacktestMaxCandles is the maximum candle count per run (signal or trade, whichever is larger); 0 means no limit.
+	// SyncEnabled gates NSE EOD sync; set false to disable without code changes.
+	// LiveTickEnabled is a no-op placeholder for Phase 3 live tick streaming.
+	BacktestEnabled    bool
+	BacktestMaxDays    int
+	BacktestMaxCandles int
+	SyncEnabled        bool
+	LiveTickEnabled    bool
 }
 
 // Load reads environment-backed configuration, including a local .env file when present.
@@ -128,21 +154,47 @@ func newFromEnv(lookup func(string) (string, bool)) (*Config, error) {
 		return nil, err
 	}
 
+	backtestEnabled, err := getBoolEnvFrom(lookup, envVarBacktestEnabled, defaultBacktestEnabled)
+	if err != nil {
+		return nil, err
+	}
+	backtestMaxDays, err := getIntEnvFrom(lookup, envVarBacktestMaxDays, defaultBacktestMaxDays)
+	if err != nil {
+		return nil, err
+	}
+	backtestMaxCandles, err := getIntEnvFrom(lookup, envVarBacktestMaxCandles, defaultBacktestMaxCandles)
+	if err != nil {
+		return nil, err
+	}
+	syncEnabled, err := getBoolEnvFrom(lookup, envVarSyncEnabled, defaultSyncEnabled)
+	if err != nil {
+		return nil, err
+	}
+	liveTickEnabled, err := getBoolEnvFrom(lookup, envVarLiveTickEnabled, defaultLiveTickEnabled)
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &Config{
-		Port:           getEnvFrom(lookup, envVarPort, defaultPort),
-		DatabaseURL:    getEnvFrom(lookup, envVarDatabaseURL, ""),
-		DBHost:         getEnvFrom(lookup, envVarDBHost, defaultDBHost),
-		DBPort:         getEnvFrom(lookup, envVarDBPort, defaultDBPort),
-		DBUser:         getEnvFrom(lookup, envVarDBUser, ""),
-		DBPass:         getEnvFrom(lookup, envVarDBPassword, ""),
-		DBName:         getEnvFrom(lookup, envVarDBName, ""),
-		JWTSecret:      jwtSecret,
-		AppSecretToken: appSecretToken,
-		Env:            env,
-		MigrationsPath: getEnvFrom(lookup, envVarMigrationsPath, defaultMigrationsPath),
-		AutoMigrate:    autoMigrate,
-		NSEUserAgent:   getEnvFrom(lookup, envVarNSEUserAgent, defaultNSEUserAgent),
-		NSEAcceptHTML:  getEnvFrom(lookup, envVarNSEAcceptHTML, defaultNSEAcceptHTML),
+		Port:               getEnvFrom(lookup, envVarPort, defaultPort),
+		DatabaseURL:        getEnvFrom(lookup, envVarDatabaseURL, ""),
+		DBHost:             getEnvFrom(lookup, envVarDBHost, defaultDBHost),
+		DBPort:             getEnvFrom(lookup, envVarDBPort, defaultDBPort),
+		DBUser:             getEnvFrom(lookup, envVarDBUser, ""),
+		DBPass:             getEnvFrom(lookup, envVarDBPassword, ""),
+		DBName:             getEnvFrom(lookup, envVarDBName, ""),
+		JWTSecret:          jwtSecret,
+		AppSecretToken:     appSecretToken,
+		Env:                env,
+		MigrationsPath:     getEnvFrom(lookup, envVarMigrationsPath, defaultMigrationsPath),
+		AutoMigrate:        autoMigrate,
+		NSEUserAgent:       getEnvFrom(lookup, envVarNSEUserAgent, defaultNSEUserAgent),
+		NSEAcceptHTML:      getEnvFrom(lookup, envVarNSEAcceptHTML, defaultNSEAcceptHTML),
+		BacktestEnabled:    backtestEnabled,
+		BacktestMaxDays:    backtestMaxDays,
+		BacktestMaxCandles: backtestMaxCandles,
+		SyncEnabled:        syncEnabled,
+		LiveTickEnabled:    liveTickEnabled,
 	}
 
 	if cfg.DatabaseURL != "" {
@@ -244,6 +296,18 @@ func getBoolEnvFrom(lookup func(string) (string, bool), key string, fallback boo
 	parsed, err := strconv.ParseBool(v)
 	if err != nil {
 		return false, fmt.Errorf("%s must be a boolean", key)
+	}
+	return parsed, nil
+}
+
+func getIntEnvFrom(lookup func(string) (string, bool), key string, fallback int) (int, error) {
+	v, ok := lookup(key)
+	if !ok || strings.TrimSpace(v) == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || parsed < 0 {
+		return 0, fmt.Errorf("%s must be a non-negative integer", key)
 	}
 	return parsed, nil
 }

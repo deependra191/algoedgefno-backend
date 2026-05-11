@@ -44,6 +44,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if !cfg.SyncEnabled {
+		slog.Info("sync disabled via SYNC_ENABLED=false, exiting")
+		return
+	}
+
 	pool := database.Connect(cfg)
 	defer pool.Close()
 

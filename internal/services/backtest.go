@@ -14,13 +14,31 @@ import (
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
-var (
-	ErrStrategyNotFound       = errors.New("strategy not found")
-	ErrNoInstrument           = errors.New("no instrument found for underlying")
-	ErrNoCandleData           = errors.New("no candle data available")
-	ErrInvalidUnderlying      = errors.New("invalid underlying for strategy")
-	ErrInvalidStrategySources = errors.New("invalid strategy source declaration")
+const (
+	// NoDayLimit and NoCandleLimit are sentinel values for BacktestLimits fields,
+	// meaning the corresponding limit is not enforced.
+	NoDayLimit    = 0
+	NoCandleLimit = 0
 )
+
+var (
+	ErrStrategyNotFound            = errors.New("strategy not found")
+	ErrNoInstrument                = errors.New("no instrument found for underlying")
+	ErrNoCandleData                = errors.New("no candle data available")
+	ErrInvalidUnderlying           = errors.New("invalid underlying for strategy")
+	ErrInvalidStrategySources      = errors.New("invalid strategy source declaration")
+	ErrBacktestDisabled            = errors.New("backtests are disabled")
+	ErrBacktestDateRangeExceeded   = errors.New("backtest date range exceeds maximum allowed days")
+	ErrBacktestCandleCountExceeded = errors.New("backtest candle count exceeds maximum")
+)
+
+// BacktestLimits defines the operational constraints for backtest submission.
+// MaxDays of 0 means no date-range limit; MaxCandles of 0 means no candle-count limit.
+type BacktestLimits struct {
+	Enabled    bool
+	MaxDays    int
+	MaxCandles int
+}
 
 const (
 	errMsgInternalError                   = "internal error"
@@ -36,6 +54,7 @@ type BacktestService struct {
 	candleStore     models.CandleRepository
 	instrumentStore models.InstrumentRepository
 	engine          models.BacktestEngine
+	limits          BacktestLimits
 	// launch fires the background execution function. Defaults to a goroutine;
 	// tests replace this with a synchronous caller to observe final state.
 	launch func(func())
@@ -48,6 +67,7 @@ func NewBacktestService(
 	candleStore models.CandleRepository,
 	instrumentStore models.InstrumentRepository,
 	engine models.BacktestEngine,
+	limits BacktestLimits,
 ) *BacktestService {
 	return &BacktestService{
 		backtestStore:   backtestStore,
@@ -55,6 +75,7 @@ func NewBacktestService(
 		candleStore:     candleStore,
 		instrumentStore: instrumentStore,
 		engine:          engine,
+		limits:          limits,
 		launch:          func(fn func()) { go fn() },
 	}
 }
@@ -75,6 +96,16 @@ type BacktestRequest struct {
 // Candle availability is checked synchronously so the caller gets an immediate error
 // if no data exists for the requested range.
 func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*models.BacktestRun, error) {
+	if !s.limits.Enabled {
+		return nil, ErrBacktestDisabled
+	}
+	if s.limits.MaxDays != NoDayLimit {
+		rangeDays := int(req.To.Sub(req.From) / (24 * time.Hour))
+		if rangeDays > s.limits.MaxDays {
+			return nil, ErrBacktestDateRangeExceeded
+		}
+	}
+
 	builtin, ok := s.builtins.Get(req.StrategySlug)
 	if !ok {
 		return nil, ErrStrategyNotFound
@@ -105,6 +136,12 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 	inputs, err := s.fetchEngineInputs(ctx, signalInst, tradeInst, builtin.CandleInterval, req.From, req.To)
 	if err != nil {
 		return nil, err
+	}
+	if s.limits.MaxCandles != NoCandleLimit {
+		count := max(len(inputs.SignalCandles), len(inputs.TradeCandles))
+		if count > s.limits.MaxCandles {
+			return nil, ErrBacktestCandleCountExceeded
+		}
 	}
 
 	// Runs intentionally snapshot the current trade lot size at submission time.
