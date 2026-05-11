@@ -395,6 +395,41 @@ func TestToBacktestTradesPageResponse_ChargeInvariant(t *testing.T) {
 	}
 }
 
+// TestToBacktestTradesPageResponse_PreB14LegacyPnL asserts that legacy trades_json
+// blobs persisted before the B14 field rename (containing the marshaled "PnL" key)
+// still render the correct pnl value, not zero, in GET /backtests/:id/trades.
+func TestToBacktestTradesPageResponse_PreB14LegacyPnL(t *testing.T) {
+	raw := []byte(`[{
+		"EntryTimestamp": "2025-01-02T09:15:00Z",
+		"ExitTimestamp":  "2025-01-02T09:30:00Z",
+		"Side":           "BUY",
+		"Quantity":       50,
+		"EntryPrice":     100,
+		"ExitPrice":      105,
+		"PnL":            123.45,
+		"Reason":         "MA bullish",
+		"ExitReason":     "target"
+	}]`)
+
+	resp, err := toBacktestTradesPageResponse(raw, 1, 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Trades) != 1 {
+		t.Fatalf("expected 1 trade, got %d", len(resp.Trades))
+	}
+	got := resp.Trades[0]
+	if got.Pnl != 123.45 {
+		t.Errorf("legacy pnl lost: got %v, want 123.45", got.Pnl)
+	}
+	if got.GrossPnl != 123.45 {
+		t.Errorf("legacy grossPnl mirror missing: got %v, want 123.45", got.GrossPnl)
+	}
+	if got.TotalCharges != 0 {
+		t.Errorf("legacy totalCharges should be 0, got %v", got.TotalCharges)
+	}
+}
+
 // TestToBacktestSummaryResponse_PreB14NilCharges asserts that runs persisted before
 // the B14 migration (GrossPnl/TotalCharges columns NULL) still render successfully,
 // with both fields rendering as 0 in the response.

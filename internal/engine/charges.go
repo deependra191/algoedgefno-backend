@@ -33,7 +33,7 @@ const (
 
 // Securities Transaction Tax — applies to the SELL leg only.
 const (
-	sttPctEQ  = 0.00025 // 0.025% on intraday delivery
+	sttPctEQ  = 0.00025 // 0.025% on equity intraday sell turnover
 	sttPctFUT = 0.0005  // 0.05% on futures sell turnover (post FA 2026)
 	sttPctOPT = 0.0015  // 0.15% on options sell premium turnover (post FA 2026)
 )
