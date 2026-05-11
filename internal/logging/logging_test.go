@@ -63,7 +63,7 @@ func TestNewHandler_RedactsSensitiveKeys(t *testing.T) {
 			if strings.Contains(out, tc.value) {
 				t.Errorf("sensitive value %q leaked for key %q: %s", tc.value, tc.key, out)
 			}
-			if !strings.Contains(out, "[redacted]") {
+			if !strings.Contains(out, logging.RedactedLogValue) {
 				t.Errorf("expected [redacted] for key %q, got: %s", tc.key, out)
 			}
 		})
@@ -76,7 +76,7 @@ func TestNewHandler_SafeKeysNotRedacted(t *testing.T) {
 	h := logging.NewHandler(config.EnvProduction, &buf)
 	slog.New(h).Info("test", "env", "production", "status", 200)
 	out := buf.String()
-	if strings.Contains(out, "[redacted]") {
+	if strings.Contains(out, logging.RedactedLogValue) {
 		t.Errorf("safe keys were unexpectedly redacted: %s", out)
 	}
 }

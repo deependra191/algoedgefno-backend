@@ -11,6 +11,11 @@ import (
 	"github.com/deependra191/algoedgefno-backend/internal/config"
 )
 
+// RedactedLogValue is the sentinel string written in place of a sensitive attribute value.
+// Tests that assert redaction behaviour should compare against this constant so that a
+// change to the sentinel propagates automatically.
+const RedactedLogValue = "[redacted]"
+
 // sensitiveKeyParts lists substrings whose presence in an attribute key triggers redaction.
 // This is defence-in-depth: code review is the primary control; this catches accidental
 // future leaks at the output boundary.
@@ -37,7 +42,7 @@ func redactSensitiveKeys(_ []string, a slog.Attr) slog.Attr {
 	key := strings.ToLower(a.Key)
 	for _, part := range sensitiveKeyParts {
 		if strings.Contains(key, part) {
-			return slog.Attr{Key: a.Key, Value: slog.StringValue("[redacted]")}
+			return slog.Attr{Key: a.Key, Value: slog.StringValue(RedactedLogValue)}
 		}
 	}
 	return a
