@@ -29,9 +29,9 @@ func Register(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, registry *p
 
 	strategySvc := services.NewStrategyService(builtinRegistry, backtestStore, candleStore)
 	backtestSvc := services.NewBacktestService(backtestStore, builtinRegistry, candleStore, instrumentStore, engine.NewBacktester(), services.BacktestLimits{
-		Enabled:    cfg.BacktestEnabled,
-		MaxDays:    cfg.BacktestMaxDays,
-		MaxCandles: cfg.BacktestMaxCandles,
+		BacktestsEnabled: cfg.BacktestEnabled,
+		MaxDays:          cfg.BacktestMaxDays,
+		MaxCandles:       cfg.BacktestMaxCandles,
 	})
 
 	strategyHandler := handlers.NewStrategyHandler(strategySvc)

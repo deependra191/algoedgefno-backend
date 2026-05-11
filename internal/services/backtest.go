@@ -19,6 +19,8 @@ const (
 	// meaning the corresponding limit is not enforced.
 	NoDayLimit    = 0
 	NoCandleLimit = 0
+
+	oneDay = 24 * time.Hour
 )
 
 var (
@@ -33,11 +35,17 @@ var (
 )
 
 // BacktestLimits defines the operational constraints for backtest submission.
+// All fields are read once at service construction; changing env values requires
+// a process restart to take effect.
+//
 // MaxDays of 0 means no date-range limit; MaxCandles of 0 means no candle-count limit.
+// MaxCandles is a post-fetch engine-safety guard — it does not prevent the DB read.
+// Use MaxDays to constrain DB read cost.
 type BacktestLimits struct {
-	Enabled    bool
-	MaxDays    int
-	MaxCandles int
+	// BacktestsEnabled gates all new backtest submissions. Running backtests are not cancelled.
+	BacktestsEnabled bool
+	MaxDays          int
+	MaxCandles       int
 }
 
 const (
@@ -96,11 +104,12 @@ type BacktestRequest struct {
 // Candle availability is checked synchronously so the caller gets an immediate error
 // if no data exists for the requested range.
 func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*models.BacktestRun, error) {
-	if !s.limits.Enabled {
+	if !s.limits.BacktestsEnabled {
 		return nil, ErrBacktestDisabled
 	}
 	if s.limits.MaxDays != NoDayLimit {
-		rangeDays := int(req.To.Sub(req.From) / (24 * time.Hour))
+		// +1 makes the range calendar-inclusive: From=Jan 1, To=Jan 31 → 31 days.
+		rangeDays := int(req.To.Sub(req.From)/oneDay) + 1
 		if rangeDays > s.limits.MaxDays {
 			return nil, ErrBacktestDateRangeExceeded
 		}

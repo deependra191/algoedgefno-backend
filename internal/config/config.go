@@ -37,7 +37,6 @@ const (
 	envVarBacktestMaxDays    = "BACKTEST_MAX_DAYS"
 	envVarBacktestMaxCandles = "BACKTEST_MAX_CANDLES"
 	envVarSyncEnabled        = "SYNC_ENABLED"
-	envVarLiveTickEnabled    = "LIVE_TICK_ENABLED"
 
 	// Operational defaults — safe to use as config fallbacks.
 	defaultPort           = "8080"
@@ -47,13 +46,16 @@ const (
 	defaultNSEUserAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 	defaultNSEAcceptHTML  = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
 
-	// defaultBacktestMaxDays and defaultBacktestMaxCandles are conservative production limits.
-	// Staging env files should set lower values. 0 means no limit.
+	// BacktestEnabled defaults to true (backtests on).
+	// BacktestMaxDays defaults to 1825 (5 years) — a high-but-finite guard against
+	// accidental extreme requests. 0 means no limit.
+	// BacktestMaxCandles defaults to 0 (no limit) because the check is post-fetch;
+	// it does not protect DB read cost. Only set this when post-fetch protection is wanted.
+	// SyncEnabled defaults to true (sync on).
 	defaultBacktestEnabled    = true
-	defaultBacktestMaxDays    = 730
-	defaultBacktestMaxCandles = 20000
+	defaultBacktestMaxDays    = 1825
+	defaultBacktestMaxCandles = 0
 	defaultSyncEnabled        = true
-	defaultLiveTickEnabled    = false
 )
 
 // Environment identifies the runtime environment selected by APP_ENV.
@@ -80,17 +82,18 @@ type Config struct {
 	NSEUserAgent  string
 	NSEAcceptHTML string
 
-	// Kill switches and cost-control limits.
-	// BacktestEnabled gates all backtest submissions; set false to disable globally.
-	// BacktestMaxDays is the maximum date range in days; 0 means no limit.
-	// BacktestMaxCandles is the maximum candle count per run (signal or trade, whichever is larger); 0 means no limit.
-	// SyncEnabled gates NSE EOD sync; set false to disable without code changes.
-	// LiveTickEnabled is a no-op placeholder for Phase 3 live tick streaming.
+	// Startup-evaluated kill switches and cost-control limits.
+	// Changing these values requires a process restart to take effect.
+	//
+	// BacktestEnabled gates all new backtest submissions (running backtests are not cancelled).
+	// BacktestMaxDays is the maximum calendar-inclusive date range in days; 0 means no limit.
+	// BacktestMaxCandles is a post-fetch engine-safety guard; 0 means no limit.
+	//   It does not prevent the DB read — use BacktestMaxDays to limit DB read cost.
+	// SyncEnabled gates new cmd/sync invocations; already-running sync is not interrupted.
 	BacktestEnabled    bool
 	BacktestMaxDays    int
 	BacktestMaxCandles int
 	SyncEnabled        bool
-	LiveTickEnabled    bool
 }
 
 // Load reads environment-backed configuration, including a local .env file when present.
@@ -170,10 +173,6 @@ func newFromEnv(lookup func(string) (string, bool)) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	liveTickEnabled, err := getBoolEnvFrom(lookup, envVarLiveTickEnabled, defaultLiveTickEnabled)
-	if err != nil {
-		return nil, err
-	}
 
 	cfg := &Config{
 		Port:               getEnvFrom(lookup, envVarPort, defaultPort),
@@ -194,7 +193,6 @@ func newFromEnv(lookup func(string) (string, bool)) (*Config, error) {
 		BacktestMaxDays:    backtestMaxDays,
 		BacktestMaxCandles: backtestMaxCandles,
 		SyncEnabled:        syncEnabled,
-		LiveTickEnabled:    liveTickEnabled,
 	}
 
 	if cfg.DatabaseURL != "" {

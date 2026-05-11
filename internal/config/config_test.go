@@ -709,9 +709,6 @@ func TestNewFromEnv_KillSwitchDefaults(t *testing.T) {
 	if !cfg.SyncEnabled {
 		t.Error("SyncEnabled default should be true")
 	}
-	if cfg.LiveTickEnabled {
-		t.Error("LiveTickEnabled default should be false")
-	}
 }
 
 func TestNewFromEnv_KillSwitchesCanBeOverridden(t *testing.T) {
@@ -720,7 +717,6 @@ func TestNewFromEnv_KillSwitchesCanBeOverridden(t *testing.T) {
 	env["BACKTEST_MAX_DAYS"] = "90"
 	env["BACKTEST_MAX_CANDLES"] = "5000"
 	env["SYNC_ENABLED"] = "false"
-	env["LIVE_TICK_ENABLED"] = "true"
 
 	cfg, err := newFromEnv(mapLookup(env))
 	if err != nil {
@@ -737,9 +733,6 @@ func TestNewFromEnv_KillSwitchesCanBeOverridden(t *testing.T) {
 	}
 	if cfg.SyncEnabled {
 		t.Error("SyncEnabled should be false")
-	}
-	if !cfg.LiveTickEnabled {
-		t.Error("LiveTickEnabled should be true")
 	}
 }
 
