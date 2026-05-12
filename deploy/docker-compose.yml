@@ -1,0 +1,152 @@
+name: algoedgefno
+
+services:
+  caddy:
+    image: caddy:2.8.4-alpine
+    container_name: algoedgefno-caddy
+    restart: unless-stopped
+    mem_limit: 128m
+    cpus: "0.20"
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PROD_API_HOST: ${PROD_API_HOST}
+      STAGING_API_HOST: ${STAGING_API_HOST}
+    volumes:
+      - /opt/algoedgefno/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend-prod
+    networks:
+      - edge
+
+  postgres:
+    image: ${POSTGRES_IMAGE:-timescale/timescaledb:2.26.4-pg16}
+    container_name: algoedgefno-postgres
+    restart: unless-stopped
+    mem_limit: 1536m
+    cpus: "0.80"
+    env_file:
+      - ${ENV_DIR:-/opt/algoedgefno/env}/postgres.env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    networks:
+      - edge
+
+  backend-prod:
+    image: ${BACKEND_IMAGE}
+    container_name: algoedgefno-backend-prod
+    restart: unless-stopped
+    mem_limit: 768m
+    cpus: "0.70"
+    env_file:
+      - ${ENV_DIR:-/opt/algoedgefno/env}/prod.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - edge
+
+  backend-staging:
+    image: ${BACKEND_IMAGE}
+    container_name: algoedgefno-backend-staging
+    profiles:
+      - staging
+    restart: unless-stopped
+    mem_limit: 384m
+    cpus: "0.30"
+    env_file:
+      - ${ENV_DIR:-/opt/algoedgefno/env}/staging.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - edge
+
+  migrate-prod:
+    image: ${BACKEND_IMAGE}
+    container_name: algoedgefno-migrate-prod
+    profiles:
+      - migrate-prod
+    restart: "no"
+    mem_limit: 256m
+    cpus: "0.25"
+    env_file:
+      - ${ENV_DIR:-/opt/algoedgefno/env}/prod.env
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - PGPASSWORD="$${DB_PASSWORD}" /app/migrate -path /app/migrations -database "postgres://$${DB_USER}@$${DB_HOST}:$${DB_PORT}/$${DB_NAME}?sslmode=disable" up
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - edge
+
+  migrate-staging:
+    image: ${BACKEND_IMAGE}
+    container_name: algoedgefno-migrate-staging
+    profiles:
+      - migrate-staging
+    restart: "no"
+    mem_limit: 256m
+    cpus: "0.20"
+    env_file:
+      - ${ENV_DIR:-/opt/algoedgefno/env}/staging.env
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - PGPASSWORD="$${DB_PASSWORD}" /app/migrate -path /app/migrations -database "postgres://$${DB_USER}@$${DB_HOST}:$${DB_PORT}/$${DB_NAME}?sslmode=disable" up
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - edge
+
+  sync-prod:
+    image: ${BACKEND_IMAGE}
+    container_name: algoedgefno-sync-prod
+    profiles:
+      - sync-prod
+    restart: "no"
+    mem_limit: 512m
+    cpus: "0.50"
+    env_file:
+      - ${ENV_DIR:-/opt/algoedgefno/env}/prod.env
+    command: ["/app/sync"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - edge
+
+  sync-staging:
+    image: ${BACKEND_IMAGE}
+    container_name: algoedgefno-sync-staging
+    profiles:
+      - sync-staging
+    restart: "no"
+    mem_limit: 256m
+    cpus: "0.20"
+    env_file:
+      - ${ENV_DIR:-/opt/algoedgefno/env}/staging.env
+    command: ["/app/sync"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - edge
+
+networks:
+  edge:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
