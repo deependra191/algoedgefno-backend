@@ -126,6 +126,7 @@ services:
         condition: service_healthy
     networks:
       - db
+      - egress
 
   sync-staging:
     image: ${BACKEND_IMAGE}
@@ -143,6 +144,7 @@ services:
         condition: service_healthy
     networks:
       - db
+      - egress
 
 networks:
   proxy:
@@ -150,6 +152,8 @@ networks:
   db:
     driver: bridge
     internal: true
+  egress:
+    driver: bridge
 
 volumes:
   postgres_data:
