@@ -20,3 +20,4 @@ Thumbs.db
 
 docker/postgres_data/
 deploy/
+docs/
