@@ -1,10 +1,13 @@
 package main
 
 import (
-	"log"
+	"log/slog"
+	"os"
 
+	"github.com/deependra191/algoedgefno-backend/internal/buildinfo"
 	"github.com/deependra191/algoedgefno-backend/internal/config"
 	"github.com/deependra191/algoedgefno-backend/internal/database"
+	"github.com/deependra191/algoedgefno-backend/internal/logging"
 	"github.com/deependra191/algoedgefno-backend/internal/middleware"
 	"github.com/deependra191/algoedgefno-backend/internal/providers"
 	"github.com/deependra191/algoedgefno-backend/internal/providers/nse"
@@ -17,6 +20,28 @@ import (
 
 func main() {
 	cfg := config.Load()
+
+	// Configure structured logging immediately after config loading so that startup
+	// validation and runtime failures emit structured records. (config.Load() itself
+	// may emit stdlib log output before this point.) The returned logger carries
+	// env/version/commit as base attributes on every record. It is also registered as
+	// slog.Default() so that all package-level slog calls share the same handler and
+	// base attributes — the local variable is kept only to pass the same instance to
+	// middleware.Logger, which accepts an injected logger for test isolation.
+	logger := slog.New(logging.NewHandler(cfg.Env, os.Stderr)).With(
+		"env", string(cfg.Env),
+		"version", buildinfo.AppVersion,
+		"commit", buildinfo.CommitSHA,
+	)
+	slog.SetDefault(logger)
+
+	if err := cfg.ValidateStartupIdentity(); err != nil {
+		// ValidateStartupIdentity returns errors built from non-secret values
+		// (env name, db name, db user, db host). If that contract ever changes, review
+		// this log call to ensure secrets are not included in the error string.
+		slog.Error("startup validation failed", "error", err)
+		os.Exit(1)
+	}
 
 	pool := database.Connect(cfg)
 	defer pool.Close()
@@ -36,14 +61,20 @@ func main() {
 	}
 
 	r := gin.New()
-	r.Use(middleware.Logger())
+	// Middleware order matters: Logger wraps Recovery so that when a handler panics,
+	// Recovery catches it (sets 500) and returns normally, allowing Logger's post-c.Next()
+	// code to run and emit a log record with the correct status and request_id.
+	// RequestID runs first so the ID is in context before Logger reads it.
+	r.Use(middleware.RequestID())
+	r.Use(middleware.Logger(logger))
 	r.Use(gin.Recovery())
 	r.Use(cors.Default())
 
 	routes.Register(r, pool, cfg, registry)
 
-	log.Printf("starting server on :%s (env=%s)", cfg.Port, cfg.Env)
+	slog.Info("server starting", "port", cfg.Port)
 	if err := r.Run(":" + cfg.Port); err != nil {
-		log.Fatalf("server error: %v", err)
+		slog.Error("server error", "error", err)
+		os.Exit(1)
 	}
 }

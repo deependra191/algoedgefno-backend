@@ -14,6 +14,10 @@ import (
 )
 
 func Register(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, registry *providers.Registry) {
+	healthStore := storage.NewHealthStore(pool)
+	healthSvc := services.NewHealthService(healthStore, cfg.Env)
+	healthHandler := handlers.NewHealthHandler(healthSvc, cfg.Env)
+
 	userRepo := storage.NewUserStore(pool)
 	authSvc := services.NewAuthService(userRepo, cfg.JWTSecret)
 	authHandler := handlers.NewAuthHandler(authSvc)
@@ -24,12 +28,18 @@ func Register(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, registry *p
 	builtinRegistry := strategies.NewRegistry()
 
 	strategySvc := services.NewStrategyService(builtinRegistry, backtestStore, candleStore)
-	backtestSvc := services.NewBacktestService(backtestStore, builtinRegistry, candleStore, instrumentStore, engine.NewBacktester())
+	backtestSvc := services.NewBacktestService(backtestStore, builtinRegistry, candleStore, instrumentStore, engine.NewBacktester(), services.BacktestLimits{
+		BacktestsEnabled: cfg.BacktestEnabled,
+		MaxDays:          cfg.BacktestMaxDays,
+		MaxCandles:       cfg.BacktestMaxCandles,
+	})
 
 	strategyHandler := handlers.NewStrategyHandler(strategySvc)
 	backtestHandler := handlers.NewBacktestHandler(backtestSvc)
 
-	r.GET("/health", handlers.Health)
+	r.GET("/health", healthHandler.Live)
+	r.GET("/ready", healthHandler.Ready)
+	r.GET("/version", healthHandler.Version)
 
 	v1 := r.Group("/api/v1")
 	{
