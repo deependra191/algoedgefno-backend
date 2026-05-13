@@ -14,7 +14,6 @@ import (
 	"github.com/deependra191/algoedgefno-backend/internal/providers/vendor"
 	"github.com/deependra191/algoedgefno-backend/internal/routes"
 	"github.com/deependra191/algoedgefno-backend/internal/storage"
-	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
@@ -61,6 +60,11 @@ func main() {
 	}
 
 	r := gin.New()
+	if err := r.SetTrustedProxies(cfg.TrustedProxies); err != nil {
+		slog.Error("trusted proxy configuration failed", "error", err)
+		os.Exit(1)
+	}
+
 	// Middleware order matters: Logger wraps Recovery so that when a handler panics,
 	// Recovery catches it (sets 500) and returns normally, allowing Logger's post-c.Next()
 	// code to run and emit a log record with the correct status and request_id.
@@ -68,7 +72,9 @@ func main() {
 	r.Use(middleware.RequestID())
 	r.Use(middleware.Logger(logger))
 	r.Use(gin.Recovery())
-	r.Use(cors.Default())
+	// CORS is intentionally disabled for v1 because the API is consumed only by
+	// the native Android app. Add explicit browser/admin CORS in a separate PR
+	// when there is an actual browser client.
 
 	routes.Register(r, pool, cfg, registry)
 

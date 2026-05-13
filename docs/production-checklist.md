@@ -32,10 +32,11 @@ Run this twice — once for `APP_SECRET_TOKEN`, once for `JWT_SECRET`. Never reu
 
 ## 3. Server config
 
-- [ ] `ENV=production` is set — this enables startup secret validation and Gin release mode
+- [ ] `APP_ENV=production` is set — this enables startup secret validation and Gin release mode
 - [ ] `PORT` is set correctly
 - [ ] `MIGRATIONS_PATH` is set to an absolute path (e.g. `file:///opt/algoedgefno/migrations`) — the default `file://migrations` is relative and will break if the binary is not run from the project root
-- [ ] CORS is tightened — `cors.Default()` in `main.go` allows all origins, restrict to your Android app's origin before go-live
+- [ ] Browser CORS is disabled for Android-only production; add explicit CORS later only if a browser/admin client exists
+- [ ] `TRUSTED_PROXIES` is set to the private proxy range used by Caddy or left empty when no reverse proxy headers should be trusted
 
 ---
 

@@ -171,6 +171,8 @@ docker compose --profile sync-staging run --rm sync-staging
 
 For cron, invoke the same `docker compose ... run --rm sync-*` commands from the server. Do not overlap staging and production sync windows.
 
+To seed production from validated staging market data instead of re-running the full historical sync, use `docs/market-data-promotion.md`. That runbook allowlists only environment-neutral market-data tables and must not be replaced with a whole-database restore.
+
 ## Smoke checks
 
 Run these after deployment:
@@ -205,10 +207,10 @@ Expected results:
 - Production API rejects the staging token.
 - Logs include method, path, status, latency, environment, version, commit, and request ID.
 - Logs do not include bearer tokens, JWTs, DB passwords, full DSNs, or Firebase secrets.
+- Browser CORS response headers are absent. CORS is intentionally disabled for v1 because there is no browser client; future browser/admin CORS support should be added in a separate PR when needed.
 - Backend container health is validated through Caddy/manual smoke checks for now. Compose-level backend `healthcheck` entries can be added later after the runtime image includes a small HTTP probe tool or the app exposes a dependency-free internal probe strategy.
 
 ## Known follow-ups
 
-- CORS hardening remains a separate go-live prerequisite.
 - Backup scripts and restore rehearsal docs are separate tasks.
 - CI image publishing and deploy automation are separate tasks after manual deployment is proven.
