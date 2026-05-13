@@ -6,9 +6,13 @@ This runbook is for the temporary private-staging and early-production setup on 
 
 - Server-side steps are executed manually by the operator.
 - The repo provides templates only: Docker image, Compose, Caddy, and sanitized env examples.
-- PostgreSQL remains private on the Docker network; only Caddy publishes ports `80` and `443`.
+- PostgreSQL remains private on the DB-only Docker network; Caddy is attached only to the proxy network and publishes ports `80` and `443`.
 - Production migrations are explicit. The backend must not auto-run production migrations.
 - Staging is optional and should stay stopped unless it is being used.
+
+## Secret access model
+
+The files under `/opt/algoedgefno/env/` are readable only by root on the host, but Docker also receives those values through `env_file`. Treat root access, Docker group access, and permission to run `docker inspect` or `docker compose exec` on this VPS as secret access. Do not grant Docker or sudo access to anyone who should not be able to read database passwords, app bearer tokens, and JWT secrets.
 
 ## DNS
 
@@ -19,6 +23,8 @@ Create DNS records before starting Caddy:
 - Optional: matching `AAAA` records -> VPS public IPv6.
 
 Use those exact hostnames in `/opt/algoedgefno/compose/.env` as `PROD_API_HOST` and `STAGING_API_HOST`.
+
+The committed `deploy/Caddyfile` contains both production and staging host blocks. Keep both DNS records in place before starting Caddy so Caddy can obtain certificates for both names. If staging DNS is intentionally not ready, remove or comment out the staging host block in `/opt/algoedgefno/caddy/Caddyfile` before starting Caddy, then restore it when staging DNS exists.
 
 ## Recommended swap
 
@@ -147,6 +153,8 @@ Start staging only when needed:
 docker compose --profile staging up -d backend-staging
 ```
 
+Because Caddy is always configured with a staging hostname, `https://staging-api.<domain>` will only be useful after `backend-staging` is running. If Caddy is up but staging is stopped, requests to the staging hostname may return a proxy error; that is expected.
+
 Stop staging when done:
 
 ```bash
@@ -170,6 +178,11 @@ Run these after deployment:
 curl -i https://api.<domain>/health
 curl -i https://api.<domain>/ready
 curl -i https://api.<domain>/version
+```
+
+Run staging smoke checks only after starting `backend-staging` with `docker compose --profile staging up -d backend-staging`:
+
+```bash
 curl -i https://staging-api.<domain>/health
 curl -i https://staging-api.<domain>/ready
 curl -i https://staging-api.<domain>/version
@@ -191,6 +204,7 @@ Expected results:
 - Production API rejects the staging token.
 - Logs include method, path, status, latency, environment, version, commit, and request ID.
 - Logs do not include bearer tokens, JWTs, DB passwords, full DSNs, or Firebase secrets.
+- Backend container health is validated through Caddy/manual smoke checks for now. Compose-level backend `healthcheck` entries can be added later after the runtime image includes a small HTTP probe tool or the app exposes a dependency-free internal probe strategy.
 
 ## Known follow-ups
 

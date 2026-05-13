@@ -20,7 +20,7 @@ services:
     depends_on:
       - backend-prod
     networks:
-      - edge
+      - proxy
 
   postgres:
     image: ${POSTGRES_IMAGE:-timescale/timescaledb:2.26.4-pg16}
@@ -38,7 +38,7 @@ services:
       timeout: 5s
       retries: 6
     networks:
-      - edge
+      - db
 
   backend-prod:
     image: ${BACKEND_IMAGE}
@@ -52,7 +52,8 @@ services:
       postgres:
         condition: service_healthy
     networks:
-      - edge
+      - proxy
+      - db
 
   backend-staging:
     image: ${BACKEND_IMAGE}
@@ -68,7 +69,8 @@ services:
       postgres:
         condition: service_healthy
     networks:
-      - edge
+      - proxy
+      - db
 
   migrate-prod:
     image: ${BACKEND_IMAGE}
@@ -87,7 +89,7 @@ services:
       postgres:
         condition: service_healthy
     networks:
-      - edge
+      - db
 
   migrate-staging:
     image: ${BACKEND_IMAGE}
@@ -106,7 +108,7 @@ services:
       postgres:
         condition: service_healthy
     networks:
-      - edge
+      - db
 
   sync-prod:
     image: ${BACKEND_IMAGE}
@@ -123,7 +125,7 @@ services:
       postgres:
         condition: service_healthy
     networks:
-      - edge
+      - db
 
   sync-staging:
     image: ${BACKEND_IMAGE}
@@ -140,10 +142,12 @@ services:
       postgres:
         condition: service_healthy
     networks:
-      - edge
+      - db
 
 networks:
-  edge:
+  proxy:
+    driver: bridge
+  db:
     driver: bridge
 
 volumes:
