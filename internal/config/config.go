@@ -32,6 +32,7 @@ const (
 	envVarMigrationsPath = "MIGRATIONS_PATH"
 	envVarNSEUserAgent   = "NSE_USER_AGENT"
 	envVarNSEAcceptHTML  = "NSE_ACCEPT_HTML"
+	envVarTrustedProxies = "TRUSTED_PROXIES"
 
 	envVarBacktestEnabled    = "BACKTEST_ENABLED"
 	envVarBacktestMaxDays    = "BACKTEST_MAX_DAYS"
@@ -81,6 +82,8 @@ type Config struct {
 	// Override via NSE_USER_AGENT / NSE_ACCEPT_HTML if NSE tightens their checks.
 	NSEUserAgent  string
 	NSEAcceptHTML string
+
+	TrustedProxies []string
 
 	// Startup-evaluated kill switches and cost-control limits.
 	// Changing these values requires a process restart to take effect.
@@ -189,6 +192,7 @@ func newFromEnv(lookup func(string) (string, bool)) (*Config, error) {
 		AutoMigrate:        autoMigrate,
 		NSEUserAgent:       getEnvFrom(lookup, envVarNSEUserAgent, defaultNSEUserAgent),
 		NSEAcceptHTML:      getEnvFrom(lookup, envVarNSEAcceptHTML, defaultNSEAcceptHTML),
+		TrustedProxies:     getCSVEnvFrom(lookup, envVarTrustedProxies),
 		BacktestEnabled:    backtestEnabled,
 		BacktestMaxDays:    backtestMaxDays,
 		BacktestMaxCandles: backtestMaxCandles,
@@ -387,4 +391,21 @@ func getEnvFrom(lookup func(string) (string, bool), key, fallback string) string
 		return v
 	}
 	return fallback
+}
+
+func getCSVEnvFrom(lookup func(string) (string, bool), key string) []string {
+	v, ok := lookup(key)
+	if !ok || strings.TrimSpace(v) == "" {
+		return nil
+	}
+
+	parts := strings.Split(v, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			values = append(values, trimmed)
+		}
+	}
+	return values
 }

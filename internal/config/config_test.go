@@ -709,6 +709,9 @@ func TestNewFromEnv_KillSwitchDefaults(t *testing.T) {
 	if !cfg.SyncEnabled {
 		t.Error("SyncEnabled default should be true")
 	}
+	if len(cfg.TrustedProxies) != 0 {
+		t.Errorf("TrustedProxies default = %v, want empty", cfg.TrustedProxies)
+	}
 }
 
 func TestNewFromEnv_KillSwitchesCanBeOverridden(t *testing.T) {
@@ -775,5 +778,30 @@ func TestNewFromEnv_InvalidKillSwitchValuesFail(t *testing.T) {
 				t.Fatalf("newFromEnv() error = nil, want error for %s=%q", tt.key, tt.val)
 			}
 		})
+	}
+}
+
+func TestNewFromEnv_ParsesTrustedProxies(t *testing.T) {
+	env := minDevEnv()
+	env["TRUSTED_PROXIES"] = "172.16.0.0/12, 10.0.0.0/8"
+
+	cfg, err := newFromEnv(mapLookup(env))
+	if err != nil {
+		t.Fatalf("newFromEnv() error = %v", err)
+	}
+
+	assertStringSlice(t, cfg.TrustedProxies, []string{"172.16.0.0/12", "10.0.0.0/8"})
+}
+
+func assertStringSlice(t *testing.T, got, want []string) {
+	t.Helper()
+
+	if len(got) != len(want) {
+		t.Fatalf("slice length = %d, want %d: got %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("slice[%d] = %q, want %q; got %v", i, got[i], want[i], got)
+		}
 	}
 }

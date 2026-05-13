@@ -7,6 +7,7 @@ This runbook is for the temporary private-staging and early-production setup on 
 - Server-side steps are executed manually by the operator.
 - The repo provides templates only: Docker image, Compose, Caddy, and sanitized env examples.
 - PostgreSQL remains private on the DB-only internal Docker network; Caddy is attached only to the proxy network and publishes ports `80` and `443`.
+- Sync jobs attach to the DB network plus a separate egress network so they can reach NSE without putting PostgreSQL on the proxy network.
 - Production migrations are explicit. The backend must not auto-run production migrations.
 - Staging is optional and should stay stopped unless it is being used.
 
@@ -136,7 +137,7 @@ docker compose --profile migrate-staging run --rm migrate-staging
 docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_staging -c "INSERT INTO environment_identity (id, identity) VALUES (TRUE, '\''staging'\'') ON CONFLICT (id) DO UPDATE SET identity = EXCLUDED.identity;"'
 ```
 
-Before future production migrations, take a fresh production backup and confirm the identity row still says `production`.
+Before future production migrations, take a fresh production backup and confirm the identity row still says `production`. Use `docs/backup-restore.md` for production backup commands and restore rehearsal steps.
 
 ## Start services
 
@@ -169,6 +170,8 @@ docker compose --profile sync-staging run --rm sync-staging
 ```
 
 For cron, invoke the same `docker compose ... run --rm sync-*` commands from the server. Do not overlap staging and production sync windows.
+
+To seed production from validated staging market data instead of re-running the full historical sync, use `docs/market-data-promotion.md`. That runbook allowlists only environment-neutral market-data tables and must not be replaced with a whole-database restore.
 
 ## Smoke checks
 
@@ -204,10 +207,9 @@ Expected results:
 - Production API rejects the staging token.
 - Logs include method, path, status, latency, environment, version, commit, and request ID.
 - Logs do not include bearer tokens, JWTs, DB passwords, full DSNs, or Firebase secrets.
+- Browser CORS response headers are absent. CORS is intentionally disabled for v1 because there is no browser client; future browser/admin CORS support should be added in a separate PR when needed.
 - Backend container health is validated through Caddy/manual smoke checks for now. Compose-level backend `healthcheck` entries can be added later after the runtime image includes a small HTTP probe tool or the app exposes a dependency-free internal probe strategy.
 
 ## Known follow-ups
 
-- CORS hardening remains a separate go-live prerequisite.
-- Backup scripts and restore rehearsal docs are separate tasks.
 - CI image publishing and deploy automation are separate tasks after manual deployment is proven.

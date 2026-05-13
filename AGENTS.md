@@ -50,6 +50,7 @@ Android is a thin client — all computation happens here.
    - **Bug fixes and follow-ups after a feature has merged**: create PRs against `dev`.
    - **`main` is reserved for `dev → main` integration PRs only** — never the target of a task or feature branch PR.
    - **Branch from the same ref the PR will target** (`git checkout -b task/x origin/dev`) so the PR diff contains only the intended changes. Branching from `main` and PR-ing to `dev` happens to produce a clean diff only when `dev` and `main` are structurally identical, which is not guaranteed.
+24. When asked to create/open a PR, create it ready for review
 
 ## Build commands
 
