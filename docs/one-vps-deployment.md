@@ -6,7 +6,7 @@ This runbook is for the temporary private-staging and early-production setup on 
 
 - Server-side steps are executed manually by the operator.
 - The repo provides templates only: Docker image, Compose, Caddy, and sanitized env examples.
-- PostgreSQL remains private on the DB-only Docker network; Caddy is attached only to the proxy network and publishes ports `80` and `443`.
+- PostgreSQL remains private on the DB-only internal Docker network; Caddy is attached only to the proxy network and publishes ports `80` and `443`.
 - Production migrations are explicit. The backend must not auto-run production migrations.
 - Staging is optional and should stay stopped unless it is being used.
 

@@ -149,6 +149,7 @@ networks:
     driver: bridge
   db:
     driver: bridge
+    internal: true
 
 volumes:
   postgres_data:
