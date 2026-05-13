@@ -1,0 +1,15 @@
+{$PROD_API_HOST} {
+    encode zstd gzip
+    request_body {
+        max_size 10MB
+    }
+    reverse_proxy backend-prod:8080
+}
+
+{$STAGING_API_HOST} {
+    encode zstd gzip
+    request_body {
+        max_size 10MB
+    }
+    reverse_proxy backend-staging:8080
+}
