@@ -137,7 +137,7 @@ docker compose --profile migrate-staging run --rm migrate-staging
 docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_staging -c "INSERT INTO environment_identity (id, identity) VALUES (TRUE, '\''staging'\'') ON CONFLICT (id) DO UPDATE SET identity = EXCLUDED.identity;"'
 ```
 
-Before future production migrations, take a fresh production backup and confirm the identity row still says `production`.
+Before future production migrations, take a fresh production backup and confirm the identity row still says `production`. Use `docs/backup-restore.md` for production backup commands and restore rehearsal steps.
 
 ## Start services
 
@@ -212,5 +212,4 @@ Expected results:
 
 ## Known follow-ups
 
-- Backup scripts and restore rehearsal docs are separate tasks.
 - CI image publishing and deploy automation are separate tasks after manual deployment is proven.
