@@ -1,7 +1,9 @@
-FROM golang:1.25-bookworm AS build
+FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS build
 
 WORKDIR /src
 
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
 ARG APP_VERSION=0.1.0
 ARG COMMIT_SHA=unknown
 ARG BUILD_TIME=unknown
@@ -11,13 +13,13 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
       -ldflags="-s -w -X github.com/deependra191/algoedgefno-backend/internal/buildinfo.AppVersion=${APP_VERSION} -X github.com/deependra191/algoedgefno-backend/internal/buildinfo.CommitSHA=${COMMIT_SHA} -X github.com/deependra191/algoedgefno-backend/internal/buildinfo.BuildTime=${BUILD_TIME}" \
       -o /out/server ./cmd/server && \
-    CGO_ENABLED=0 GOOS=linux go build -trimpath \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
       -ldflags="-s -w -X github.com/deependra191/algoedgefno-backend/internal/buildinfo.AppVersion=${APP_VERSION} -X github.com/deependra191/algoedgefno-backend/internal/buildinfo.CommitSHA=${COMMIT_SHA} -X github.com/deependra191/algoedgefno-backend/internal/buildinfo.BuildTime=${BUILD_TIME}" \
       -o /out/sync ./cmd/sync && \
-    CGO_ENABLED=0 GOOS=linux go build -trimpath -tags postgres \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -tags postgres \
       -ldflags="-s -w" \
       -o /out/migrate github.com/golang-migrate/migrate/v4/cmd/migrate
 
