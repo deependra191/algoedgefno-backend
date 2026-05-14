@@ -25,9 +25,9 @@ Run this twice — once for `APP_SECRET_TOKEN`, once for `JWT_SECRET`. Never reu
 
 - [ ] TimescaleDB is running and reachable
 - [ ] All migrations have been applied — run `migrate ... up` and confirm `no change`
-- [ ] `DB_USER=algoedgefno_prod_app`
-- [ ] `DB_PASSWORD` is strong and unique to production
-- [ ] `DB_NAME=algoedgefno_prod`
+- [ ] `DB_USER` is a production-only app role and includes a production marker such as `prod` or `production`
+- [ ] `DB_PASSWORD` is strong, unique to production, and stored only in the server-only production env file
+- [ ] `DB_NAME` is a production-only database name and includes a production marker such as `prod` or `production`
 - [ ] `environment_identity` returns `production`
 - [ ] DB is not exposed on a public port — only accessible from the app server
 

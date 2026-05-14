@@ -162,14 +162,42 @@ Stop staging when done:
 docker compose --profile staging stop backend-staging
 ```
 
-Run sync manually:
+Run sync manually (always via flock — same lock file used by cron, prevents concurrent runs):
 
 ```bash
-docker compose --profile sync-prod run --rm sync-prod
-docker compose --profile sync-staging run --rm sync-staging
+# Staging
+flock -n /opt/algoedgefno/locks/sync-staging.lock -c \
+  'cd /opt/algoedgefno/compose && docker compose --profile sync-staging run --rm sync-staging'
+
+# Production
+flock -n /opt/algoedgefno/locks/sync-prod.lock -c \
+  'cd /opt/algoedgefno/compose && docker compose --profile sync-prod run --rm sync-prod'
 ```
 
-For cron, invoke the same `docker compose ... run --rm sync-*` commands from the server. Do not overlap staging and production sync windows.
+Never run `docker compose ... run --rm sync-*` directly — always go through the flock wrapper. Do not overlap staging and production sync windows (≥30-minute gap).
+
+### Stale RUNNING row reconciliation
+
+If a sync_runs row is stuck in `RUNNING` state with no live container (e.g. after a host crash or OOM kill):
+
+1. Confirm no container is running: `docker ps | grep sync-staging` must return empty.
+2. Find the stuck row:
+
+```sql
+SELECT id, status, started_at FROM sync_runs WHERE status = 'RUNNING';
+```
+
+3. Reconcile it (replace `<uuid>` with the actual id):
+
+```sql
+UPDATE sync_runs
+SET status = 'FAILED',
+    finished_at = NOW(),
+    error_message = 'reconciled: no active container'
+WHERE id = '<uuid>' AND status = 'RUNNING';
+```
+
+Never run this SQL while a container is live.
 
 To seed production from validated staging market data instead of re-running the full historical sync, use `docs/market-data-promotion.md`. That runbook allowlists only environment-neutral market-data tables and must not be replaced with a whole-database restore.
 

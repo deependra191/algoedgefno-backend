@@ -134,7 +134,7 @@ services:
     profiles:
       - sync-staging
     restart: "no"
-    mem_limit: 256m
+    mem_limit: 512m
     cpus: "0.20"
     env_file:
       - ${ENV_DIR:-/opt/algoedgefno/env}/staging.env
