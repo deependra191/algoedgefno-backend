@@ -16,7 +16,7 @@ func makeTrade(entryMin, exitMin int, pnl float64) models.Trade {
 	return models.Trade{
 		EntryTimestamp: t0.Add(time.Duration(entryMin) * time.Minute),
 		ExitTimestamp:  t0.Add(time.Duration(exitMin) * time.Minute),
-		PnL:            pnl,
+		NetPnL:         pnl,
 	}
 }
 
@@ -240,8 +240,8 @@ func TestBuildChartData_TimestampsAreExitTs(t *testing.T) {
 	exit1 := t0.Add(30 * time.Minute)
 	exit2 := t0.Add(60 * time.Minute)
 	trades := []models.Trade{
-		{EntryTimestamp: t0, ExitTimestamp: exit1, PnL: 100},
-		{EntryTimestamp: exit1, ExitTimestamp: exit2, PnL: 200},
+		{EntryTimestamp: t0, ExitTimestamp: exit1, NetPnL: 100},
+		{EntryTimestamp: exit1, ExitTimestamp: exit2, NetPnL: 200},
 	}
 	cd := BuildChartData(trades, 0)
 

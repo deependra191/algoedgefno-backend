@@ -17,6 +17,9 @@ const (
 )
 
 // Trade is a single completed round-trip entry+exit produced by the backtest engine.
+// GrossPnL is the frictionless price-move profit; NetPnL is GrossPnL − TotalCharges and
+// is the value Android renders as "pnl". The individual charge fields are populated by
+// the engine via the ChargeCalculator so the UI can show the full cost stack per trade.
 type Trade struct {
 	EntryTimestamp time.Time
 	ExitTimestamp  time.Time
@@ -24,7 +27,16 @@ type Trade struct {
 	Quantity       int
 	EntryPrice     float64
 	ExitPrice      float64
-	PnL            float64
+	GrossPnL       float64
+	Slippage       float64
+	Brokerage      float64
+	STT            float64
+	ExchangeFees   float64
+	SEBIFees       float64
+	GST            float64
+	StampDuty      float64
+	TotalCharges   float64
+	NetPnL         float64
 	Reason         string
 	ExitReason     string
 }
@@ -61,13 +73,18 @@ type ChartData struct {
 }
 
 // BacktestResult aggregates the outcome of a full backtest run.
+// GrossPnL is the sum of trade-level GrossPnL; TotalCharges is the sum of trade-level
+// TotalCharges; NetPnL is the sum of trade-level NetPnL (== GrossPnL − TotalCharges
+// within float-rounding tolerance). WinCount/LossCount are bucketed on NetPnL.
 type BacktestResult struct {
-	Trades      []Trade
-	NetPnL      float64
-	TotalTrades int
-	WinCount    int
-	LossCount   int
-	MaxDrawdown float64
+	Trades       []Trade
+	GrossPnL     float64
+	TotalCharges float64
+	NetPnL       float64
+	TotalTrades  int
+	WinCount     int
+	LossCount    int
+	MaxDrawdown  float64
 }
 
 // EngineInputs carries the strategy interval and candle streams consumed by the backtest engine.
@@ -94,6 +111,12 @@ type BacktestEngine interface {
 	// capital is the user's starting capital and is used as the drawdown denominator
 	// when the equity curve has not yet gone positive (avoids division by zero).
 	// Returns an error only if the strategy configuration is invalid.
+	//
+	// Each returned Trade carries a full charge breakdown (Slippage, Brokerage, STT,
+	// ExchangeFees, SEBIFees, GST, StampDuty, TotalCharges) and both GrossPnL and
+	// NetPnL = GrossPnL − TotalCharges. The aggregate BacktestResult mirrors this:
+	// GrossPnL, TotalCharges, and NetPnL are summed from trade-level values, and the
+	// equity curve and drawdown are driven by NetPnL (the post-charges series).
 	RunBacktest(strategy *Strategy, inputs EngineInputs, capital float64) (*BacktestResult, error)
 	// ComputeTradeStats derives performance statistics from a completed trade list.
 	// from and to are the backtest date range used to compute tradesPerWeek.
@@ -140,6 +163,8 @@ type BacktestRun struct {
 	CandleInterval        string
 	Status                string
 	NetPnl                *float64
+	GrossPnl              *float64
+	TotalCharges          *float64
 	TotalTrades           *int
 	WinCount              *int
 	LossCount             *int
@@ -164,3 +189,28 @@ const (
 	BacktestCompleted = "COMPLETED"
 	BacktestFailed    = "FAILED"
 )
+
+// UnmarshalJSON decodes a Trade with backward compatibility for pre-B14 records.
+// Before B14, persisted trades_json used Go's default marshaling of the legacy
+// Trade.PnL field, producing objects with a "PnL" key. Post-B14 the field was
+// split into GrossPnL/NetPnL/TotalCharges and never marshals "PnL" again.
+//
+// When a legacy "PnL" key is present, we mirror it to both NetPnL and GrossPnL
+// and leave the charge breakdown at zero. Detection is unambiguous because
+// current code cannot emit "PnL" — so a non-nil legacy pointer always means a
+// pre-B14 record, regardless of whether the new fields happen to be zero.
+func (t *Trade) UnmarshalJSON(data []byte) error {
+	type tradeAlias Trade
+	aux := struct {
+		*tradeAlias
+		LegacyPnL *float64 `json:"PnL"`
+	}{tradeAlias: (*tradeAlias)(t)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if aux.LegacyPnL != nil {
+		t.NetPnL = *aux.LegacyPnL
+		t.GrossPnL = *aux.LegacyPnL
+	}
+	return nil
+}

@@ -17,6 +17,8 @@ type BacktestRun struct {
 	CandleInterval        string
 	Status                string
 	NetPnl                *float64
+	GrossPnl              *float64
+	TotalCharges          *float64
 	TotalTrades           *int
 	WinCount              *int
 	LossCount             *int

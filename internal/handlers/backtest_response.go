@@ -56,6 +56,8 @@ type backtestResultPayload struct {
 	CapStart          float64                  `json:"capStart"`
 	CapEnd            float64                  `json:"capEnd"`
 	NetPnl            float64                  `json:"netPnl"`
+	GrossPnl          float64                  `json:"grossPnl"`
+	TotalCharges      float64                  `json:"totalCharges"`
 	ReturnPct         float64                  `json:"returnPct"`
 	TradeCount        int                      `json:"tradeCount"`
 	WinRate           int                      `json:"winRate"`
@@ -93,15 +95,24 @@ type backtestTradesPageResponse struct {
 }
 
 type backtestTradeResponse struct {
-	EntryTs    string  `json:"entryTs"`
-	ExitTs     string  `json:"exitTs"`
-	Side       string  `json:"side"`
-	Quantity   int     `json:"quantity"`
-	EntryPrice float64 `json:"entryPrice"`
-	ExitPrice  float64 `json:"exitPrice"`
-	Pnl        float64 `json:"pnl"`
-	Reason     string  `json:"reason"`
-	ExitReason string  `json:"exitReason"`
+	EntryTs      string  `json:"entryTs"`
+	ExitTs       string  `json:"exitTs"`
+	Side         string  `json:"side"`
+	Quantity     int     `json:"quantity"`
+	EntryPrice   float64 `json:"entryPrice"`
+	ExitPrice    float64 `json:"exitPrice"`
+	Pnl          float64 `json:"pnl"`
+	GrossPnl     float64 `json:"grossPnl"`
+	Slippage     float64 `json:"slippage"`
+	Brokerage    float64 `json:"brokerage"`
+	STT          float64 `json:"stt"`
+	ExchangeFees float64 `json:"exchangeFees"`
+	SEBIFees     float64 `json:"sebiFees"`
+	GST          float64 `json:"gst"`
+	StampDuty    float64 `json:"stampDuty"`
+	TotalCharges float64 `json:"totalCharges"`
+	Reason       string  `json:"reason"`
+	ExitReason   string  `json:"exitReason"`
 }
 
 type backtestListResponse struct {
@@ -127,6 +138,8 @@ type backtestSummaryResultResponse struct {
 	CapStart       float64                  `json:"capStart"`
 	CapEnd         float64                  `json:"capEnd"`
 	NetPnl         float64                  `json:"netPnl"`
+	GrossPnl       float64                  `json:"grossPnl"`
+	TotalCharges   float64                  `json:"totalCharges"`
 	ReturnPct      float64                  `json:"returnPct"`
 	TradeCount     int                      `json:"tradeCount"`
 	WinRate        *int                     `json:"winRate"`
@@ -187,6 +200,8 @@ func toBacktestResultPayload(run *models.BacktestRun) *backtestResultPayload {
 		CapStart:       capital,
 		CapEnd:         round2(capital + netPnl),
 		NetPnl:         round2(netPnl),
+		GrossPnl:       round2(derefFloat(run.GrossPnl)),
+		TotalCharges:   round2(derefFloat(run.TotalCharges)),
 		ReturnPct:      computeReturnPct(run),
 		TradeCount:     derefInt(run.TotalTrades),
 		WinRate:        computeWinRate(run),
@@ -257,15 +272,24 @@ func toBacktestTradesPageResponse(tradesJSON json.RawMessage, page, limit int) (
 	trades := make([]backtestTradeResponse, len(slice))
 	for i, tr := range slice {
 		trades[i] = backtestTradeResponse{
-			EntryTs:    tr.EntryTimestamp.UTC().Format(time.RFC3339),
-			ExitTs:     tr.ExitTimestamp.UTC().Format(time.RFC3339),
-			Side:       string(tr.Side),
-			Quantity:   tr.Quantity,
-			EntryPrice: tr.EntryPrice,
-			ExitPrice:  tr.ExitPrice,
-			Pnl:        tr.PnL,
-			Reason:     tr.Reason,
-			ExitReason: tr.ExitReason,
+			EntryTs:      tr.EntryTimestamp.UTC().Format(time.RFC3339),
+			ExitTs:       tr.ExitTimestamp.UTC().Format(time.RFC3339),
+			Side:         string(tr.Side),
+			Quantity:     tr.Quantity,
+			EntryPrice:   tr.EntryPrice,
+			ExitPrice:    tr.ExitPrice,
+			Pnl:          tr.NetPnL,
+			GrossPnl:     tr.GrossPnL,
+			Slippage:     tr.Slippage,
+			Brokerage:    tr.Brokerage,
+			STT:          tr.STT,
+			ExchangeFees: tr.ExchangeFees,
+			SEBIFees:     tr.SEBIFees,
+			GST:          tr.GST,
+			StampDuty:    tr.StampDuty,
+			TotalCharges: tr.TotalCharges,
+			Reason:       tr.Reason,
+			ExitReason:   tr.ExitReason,
 		}
 	}
 
@@ -314,6 +338,8 @@ func toBacktestSummaryResponse(run *models.BacktestRun) (backtestSummaryResponse
 			CapStart:       *run.Capital,
 			CapEnd:         round2(*run.Capital + *run.NetPnl),
 			NetPnl:         round2(*run.NetPnl),
+			GrossPnl:       round2(derefFloat(run.GrossPnl)),
+			TotalCharges:   round2(derefFloat(run.TotalCharges)),
 			ReturnPct:      computeReturnPct(run),
 			TradeCount:     *run.TotalTrades,
 			WinRate:        computeWinRatePtr(run),

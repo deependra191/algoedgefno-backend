@@ -21,24 +21,24 @@ func ComputeTradeStats(trades []models.Trade, from, to time.Time) *models.TradeS
 	var totalHolding float64
 	var winSum, lossSum float64
 	winCount, lossCount := 0, 0
-	best := trades[0].PnL
-	worst := trades[0].PnL
+	best := trades[0].NetPnL
+	worst := trades[0].NetPnL
 
 	for _, tr := range trades {
-		if tr.PnL > best {
-			best = tr.PnL
+		if tr.NetPnL > best {
+			best = tr.NetPnL
 		}
-		if tr.PnL < worst {
-			worst = tr.PnL
+		if tr.NetPnL < worst {
+			worst = tr.NetPnL
 		}
 		totalHolding += tr.ExitTimestamp.Sub(tr.EntryTimestamp).Minutes()
-		if tr.PnL > 0 {
-			winSum += tr.PnL
-			grossWins += tr.PnL
+		if tr.NetPnL > 0 {
+			winSum += tr.NetPnL
+			grossWins += tr.NetPnL
 			winCount++
-		} else if tr.PnL < 0 {
-			lossSum += tr.PnL
-			grossLosses += tr.PnL
+		} else if tr.NetPnL < 0 {
+			lossSum += tr.NetPnL
+			grossLosses += tr.NetPnL
 			lossCount++
 		}
 	}
@@ -85,7 +85,7 @@ func BuildChartData(trades []models.Trade, capital float64) *models.ChartData {
 
 	var cumPnL, peak float64
 	for i, tr := range trades {
-		cumPnL += tr.PnL
+		cumPnL += tr.NetPnL
 		if cumPnL > peak {
 			peak = cumPnL
 		}
@@ -116,13 +116,13 @@ func computeStreaks(trades []models.Trade) (longestWin, longestLoss int) {
 	curWin, curLoss := 0, 0
 	for _, tr := range trades {
 		switch {
-		case tr.PnL > 0:
+		case tr.NetPnL > 0:
 			curWin++
 			curLoss = 0
 			if curWin > longestWin {
 				longestWin = curWin
 			}
-		case tr.PnL < 0:
+		case tr.NetPnL < 0:
 			curLoss++
 			curWin = 0
 			if curLoss > longestLoss {
