@@ -381,6 +381,8 @@ func (s *BacktestService) applyResult(ctx context.Context, run *models.BacktestR
 	}
 	run.Status = models.BacktestCompleted
 	run.NetPnl = &result.NetPnL
+	run.GrossPnl = &result.GrossPnL
+	run.TotalCharges = &result.TotalCharges
 	run.TotalTrades = &result.TotalTrades
 	run.WinCount = &result.WinCount
 	run.LossCount = &result.LossCount

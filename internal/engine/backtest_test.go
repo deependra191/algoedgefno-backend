@@ -11,6 +11,15 @@ import (
 func ptrFloat(v float64) *float64 { return &v }
 func ptrInt(v int) *int           { return &v }
 
+// zeroCharges is a test stub implementing models.ChargeCalculator that returns no
+// charges. It keeps the legacy frictionless-P&L assertions in backtest_test.go
+// valid; tests exercising real charges use engine.NewCharges() directly.
+type zeroCharges struct{}
+
+func (zeroCharges) Compute(string, models.OrderSide, float64, float64, int) models.ChargeBreakdown {
+	return models.ChargeBreakdown{}
+}
+
 func makeCandleSeries(closes []float64, minuteInterval int) []models.Candle {
 	base := time.Date(2025, 1, 2, 9, 15, 0, 0, time.UTC)
 	candles := make([]models.Candle, len(closes))
@@ -187,7 +196,7 @@ func TestRunBacktest_MACrossover(t *testing.T) {
 		LotSize:            1,
 	}
 
-	result, err := NewBacktester().RunBacktest(s, sameStreamInputs(candles), 0)
+	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, sameStreamInputs(candles), 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -213,7 +222,7 @@ func TestRunBacktest_MACrossover(t *testing.T) {
 
 	calculatedPnL := 0.0
 	for _, tr := range result.Trades {
-		calculatedPnL += tr.PnL
+		calculatedPnL += tr.NetPnL
 	}
 	if math.Abs(calculatedPnL-result.NetPnL) > tolerance {
 		t.Errorf("NetPnL mismatch: sum of trades=%f, reported=%f", calculatedPnL, result.NetPnL)
@@ -243,7 +252,7 @@ func TestRunBacktest_TargetHit(t *testing.T) {
 		TargetPct:          ptrFloat(5.0),
 	}
 
-	result, err := NewBacktester().RunBacktest(s, sameStreamInputs(candles), 0)
+	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, sameStreamInputs(candles), 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -252,8 +261,8 @@ func TestRunBacktest_TargetHit(t *testing.T) {
 	for _, tr := range result.Trades {
 		if tr.ExitReason == ExitReasonTarget {
 			targetHit = true
-			if tr.PnL <= 0 {
-				t.Errorf("target exit should have positive PnL, got %f", tr.PnL)
+			if tr.NetPnL <= 0 {
+				t.Errorf("target exit should have positive PnL, got %f", tr.NetPnL)
 			}
 			if tr.Quantity != 2 {
 				t.Errorf("expected quantity 2, got %d", tr.Quantity)
@@ -285,7 +294,7 @@ func TestRunBacktest_StopLossHit(t *testing.T) {
 		StopLossPct:        ptrFloat(3.0),
 	}
 
-	result, err := NewBacktester().RunBacktest(s, sameStreamInputs(candles), 0)
+	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, sameStreamInputs(candles), 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -294,8 +303,8 @@ func TestRunBacktest_StopLossHit(t *testing.T) {
 	for _, tr := range result.Trades {
 		if tr.ExitReason == ExitReasonStopLoss {
 			slHit = true
-			if tr.PnL >= 0 {
-				t.Errorf("stop loss exit should have negative PnL, got %f", tr.PnL)
+			if tr.NetPnL >= 0 {
+				t.Errorf("stop loss exit should have negative PnL, got %f", tr.NetPnL)
 			}
 		}
 	}
@@ -321,7 +330,7 @@ func TestRunBacktest_TimeExit(t *testing.T) {
 		TimeExitMinutes:    ptrInt(20),
 	}
 
-	result, err := NewBacktester().RunBacktest(s, sameStreamInputs(candles), 0)
+	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, sameStreamInputs(candles), 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -348,7 +357,7 @@ func TestRunBacktest_MaxDrawdown(t *testing.T) {
 		LotSize:            1,
 	}
 
-	result, err := NewBacktester().RunBacktest(s, sameStreamInputs(candles), 0)
+	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, sameStreamInputs(candles), 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -366,7 +375,7 @@ func TestRunBacktest_NoSignals(t *testing.T) {
 		LotSize:            1,
 	}
 
-	result, err := NewBacktester().RunBacktest(s, sameStreamInputs(candles), 0)
+	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, sameStreamInputs(candles), 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -387,7 +396,7 @@ func TestRunBacktest_QuantityIsLotSizeTimesNumberOfLots(t *testing.T) {
 		NumberOfLots:       3,
 	}
 
-	result, err := NewBacktester().RunBacktest(s, sameStreamInputs(candles), 0)
+	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, sameStreamInputs(candles), 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -411,7 +420,7 @@ func TestRunBacktest_SplitStreamsExecuteAtNextTradeOpen(t *testing.T) {
 		LotSize:            1,
 	}
 
-	result, err := NewBacktester().RunBacktest(s, models.EngineInputs{
+	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, models.EngineInputs{
 		Interval:      models.CandleInterval5M,
 		SignalCandles: signalCandles,
 		TradeCandles:  tradeCandles,
@@ -443,7 +452,7 @@ func TestRunBacktest_TradeGapAtSignalTimestampSkipsEntry(t *testing.T) {
 		LotSize:            1,
 	}
 
-	result, err := NewBacktester().RunBacktest(s, models.EngineInputs{
+	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, models.EngineInputs{
 		Interval:      models.CandleInterval5M,
 		SignalCandles: signalCandles,
 		TradeCandles:  tradeCandles,
@@ -470,7 +479,7 @@ func TestRunBacktest_TradeSideExitWithoutSignalBar(t *testing.T) {
 		StopLossPct:        ptrFloat(5.0),
 	}
 
-	result, err := NewBacktester().RunBacktest(s, models.EngineInputs{
+	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, models.EngineInputs{
 		Interval:      models.CandleInterval5M,
 		SignalCandles: signalCandles,
 		TradeCandles:  tradeCandles,
@@ -500,7 +509,7 @@ func TestRunBacktest_SameInstrumentBaselineUsesNextBarOpen(t *testing.T) {
 		LotSize:            1,
 	}
 
-	result, err := NewBacktester().RunBacktest(s, sameStreamInputs(candles), 0)
+	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, sameStreamInputs(candles), 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -530,7 +539,7 @@ func TestRunBacktest_TradeSideTargetExitWithoutSignalBar(t *testing.T) {
 		TargetPct:          ptrFloat(5.0),
 	}
 
-	result, err := NewBacktester().RunBacktest(s, models.EngineInputs{
+	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, models.EngineInputs{
 		Interval:      models.CandleInterval5M,
 		SignalCandles: signalCandles,
 		TradeCandles:  tradeCandles,
@@ -579,7 +588,7 @@ func TestRunBacktest_DailyIntervalDoesNotInferWeekendGap(t *testing.T) {
 		LotSize:            1,
 	}
 
-	result, err := NewBacktester().RunBacktest(s, models.EngineInputs{
+	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, models.EngineInputs{
 		Interval:      models.CandleInterval1D,
 		SignalCandles: signalCandles,
 		TradeCandles:  tradeCandles,
@@ -593,5 +602,59 @@ func TestRunBacktest_DailyIntervalDoesNotInferWeekendGap(t *testing.T) {
 	trade := result.Trades[0]
 	if !trade.EntryTimestamp.Equal(signalTime.AddDate(0, 0, 1)) {
 		t.Errorf("expected next-day entry using explicit 1d interval, got %s", trade.EntryTimestamp)
+	}
+}
+
+// TestRunBacktest_AppliesCharges drives the engine with the real IndianRetailCharges
+// calculator and asserts that charges are deducted from the per-trade and aggregate
+// NetPnL. Uses a small OPTIDX BUY round-trip so STT/stamp leg mapping has to be right.
+func TestRunBacktest_AppliesCharges(t *testing.T) {
+	closes := make([]float64, 60)
+	for i := 0; i < 25; i++ {
+		closes[i] = 100
+	}
+	for i := 25; i < 60; i++ {
+		closes[i] = 100 + float64(i-24)*1.5
+	}
+	candles := makeCandleSeries(closes, 5)
+
+	s := &models.Strategy{
+		EntryConditionType: models.EntryConditionMACrossover,
+		InstrumentType:     models.InstrumentTypeOptionsIndex,
+		LotSize:            50,
+		NumberOfLots:       1,
+	}
+
+	result, err := NewBacktester(NewCharges()).RunBacktest(s, sameStreamInputs(candles), 100000)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.TotalTrades == 0 {
+		t.Fatal("expected at least one trade")
+	}
+	if result.TotalCharges <= 0 {
+		t.Fatalf("expected positive TotalCharges, got %.4f", result.TotalCharges)
+	}
+	if result.GrossPnL <= result.NetPnL {
+		t.Fatalf("expected GrossPnL > NetPnL after charges; gross=%.4f net=%.4f charges=%.4f",
+			result.GrossPnL, result.NetPnL, result.TotalCharges)
+	}
+	if math.Abs((result.GrossPnL-result.TotalCharges)-result.NetPnL) > tolerance {
+		t.Fatalf("invariant violated: gross−charges=%.4f, net=%.4f",
+			result.GrossPnL-result.TotalCharges, result.NetPnL)
+	}
+
+	for _, tr := range result.Trades {
+		if tr.TotalCharges <= 0 {
+			t.Errorf("trade has non-positive TotalCharges: %+v", tr)
+		}
+		sum := tr.Slippage + tr.Brokerage + tr.STT + tr.ExchangeFees + tr.SEBIFees + tr.GST + tr.StampDuty
+		if math.Abs(sum-tr.TotalCharges) > tolerance {
+			t.Errorf("trade charges sum mismatch: components=%.6f totalCharges=%.6f", sum, tr.TotalCharges)
+		}
+		if math.Abs((tr.GrossPnL-tr.TotalCharges)-tr.NetPnL) > tolerance {
+			t.Errorf("trade pnl invariant violated: gross=%.4f charges=%.4f net=%.4f",
+				tr.GrossPnL, tr.TotalCharges, tr.NetPnL)
+		}
 	}
 }
