@@ -30,8 +30,9 @@ type Backtester struct {
 }
 
 // NewBacktester constructs a Backtester with the given ChargeCalculator.
-// charges must be non-nil; passing nil produces a panic on the first trade closure,
-// which is the correct failure mode for a wiring bug.
+// charges must be non-nil; closeTrade will panic on nil. The constructor stays
+// strict by design — a silent zero-charge fallback would mask wiring bugs and
+// corrupt P&L on every closed trade.
 func NewBacktester(charges models.ChargeCalculator) *Backtester {
 	return &Backtester{charges: charges}
 }
@@ -117,13 +118,13 @@ func (b *Backtester) RunBacktest(strategy *models.Strategy, inputs models.Engine
 	for _, tr := range result.Trades {
 		result.GrossPnL += tr.GrossPnL
 		result.TotalCharges += tr.TotalCharges
-		result.NetPnL += tr.NetPnL
 		if tr.NetPnL > 0 {
 			result.WinCount++
 		} else if tr.NetPnL < 0 {
 			result.LossCount++
 		}
 	}
+	result.NetPnL = result.GrossPnL - result.TotalCharges
 	result.MaxDrawdown = math.Round(maxDrawdown*10000) / 10000
 
 	return result, nil
