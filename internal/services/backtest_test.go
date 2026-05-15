@@ -47,9 +47,6 @@ func (m *mockBacktestRepo) UpdateResult(_ context.Context, run *models.BacktestR
 func (m *mockBacktestRepo) GetByID(_ context.Context, _ uuid.UUID) (*models.BacktestRun, error) {
 	return m.getByIDResult, m.getByIDErr
 }
-func (m *mockBacktestRepo) ListByStrategy(_ context.Context, _ uuid.UUID) ([]models.BacktestRun, error) {
-	return m.listResult, m.listErr
-}
 func (m *mockBacktestRepo) LatestCompletedBySlug(_ context.Context, _ string) (*models.BacktestRun, error) {
 	return nil, models.ErrNotFound
 }
