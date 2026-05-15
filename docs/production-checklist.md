@@ -66,6 +66,7 @@ Run this twice — once for `APP_SECRET_TOKEN`, once for `JWT_SECRET`. Never reu
 - [ ] Hit a protected endpoint without a token — confirm `401 Unauthorized`
 - [ ] Hit a protected endpoint with the correct `APP_SECRET_TOKEN` — confirm it works
 - [ ] Confirm logs contain request IDs and do not contain bearer tokens, JWTs, DB passwords, or full DSNs
+- [ ] Create and review a screen-by-screen smoke-test sheet before live. For each Android screen/state, list the expected test cases, identify missing/unimplemented cases first, then run proper smoke testing against the implemented flows.
 
 ---
 
