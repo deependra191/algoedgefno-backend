@@ -169,7 +169,7 @@ type BacktestRun struct {
 	WinCount              *int
 	LossCount             *int
 	MaxDrawdown           *float64
-	Trades                json.RawMessage
+	Trades                []Trade
 	ErrorMessage          *string
 	CreatedAt             time.Time
 	CompletedAt           *time.Time
@@ -190,6 +190,9 @@ const (
 	BacktestFailed    = "FAILED"
 )
 
+// TODO(persist-dto): legacy shim — delete after one major release once tradePersist.UnmarshalJSON
+// in internal/storage handles all reads. See scratch/trades-json-persist-dto.md.
+//
 // UnmarshalJSON decodes a Trade with backward compatibility for pre-B14 records.
 // Before B14, persisted trades_json used Go's default marshaling of the legacy
 // Trade.PnL field, producing objects with a "PnL" key. Post-B14 the field was

@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -51,8 +52,12 @@ func (s *BacktestStore) UpdateStatus(ctx context.Context, run *models.BacktestRu
 func (s *BacktestStore) UpdateResult(ctx context.Context, run *models.BacktestRun) error {
 	ent := toBacktestEntity(run)
 	var tradesJSON, resultStatsJSON, chartDataJSON any
-	if len(ent.TradesJSON) > 0 {
-		tradesJSON = string(ent.TradesJSON)
+	if len(run.Trades) > 0 {
+		b, err := encodeTradesJSON(run.Trades)
+		if err != nil {
+			return fmt.Errorf("encoding trades_json for backtest %s: %w", run.ID, err)
+		}
+		tradesJSON = string(b)
 	}
 	if len(ent.ResultStatsJSON) > 0 {
 		resultStatsJSON = string(ent.ResultStatsJSON)
@@ -119,7 +124,15 @@ func (s *BacktestStore) GetByIDWithTrades(ctx context.Context, id uuid.UUID) (*m
 	if err != nil {
 		return nil, err
 	}
-	return toBacktestModel(ent), nil
+	run := toBacktestModel(ent)
+	if len(ent.TradesJSON) > 0 {
+		trades, err := decodeTradesJSON(ent.TradesJSON)
+		if err != nil {
+			return nil, fmt.Errorf("decoding trades_json for backtest %s: %w", id, err)
+		}
+		run.Trades = trades
+	}
+	return run, nil
 }
 
 func (s *BacktestStore) ListByStrategy(ctx context.Context, strategyID uuid.UUID) ([]models.BacktestRun, error) {

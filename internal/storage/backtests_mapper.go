@@ -30,7 +30,7 @@ func toBacktestModel(e *entities.BacktestRun) *models.BacktestRun {
 		ErrorMessage:          e.ErrorMessage,
 		CreatedAt:             e.CreatedAt,
 		CompletedAt:           e.CompletedAt,
-		Trades:                json.RawMessage(e.TradesJSON),
+		Trades:                nil, // decoded separately in GetByIDWithTrades via decodeTradesJSON
 		StrategySlug:          e.StrategySlug,
 		Capital:               e.Capital,
 		Lots:                  e.Lots,
@@ -75,7 +75,7 @@ func toBacktestEntity(r *models.BacktestRun) *entities.BacktestRun {
 		ErrorMessage:          r.ErrorMessage,
 		CreatedAt:             r.CreatedAt,
 		CompletedAt:           r.CompletedAt,
-		TradesJSON:            []byte(r.Trades),
+		TradesJSON:            nil, // encoded separately in UpdateResult via encodeTradesJSON
 		StrategySlug:          r.StrategySlug,
 		Capital:               r.Capital,
 		Lots:                  r.Lots,

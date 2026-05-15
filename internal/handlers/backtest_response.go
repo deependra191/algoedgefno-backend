@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"errors"
 	"math"
 	"time"
@@ -245,14 +244,8 @@ func toBacktestChartResponse(cd *models.ChartData) backtestChartResponse {
 	return backtestChartResponse{Equity: equity, Drawdown: drawdown}
 }
 
-func toBacktestTradesPageResponse(tradesJSON json.RawMessage, page, limit int) (backtestTradesPageResponse, error) {
-	var all []models.Trade
-	if len(tradesJSON) > 0 {
-		if err := json.Unmarshal(tradesJSON, &all); err != nil {
-			return backtestTradesPageResponse{}, err
-		}
-	}
-	total := len(all)
+func toBacktestTradesPageResponse(trades []models.Trade, page, limit int) (backtestTradesPageResponse, error) {
+	total := len(trades)
 
 	start := (page - 1) * limit
 	if start >= total {
@@ -267,11 +260,11 @@ func toBacktestTradesPageResponse(tradesJSON json.RawMessage, page, limit int) (
 	if end > total {
 		end = total
 	}
-	slice := all[start:end]
+	slice := trades[start:end]
 
-	trades := make([]backtestTradeResponse, len(slice))
+	items := make([]backtestTradeResponse, len(slice))
 	for i, tr := range slice {
-		trades[i] = backtestTradeResponse{
+		items[i] = backtestTradeResponse{
 			EntryTs:      tr.EntryTimestamp.UTC().Format(time.RFC3339),
 			ExitTs:       tr.ExitTimestamp.UTC().Format(time.RFC3339),
 			Side:         string(tr.Side),
@@ -294,7 +287,7 @@ func toBacktestTradesPageResponse(tradesJSON json.RawMessage, page, limit int) (
 	}
 
 	return backtestTradesPageResponse{
-		Trades: trades,
+		Trades: items,
 		Total:  total,
 		Page:   page,
 		Limit:  limit,
