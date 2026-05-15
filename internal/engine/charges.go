@@ -46,7 +46,7 @@ const (
 )
 
 // SEBI turnover fee — applied on both legs, flat across segments.
-const sebiPct = 0.000001 // 0.0001%
+const sebiPct = 0.000001 // 0.0001% (₹10 per ₹1 crore turnover)
 
 // GST rate — applied on (brokerage + exchange + SEBI) only.
 // GST explicitly excludes STT and stamp duty.
@@ -65,7 +65,7 @@ const (
 	brokeragePct        = 0.0003
 )
 
-var _ models.ChargeCalculator = (*IndianRetailCharges)(nil)
+var _ models.ChargeCalculator = IndianRetailCharges{}
 
 // IndianRetailCharges implements the Indian retail F&O cost model documented at
 // the top of this file. It is stateless and safe for concurrent use.
