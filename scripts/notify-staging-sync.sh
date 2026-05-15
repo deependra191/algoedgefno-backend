@@ -38,7 +38,7 @@ send_telegram() {
     _cfg=""
 }
 
-# ASCII unit separator (0x1f) — cannot appear in psql text output.
+# ASCII unit separator (0x1f) — very unlikely to appear in sync error text.
 sep=$'\x1f'
 
 if ! result=$(docker compose -f "${COMPOSE_FILE}" exec -T postgres \
