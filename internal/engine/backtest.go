@@ -41,8 +41,9 @@ func NewBacktester(charges models.ChargeCalculator) *Backtester {
 // Signals are generated from completed signal bars and executed at the open of
 // the next eligible trade bar. Exit checks and end-of-data closure are driven by
 // the trade-side candle stream.
-// capital is the user's starting capital used as the drawdown denominator when
-// the equity curve has not yet risen above zero (avoids division by zero).
+// capital seeds running equity and the drawdown peak; MaxDrawdown is reported
+// as a fraction of the running equity peak (matching the chart-series semantics
+// in BuildChartData).
 func (b *Backtester) RunBacktest(strategy *models.Strategy, inputs models.EngineInputs, capital float64) (*models.BacktestResult, error) {
 	if len(inputs.SignalCandles) == 0 || len(inputs.TradeCandles) == 0 {
 		return &models.BacktestResult{}, nil
@@ -71,7 +72,7 @@ func (b *Backtester) RunBacktest(strategy *models.Strategy, inputs models.Engine
 	result := &models.BacktestResult{}
 	var openTrade *models.Trade
 	sigIdx := 0
-	equity, peakEquity, maxDrawdown := 0.0, 0.0, 0.0
+	equity, peakEquity, maxDrawdown := capital, capital, 0.0
 	segment := strategy.InstrumentType
 
 	for i := range inputs.TradeCandles {
@@ -80,7 +81,7 @@ func (b *Backtester) RunBacktest(strategy *models.Strategy, inputs models.Engine
 		if openTrade != nil {
 			if reason, price := checkExitConditions(openTrade, candle, strategy); reason != "" {
 				b.closeTrade(openTrade, price, candle.Timestamp, reason, qty, segment)
-				recordTrade(result, *openTrade, &equity, &peakEquity, &maxDrawdown, capital)
+				recordTrade(result, *openTrade, &equity, &peakEquity, &maxDrawdown)
 				openTrade = nil
 			}
 		}
@@ -94,7 +95,7 @@ func (b *Backtester) RunBacktest(strategy *models.Strategy, inputs models.Engine
 					continue
 				}
 				b.closeTrade(openTrade, candle.Open, candle.Timestamp, ExitReasonSignalReversal, qty, segment)
-				recordTrade(result, *openTrade, &equity, &peakEquity, &maxDrawdown, capital)
+				recordTrade(result, *openTrade, &equity, &peakEquity, &maxDrawdown)
 				openTrade = nil
 			}
 
@@ -111,7 +112,7 @@ func (b *Backtester) RunBacktest(strategy *models.Strategy, inputs models.Engine
 	if openTrade != nil && len(inputs.TradeCandles) > 0 {
 		last := inputs.TradeCandles[len(inputs.TradeCandles)-1]
 		b.closeTrade(openTrade, last.Close, last.Timestamp, ExitReasonEndOfData, qty, segment)
-		recordTrade(result, *openTrade, &equity, &peakEquity, &maxDrawdown, capital)
+		recordTrade(result, *openTrade, &equity, &peakEquity, &maxDrawdown)
 	}
 
 	result.TotalTrades = len(result.Trades)
@@ -182,10 +183,11 @@ func intervalDuration(interval string) (time.Duration, error) {
 	}
 }
 
-// recordTrade appends a closed trade and updates the running equity and max-drawdown accumulators.
-// capital is the user's starting capital and is used as the denominator when the running equity
-// peak is still at zero (i.e. no profitable trade has been closed yet).
-func recordTrade(result *models.BacktestResult, trade models.Trade, equity, peakEquity, maxDrawdown *float64, capital float64) {
+// recordTrade appends a closed trade and updates the running-equity and max-drawdown
+// accumulators. equity and peakEquity are seeded at capital by the caller, so the
+// drawdown denominator is the running equity peak and matches the chart-series
+// semantics in BuildChartData.
+func recordTrade(result *models.BacktestResult, trade models.Trade, equity, peakEquity, maxDrawdown *float64) {
 	result.Trades = append(result.Trades, trade)
 	*equity += trade.NetPnL
 	if *equity > *peakEquity {
@@ -194,9 +196,6 @@ func recordTrade(result *models.BacktestResult, trade models.Trade, equity, peak
 	var dd float64
 	if *peakEquity > 0 {
 		dd = (*peakEquity - *equity) / *peakEquity
-	} else if capital > 0 && *equity < 0 {
-		// Equity has never gone positive; measure the drop from zero relative to capital.
-		dd = -(*equity) / capital
 	}
 	if dd > *maxDrawdown {
 		*maxDrawdown = dd

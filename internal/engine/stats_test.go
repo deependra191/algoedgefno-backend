@@ -153,102 +153,157 @@ func TestComputeTradeStats_Streaks(t *testing.T) {
 	}
 }
 
-func TestBuildChartData_Empty(t *testing.T) {
-	cd := BuildChartData(nil, 0)
-	if len(cd.Equity) != 0 || len(cd.Drawdown) != 0 {
-		t.Error("expected empty slices for nil trades")
+// Chart tests use a 120-minute run window; capital defaults to 100000.
+// All cases verify both equity (running balance = capital + cumPnL) and
+// drawdown (% from running peak, peak seeded at capital).
+
+const chartCapital = 100000.0
+
+var chartTo = t0.Add(120 * time.Minute)
+
+func assertPoint(t *testing.T, label string, got models.ChartPoint, wantTs time.Time, wantVal float64) {
+	t.Helper()
+	if !got.Ts.Equal(wantTs) {
+		t.Errorf("%s.Ts: want %v, got %v", label, wantTs, got.Ts)
+	}
+	if got.Value != wantVal {
+		t.Errorf("%s.Value: want %f, got %f", label, wantVal, got.Value)
 	}
 }
 
-func TestBuildChartData_EquityCurve(t *testing.T) {
+func TestBuildChartData_ZeroTrades_EmitsTwoFlatEndpoints(t *testing.T) {
+	cd := BuildChartData(nil, chartCapital, t0, chartTo)
+
+	if len(cd.Equity) != 2 || len(cd.Drawdown) != 2 {
+		t.Fatalf("want 2 points each, got equity=%d drawdown=%d", len(cd.Equity), len(cd.Drawdown))
+	}
+	assertPoint(t, "equity[0]", cd.Equity[0], t0, chartCapital)
+	assertPoint(t, "equity[1]", cd.Equity[1], chartTo, chartCapital)
+	assertPoint(t, "drawdown[0]", cd.Drawdown[0], t0, 0)
+	assertPoint(t, "drawdown[1]", cd.Drawdown[1], chartTo, 0)
+}
+
+func TestBuildChartData_SingleTrade_ExitBeforeTo_EmitsThreePoints(t *testing.T) {
+	trades := []models.Trade{makeTrade(0, 30, 500)}
+	exit := t0.Add(30 * time.Minute)
+	cd := BuildChartData(trades, chartCapital, t0, chartTo)
+
+	if len(cd.Equity) != 3 {
+		t.Fatalf("want 3 equity points, got %d", len(cd.Equity))
+	}
+	assertPoint(t, "equity[0]", cd.Equity[0], t0, chartCapital)
+	assertPoint(t, "equity[1]", cd.Equity[1], exit, chartCapital+500)
+	assertPoint(t, "equity[2]", cd.Equity[2], chartTo, chartCapital+500)
+	// All points at peak (rising equity) → drawdown 0 throughout.
+	for i, pt := range cd.Drawdown {
+		if pt.Value != 0 {
+			t.Errorf("drawdown[%d] want 0, got %f", i, pt.Value)
+		}
+	}
+}
+
+func TestBuildChartData_SingleTrade_ExitEqualsTo_SuppressesTerminal(t *testing.T) {
+	trades := []models.Trade{makeTrade(0, 120, -500)}
+	cd := BuildChartData(trades, chartCapital, t0, chartTo)
+
+	if len(cd.Equity) != 2 {
+		t.Fatalf("want 2 equity points (terminal suppressed), got %d", len(cd.Equity))
+	}
+	assertPoint(t, "equity[0]", cd.Equity[0], t0, chartCapital)
+	assertPoint(t, "equity[1]", cd.Equity[1], chartTo, chartCapital-500)
+	// Drawdown: peak=chartCapital, eq=chartCapital-500, dd = 500/100000 = 0.5%.
+	expectedDD := round2(500.0 / chartCapital * 100)
+	assertPoint(t, "drawdown[0]", cd.Drawdown[0], t0, 0)
+	assertPoint(t, "drawdown[1]", cd.Drawdown[1], chartTo, expectedDD)
+}
+
+func TestBuildChartData_MultipleTrades_LastExitBeforeTo_EmitsTerminal(t *testing.T) {
 	trades := []models.Trade{
 		makeTrade(0, 30, 1000),
 		makeTrade(30, 60, -200),
 		makeTrade(60, 90, 500),
 	}
-	cd := BuildChartData(trades, 0)
+	cd := BuildChartData(trades, chartCapital, t0, chartTo)
 
-	if len(cd.Equity) != 3 {
-		t.Fatalf("expected 3 equity points, got %d", len(cd.Equity))
+	if len(cd.Equity) != 5 {
+		t.Fatalf("want 5 equity points (seed + 3 trades + terminal), got %d", len(cd.Equity))
 	}
-	if cd.Equity[0].Value != 1000 {
-		t.Errorf("equity[0] want 1000, got %f", cd.Equity[0].Value)
-	}
-	if cd.Equity[1].Value != 800 {
-		t.Errorf("equity[1] want 800, got %f", cd.Equity[1].Value)
-	}
-	if cd.Equity[2].Value != 1300 {
-		t.Errorf("equity[2] want 1300, got %f", cd.Equity[2].Value)
+	assertPoint(t, "equity[0]", cd.Equity[0], t0, chartCapital)
+	assertPoint(t, "equity[1]", cd.Equity[1], t0.Add(30*time.Minute), chartCapital+1000)
+	assertPoint(t, "equity[2]", cd.Equity[2], t0.Add(60*time.Minute), chartCapital+800)
+	assertPoint(t, "equity[3]", cd.Equity[3], t0.Add(90*time.Minute), chartCapital+1300)
+	assertPoint(t, "equity[4]", cd.Equity[4], chartTo, chartCapital+1300)
+	// Drawdown: peak hits chartCapital+1000 at t+30, then equity dips to +800
+	// → dd = 200/101000 = 0.198... ≈ 0.20. Then equity reclaims peak.
+	expectedDip := round2(200.0 / (chartCapital + 1000) * 100)
+	assertPoint(t, "drawdown[2]", cd.Drawdown[2], t0.Add(60*time.Minute), expectedDip)
+	if cd.Drawdown[3].Value != 0 || cd.Drawdown[4].Value != 0 {
+		t.Errorf("drawdown should return to 0 once peak reclaimed; got %f %f",
+			cd.Drawdown[3].Value, cd.Drawdown[4].Value)
 	}
 }
 
-func TestBuildChartData_DrawdownAtPeak(t *testing.T) {
-	// Each trade is profitable — always at peak, drawdown always 0.
+func TestBuildChartData_MultipleTrades_LastExitEqualsTo_SuppressesTerminal(t *testing.T) {
 	trades := []models.Trade{
-		makeTrade(0, 30, 500),
-		makeTrade(30, 60, 300),
+		makeTrade(0, 30, 1000),
+		makeTrade(30, 120, -300),
 	}
-	cd := BuildChartData(trades, 0)
+	cd := BuildChartData(trades, chartCapital, t0, chartTo)
 
-	for i, pt := range cd.Drawdown {
-		if pt.Value != 0 {
-			t.Errorf("drawdown[%d] want 0 at peak, got %f", i, pt.Value)
+	if len(cd.Equity) != 3 {
+		t.Fatalf("want 3 equity points (terminal suppressed), got %d", len(cd.Equity))
+	}
+	assertPoint(t, "equity[0]", cd.Equity[0], t0, chartCapital)
+	assertPoint(t, "equity[1]", cd.Equity[1], t0.Add(30*time.Minute), chartCapital+1000)
+	assertPoint(t, "equity[2]", cd.Equity[2], chartTo, chartCapital+700)
+}
+
+func TestBuildChartData_DrawdownArithmetic_KnownSequence(t *testing.T) {
+	// Hand-verified: capital=100000, trades=[+5000, -3000].
+	// Equity: [100000, 105000, 102000, 102000].
+	// Peak: 100000 → 105000 → 105000.
+	// Drawdown: [0, 0, 3000/105000*100=2.857..., same]. round2 → 2.86.
+	trades := []models.Trade{
+		makeTrade(0, 30, 5000),
+		makeTrade(30, 60, -3000),
+	}
+	cd := BuildChartData(trades, chartCapital, t0, chartTo)
+
+	if len(cd.Equity) != 4 {
+		t.Fatalf("want 4 equity points, got %d", len(cd.Equity))
+	}
+	wantEq := []float64{100000, 105000, 102000, 102000}
+	for i, want := range wantEq {
+		if cd.Equity[i].Value != want {
+			t.Errorf("equity[%d]: want %f, got %f", i, want, cd.Equity[i].Value)
+		}
+	}
+	expectedDD := round2(3000.0 / 105000.0 * 100)
+	wantDD := []float64{0, 0, expectedDD, expectedDD}
+	for i, want := range wantDD {
+		if cd.Drawdown[i].Value != want {
+			t.Errorf("drawdown[%d]: want %f, got %f", i, want, cd.Drawdown[i].Value)
 		}
 	}
 }
 
-func TestBuildChartData_DrawdownCalculation(t *testing.T) {
-	// Peak at 1000 after first trade, then drops to 800 → drawdown = 20%
-	trades := []models.Trade{
-		makeTrade(0, 30, 1000),
-		makeTrade(30, 60, -200),
-	}
-	cd := BuildChartData(trades, 0)
-
-	if cd.Drawdown[0].Value != 0 {
-		t.Errorf("drawdown[0] want 0 (at peak), got %f", cd.Drawdown[0].Value)
-	}
-	expectedDD := round2(200.0 / 1000.0 * 100) // 20%
-	if cd.Drawdown[1].Value != expectedDD {
-		t.Errorf("drawdown[1] want %f, got %f", expectedDD, cd.Drawdown[1].Value)
+func TestBuildChartData_InvalidWindow_ReturnsEmpty(t *testing.T) {
+	cd := BuildChartData(nil, chartCapital, chartTo, t0) // from > to
+	if len(cd.Equity) != 0 || len(cd.Drawdown) != 0 {
+		t.Errorf("want empty slices for invalid window, got equity=%d drawdown=%d",
+			len(cd.Equity), len(cd.Drawdown))
 	}
 }
 
-func TestBuildChartData_DrawdownFromZero(t *testing.T) {
-	// Equity starts negative (all losses) — drawdown must be non-zero, expressed
-	// relative to capital, not the zero peak.
-	trades := []models.Trade{
-		makeTrade(0, 30, -500),
-		makeTrade(30, 60, -300),
-	}
-	capital := 10000.0
-	cd := BuildChartData(trades, capital)
+func TestBuildChartData_NonPositiveCapital_EmitsZeroDrawdowns(t *testing.T) {
+	// Defensive: production callers always pass capital > 0, but tests pass 0.
+	// Result must not panic; drawdown values are zero throughout.
+	trades := []models.Trade{makeTrade(0, 30, -100)}
+	cd := BuildChartData(trades, 0, t0, chartTo)
 
-	// After first trade: equity=-500, peak=0, dd = 500/10000*100 = 5%
-	expectedDD0 := round2(500.0 / capital * 100)
-	if cd.Drawdown[0].Value != expectedDD0 {
-		t.Errorf("drawdown[0] want %f, got %f", expectedDD0, cd.Drawdown[0].Value)
-	}
-	// After second trade: equity=-800, peak=0, dd = 800/10000*100 = 8%
-	expectedDD1 := round2(800.0 / capital * 100)
-	if cd.Drawdown[1].Value != expectedDD1 {
-		t.Errorf("drawdown[1] want %f, got %f", expectedDD1, cd.Drawdown[1].Value)
-	}
-}
-
-func TestBuildChartData_TimestampsAreExitTs(t *testing.T) {
-	exit1 := t0.Add(30 * time.Minute)
-	exit2 := t0.Add(60 * time.Minute)
-	trades := []models.Trade{
-		{EntryTimestamp: t0, ExitTimestamp: exit1, NetPnL: 100},
-		{EntryTimestamp: exit1, ExitTimestamp: exit2, NetPnL: 200},
-	}
-	cd := BuildChartData(trades, 0)
-
-	if !cd.Equity[0].Ts.Equal(exit1) {
-		t.Errorf("equity[0].Ts want %v, got %v", exit1, cd.Equity[0].Ts)
-	}
-	if !cd.Equity[1].Ts.Equal(exit2) {
-		t.Errorf("equity[1].Ts want %v, got %v", exit2, cd.Equity[1].Ts)
+	for i, pt := range cd.Drawdown {
+		if pt.Value != 0 {
+			t.Errorf("drawdown[%d]: want 0 with capital=0, got %f", i, pt.Value)
+		}
 	}
 }

@@ -383,7 +383,7 @@ func (s *BacktestService) applyResult(ctx context.Context, run *models.BacktestR
 	run.MaxDrawdown = &result.MaxDrawdown
 	run.Trades = result.Trades
 	run.ResultStats = s.engine.ComputeTradeStats(result.Trades, run.FromTs, run.ToTs)
-	run.ChartData = s.engine.BuildChartData(result.Trades, capital)
+	run.ChartData = s.engine.BuildChartData(result.Trades, capital, run.FromTs, run.ToTs)
 	if err := s.backtestStore.UpdateResult(ctx, run); err != nil {
 		return fmt.Errorf("failed to save backtest results: %w", err)
 	}

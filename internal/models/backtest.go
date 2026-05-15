@@ -64,9 +64,15 @@ type ChartPoint struct {
 }
 
 // ChartData holds equity-curve and drawdown series for a completed backtest.
-// Each slice has one point per closed trade, keyed by ExitTimestamp.
-// Equity values are cumulative PnL from zero; drawdown values are percentage
-// decline from the running peak (0 = at peak, 6.8 = 6.8% below peak).
+// Equity values are absolute account balance (capital + cumulative NetPnL), not
+// cumulative PnL from zero. Series are keyed at the run start, each trade exit,
+// and the run end; counts are not 1:1 with the trade list. Drawdown values are
+// the percentage decline from the running equity peak.
+//
+// Note: ChartData blobs persisted before the running-equity rebase carry the
+// older shape (cumulative PnL from zero, keyed only at exit timestamps, no
+// run-window endpoints). Old runs render with their stored shape; no backfill
+// is performed.
 type ChartData struct {
 	Equity   []ChartPoint
 	Drawdown []ChartPoint
@@ -122,11 +128,16 @@ type BacktestEngine interface {
 	// from and to are the backtest date range used to compute tradesPerWeek.
 	// Pointer fields in the result are nil when mathematically undefined.
 	ComputeTradeStats(trades []Trade, from, to time.Time) *TradeStats
-	// BuildChartData builds equity-curve and drawdown time series from a completed trade list.
-	// Each point is keyed by the trade's ExitTimestamp.
-	// capital is the user's starting capital and is used as the drawdown denominator
-	// when the running equity peak has not yet gone positive.
-	BuildChartData(trades []Trade, capital float64) *ChartData
+	// BuildChartData builds equity-curve and drawdown time series spanning the
+	// backtest run window. Equity values are absolute account balance (capital +
+	// cumulative NetPnL). The first point is (from, capital); each trade exit
+	// emits (exitTs, capital + cumPnLSoFar); a terminal (to, capital + finalCumPnL)
+	// is appended unless the last trade's exit timestamp equals to. Result has
+	// at least 2 points whenever from < to; an empty result is returned for
+	// invalid windows (from >= to). Drawdown is the percentage decline from the
+	// running equity peak; the peak is seeded at capital, so capital must be > 0
+	// for meaningful drawdown values (capital <= 0 emits zero drawdowns).
+	BuildChartData(trades []Trade, capital float64, from, to time.Time) *ChartData
 }
 
 // BacktestRepository is the storage contract for persisting backtest run records.
