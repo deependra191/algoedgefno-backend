@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 	"time"
@@ -174,6 +175,43 @@ func TestTradePersistUnmarshalLegacyFixture(t *testing.T) {
 	}
 	if tp.TotalCharges != 0 {
 		t.Errorf("TotalCharges: got %v, want 0", tp.TotalCharges)
+	}
+}
+
+// TestEncodeTradesJSONKeyShape asserts that encodeTradesJSON produces PascalCase JSON
+// keys matching the on-disk contract. A field-tag rename would silently break Android
+// clients reading legacy rows; this test catches it before it reaches storage.
+func TestEncodeTradesJSONKeyShape(t *testing.T) {
+	trades := []models.Trade{{
+		Side:         models.OrderSideBuy,
+		GrossPnL:     1000,
+		NetPnL:       928,
+		TotalCharges: 72,
+		Slippage:     11,
+		Brokerage:    40,
+		STT:          9,
+		ExchangeFees: 3.91,
+		SEBIFees:     0.011,
+		GST:          7.91,
+		StampDuty:    0.15,
+		Reason:       "test",
+		ExitReason:   "target",
+	}}
+
+	b, err := encodeTradesJSON(trades)
+	if err != nil {
+		t.Fatalf("encodeTradesJSON: %v", err)
+	}
+	for _, key := range []string{
+		`"GrossPnL"`, `"NetPnL"`, `"TotalCharges"`,
+		`"Slippage"`, `"Brokerage"`, `"STT"`,
+		`"ExchangeFees"`, `"SEBIFees"`, `"GST"`, `"StampDuty"`,
+		`"EntryTimestamp"`, `"ExitTimestamp"`, `"Side"`, `"Quantity"`,
+		`"EntryPrice"`, `"ExitPrice"`, `"Reason"`, `"ExitReason"`,
+	} {
+		if !bytes.Contains(b, []byte(key)) {
+			t.Errorf("encoded JSON missing expected key %s", key)
+		}
 	}
 }
 

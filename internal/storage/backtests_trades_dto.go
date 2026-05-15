@@ -1,5 +1,3 @@
-// tradePersist is the on-disk JSON shape of a single trade in backtest_runs.trades_json.
-// It exists so models.Trade can stay free of json: tags (CLAUDE.md rule 20).
 package storage
 
 import (
@@ -105,6 +103,7 @@ func toTradeModel(tp tradePersist) models.Trade {
 }
 
 // encodeTradesJSON maps each trade to tradePersist and marshals the slice to JSON.
+// Callers must not pass a nil or empty slice; guard with len(trades) > 0 before calling.
 func encodeTradesJSON(trades []models.Trade) ([]byte, error) {
 	dtos := make([]tradePersist, len(trades))
 	for i, tr := range trades {
@@ -115,7 +114,11 @@ func encodeTradesJSON(trades []models.Trade) ([]byte, error) {
 
 // decodeTradesJSON unmarshals trades_json bytes into []models.Trade via the
 // tradePersist DTO, tolerating both pre-B14 and post-B14 stored shapes.
+// Callers must not pass empty/nil data; pass a nil check before calling.
 func decodeTradesJSON(data []byte) ([]models.Trade, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
 	var dtos []tradePersist
 	if err := json.Unmarshal(data, &dtos); err != nil {
 		return nil, fmt.Errorf("unmarshaling trades_json: %w", err)

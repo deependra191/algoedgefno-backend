@@ -143,12 +143,14 @@ type BacktestRepository interface {
 	// GetByIDWithTrades returns the run with the given ID including the trades_json blob, or models.ErrNotFound.
 	// Use only when trade-level data is needed (e.g. the paginated trades endpoint).
 	GetByIDWithTrades(ctx context.Context, id uuid.UUID) (*BacktestRun, error)
-	// ListByStrategy returns all runs for a strategy, newest first.
-	ListByStrategy(ctx context.Context, strategyID uuid.UUID) ([]BacktestRun, error)
 	// LatestCompletedBySlug returns the most recent COMPLETED backtest for a built-in strategy slug.
 	// Returns models.ErrNotFound if no completed run exists.
 	LatestCompletedBySlug(ctx context.Context, slug string) (*BacktestRun, error)
-	// ListCompleted returns completed backtest runs ordered by completed_at descending.
+	// ListCompleted returns completed backtest runs that produced at least one trade,
+	// ordered by completed_at descending. 0-trade runs are persisted (and reachable
+	// via GetByID) but excluded from this user-facing list view — they are noise on
+	// the results screen, not history worth scanning. The returned total reflects
+	// the same filter so callers can paginate correctly.
 	ListCompleted(ctx context.Context, page, limit int) ([]BacktestRun, int, error)
 }
 
@@ -190,8 +192,9 @@ const (
 	BacktestFailed    = "FAILED"
 )
 
-// TODO(persist-dto): legacy shim — delete after one major release once tradePersist.UnmarshalJSON
-// in internal/storage handles all reads. See scratch/trades-json-persist-dto.md.
+// TODO(persist-dto): legacy shim — delete once all pre-B14 rows have been re-run or confirmed
+// unreachable, AND tradePersist.UnmarshalJSON in internal/storage has handled all production
+// reads for at least one tagged release. See scratch/trades-json-persist-dto.md.
 //
 // UnmarshalJSON decodes a Trade with backward compatibility for pre-B14 records.
 // Before B14, persisted trades_json used Go's default marshaling of the legacy
