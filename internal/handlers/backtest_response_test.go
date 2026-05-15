@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -321,10 +320,9 @@ func TestToBacktestTradesPageResponse_Pagination(t *testing.T) {
 			NetPnL:         float64(i+1)*100 - float64(i+1)*5,
 		}
 	}
-	raw, _ := json.Marshal(trades)
 
 	// page 1, limit 2 → first 2 trades
-	resp, err := toBacktestTradesPageResponse(raw, 1, 2)
+	resp, err := toBacktestTradesPageResponse(trades, 1, 2)
 	if err != nil {
 		t.Fatal("unexpected error:", err)
 	}
@@ -336,7 +334,7 @@ func TestToBacktestTradesPageResponse_Pagination(t *testing.T) {
 	}
 
 	// page 3, limit 2 → last 1 trade
-	resp, err = toBacktestTradesPageResponse(raw, 3, 2)
+	resp, err = toBacktestTradesPageResponse(trades, 3, 2)
 	if err != nil {
 		t.Fatal("unexpected error:", err)
 	}
@@ -345,7 +343,7 @@ func TestToBacktestTradesPageResponse_Pagination(t *testing.T) {
 	}
 
 	// page beyond end → empty
-	resp, err = toBacktestTradesPageResponse(raw, 10, 2)
+	resp, err = toBacktestTradesPageResponse(trades, 10, 2)
 	if err != nil {
 		t.Fatal("unexpected error:", err)
 	}
@@ -376,9 +374,8 @@ func TestToBacktestTradesPageResponse_ChargeInvariant(t *testing.T) {
 		TotalCharges:   72,
 		NetPnL:         928,
 	}
-	raw, _ := json.Marshal([]models.Trade{tr})
 
-	resp, err := toBacktestTradesPageResponse(raw, 1, 10)
+	resp, err := toBacktestTradesPageResponse([]models.Trade{tr}, 1, 10)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -392,41 +389,6 @@ func TestToBacktestTradesPageResponse_ChargeInvariant(t *testing.T) {
 	}
 	if got.Pnl != tr.NetPnL {
 		t.Errorf("pnl JSON field must be sourced from NetPnL: got=%.4f want=%.4f", got.Pnl, tr.NetPnL)
-	}
-}
-
-// TestToBacktestTradesPageResponse_PreB14LegacyPnL asserts that legacy trades_json
-// blobs persisted before the B14 field rename (containing the marshaled "PnL" key)
-// still render the correct pnl value, not zero, in GET /backtests/:id/trades.
-func TestToBacktestTradesPageResponse_PreB14LegacyPnL(t *testing.T) {
-	raw := []byte(`[{
-		"EntryTimestamp": "2025-01-02T09:15:00Z",
-		"ExitTimestamp":  "2025-01-02T09:30:00Z",
-		"Side":           "BUY",
-		"Quantity":       50,
-		"EntryPrice":     100,
-		"ExitPrice":      105,
-		"PnL":            123.45,
-		"Reason":         "MA bullish",
-		"ExitReason":     "target"
-	}]`)
-
-	resp, err := toBacktestTradesPageResponse(raw, 1, 10)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(resp.Trades) != 1 {
-		t.Fatalf("expected 1 trade, got %d", len(resp.Trades))
-	}
-	got := resp.Trades[0]
-	if got.Pnl != 123.45 {
-		t.Errorf("legacy pnl lost: got %v, want 123.45", got.Pnl)
-	}
-	if got.GrossPnl != 123.45 {
-		t.Errorf("legacy grossPnl mirror missing: got %v, want 123.45", got.GrossPnl)
-	}
-	if got.TotalCharges != 0 {
-		t.Errorf("legacy totalCharges should be 0, got %v", got.TotalCharges)
 	}
 }
 

@@ -23,7 +23,8 @@ type BacktestRun struct {
 	WinCount              *int
 	LossCount             *int
 	MaxDrawdown           *float64
-	TradesJSON            []byte
+	// Populated only by scanBacktestRunWithTrades; consumed only by decodeTradesJSON. Mappers must not touch this field.
+	TradesJSON []byte
 	ErrorMessage          *string
 	CreatedAt             time.Time
 	CompletedAt           *time.Time

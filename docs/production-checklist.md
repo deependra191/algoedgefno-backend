@@ -70,7 +70,26 @@ Run this twice — once for `APP_SECRET_TOKEN`, once for `JWT_SECRET`. Never reu
 
 ---
 
-## 6. Before every deploy (ongoing)
+## 6. CI/CD — GitHub Actions (CRITICAL — must be in place before go-live)
+
+**Status: TODO — no workflows exist yet.**
+
+The following gate checks must run automatically on every PR before merge. Running them manually is not sufficient for a production codebase.
+
+- [ ] **Create `.github/workflows/ci.yml`** covering:
+  - `go build ./...` — compile check
+  - `go vet ./...` — vet warnings
+  - `go test ./...` — full test suite
+  - `go-arch-lint` — import boundary enforcement (config already exists at `.go-arch-lint.yml`)
+- [ ] Workflow triggers on `pull_request` targeting `dev` and `main`
+- [ ] Branch protection on `dev` and `main` requires the CI workflow to pass before merge — enforced in GitHub repo settings, not just by convention
+- [ ] Secrets required by tests (if any) are added as GitHub Actions secrets, not committed
+
+**Why this is CRITICAL:** without branch protection + passing CI, the architectural rules in CLAUDE.md (layer boundaries, no `json:` tags on domain types, etc.) are enforced only by code review. One missed review means a rule violation ships to prod. CI makes this machine-enforced.
+
+---
+
+## 7. Before every deploy (ongoing)
 
 - [ ] Run `go build ./...` — confirm no compile errors
 - [ ] Run `go vet ./...` — confirm no vet warnings
