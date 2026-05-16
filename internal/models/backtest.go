@@ -114,8 +114,9 @@ type BacktestEngine interface {
 	// open of the next trade bar starting at or after T plus the strategy interval.
 	// Open positions evaluate exits on every trade-side bar, even when no signal
 	// candle exists for that timestamp.
-	// capital is the user's starting capital and is used as the drawdown denominator
-	// when the equity curve has not yet gone positive (avoids division by zero).
+	// capital is the user's starting capital. It seeds running equity and the
+	// initial drawdown peak; MaxDrawdown is reported as a fraction of the
+	// running equity peak.
 	// Returns an error only if the strategy configuration is invalid.
 	//
 	// Each returned Trade carries a full charge breakdown (Slippage, Brokerage, STT,

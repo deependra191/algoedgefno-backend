@@ -11,6 +11,8 @@ import (
 func ptrFloat(v float64) *float64 { return &v }
 func ptrInt(v int) *int           { return &v }
 
+const maxDrawdownTolerance = 1e-9
+
 // zeroCharges is a test stub implementing models.ChargeCalculator that returns no
 // charges. It keeps the legacy frictionless-P&L assertions in backtest_test.go
 // valid; tests exercising real charges use engine.NewCharges() directly.
@@ -357,13 +359,39 @@ func TestRunBacktest_MaxDrawdown(t *testing.T) {
 		LotSize:            1,
 	}
 
-	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, sameStreamInputs(candles), 0)
+	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, sameStreamInputs(candles), 100000)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if result.MaxDrawdown < 0 || result.MaxDrawdown > 1 {
 		t.Errorf("MaxDrawdown should be in [0, 1], got %f", result.MaxDrawdown)
+	}
+}
+
+func TestRecordTrade_MaxDrawdownUsesCapitalSeededRunningPeak(t *testing.T) {
+	result := &models.BacktestResult{}
+	equity := 100000.0
+	peakEquity := equity
+	maxDrawdown := 0.0
+
+	for _, netPnL := range []float64{5000, -3000, -1000, 10000} {
+		recordTrade(result, models.Trade{NetPnL: netPnL}, &equity, &peakEquity, &maxDrawdown)
+	}
+
+	expectedMaxDrawdown := 4000.0 / 105000.0
+	if math.Abs(maxDrawdown-expectedMaxDrawdown) > maxDrawdownTolerance {
+		t.Fatalf("expected max drawdown %.10f, got %.10f", expectedMaxDrawdown, maxDrawdown)
+	}
+	result.MaxDrawdown = math.Round(maxDrawdown*10000) / 10000
+	if result.MaxDrawdown != 0.0381 {
+		t.Fatalf("expected rounded BacktestResult.MaxDrawdown 0.0381, got %.4f", result.MaxDrawdown)
+	}
+	if peakEquity != 111000 {
+		t.Fatalf("expected final peak equity 111000, got %.2f", peakEquity)
+	}
+	if equity != 111000 {
+		t.Fatalf("expected final equity 111000, got %.2f", equity)
 	}
 }
 
