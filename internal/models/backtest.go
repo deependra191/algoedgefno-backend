@@ -2,7 +2,6 @@ package models
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,6 +16,9 @@ const (
 )
 
 // Trade is a single completed round-trip entry+exit produced by the backtest engine.
+// GrossPnL is the frictionless price-move profit; NetPnL is GrossPnL − TotalCharges and
+// is the value Android renders as "pnl". The individual charge fields are populated by
+// the engine via the ChargeCalculator so the UI can show the full cost stack per trade.
 type Trade struct {
 	EntryTimestamp time.Time
 	ExitTimestamp  time.Time
@@ -24,7 +26,16 @@ type Trade struct {
 	Quantity       int
 	EntryPrice     float64
 	ExitPrice      float64
-	PnL            float64
+	GrossPnL       float64
+	Slippage       float64
+	Brokerage      float64
+	STT            float64
+	ExchangeFees   float64
+	SEBIFees       float64
+	GST            float64
+	StampDuty      float64
+	TotalCharges   float64
+	NetPnL         float64
 	Reason         string
 	ExitReason     string
 }
@@ -52,22 +63,33 @@ type ChartPoint struct {
 }
 
 // ChartData holds equity-curve and drawdown series for a completed backtest.
-// Each slice has one point per closed trade, keyed by ExitTimestamp.
-// Equity values are cumulative PnL from zero; drawdown values are percentage
-// decline from the running peak (0 = at peak, 6.8 = 6.8% below peak).
+// Equity values are absolute account balance (capital + cumulative NetPnL), not
+// cumulative PnL from zero. Series are keyed at the run start, each trade exit,
+// and the run end; counts are not 1:1 with the trade list. Drawdown values are
+// the percentage decline from the running equity peak.
+//
+// Note: ChartData blobs persisted before the running-equity rebase carry the
+// older shape (cumulative PnL from zero, keyed only at exit timestamps, no
+// run-window endpoints). Old runs render with their stored shape; no backfill
+// is performed.
 type ChartData struct {
 	Equity   []ChartPoint
 	Drawdown []ChartPoint
 }
 
 // BacktestResult aggregates the outcome of a full backtest run.
+// GrossPnL is the sum of trade-level GrossPnL; TotalCharges is the sum of trade-level
+// TotalCharges; NetPnL is the sum of trade-level NetPnL (== GrossPnL − TotalCharges
+// within float-rounding tolerance). WinCount/LossCount are bucketed on NetPnL.
 type BacktestResult struct {
-	Trades      []Trade
-	NetPnL      float64
-	TotalTrades int
-	WinCount    int
-	LossCount   int
-	MaxDrawdown float64
+	Trades       []Trade
+	GrossPnL     float64
+	TotalCharges float64
+	NetPnL       float64
+	TotalTrades  int
+	WinCount     int
+	LossCount    int
+	MaxDrawdown  float64
 }
 
 // EngineInputs carries the strategy interval and candle streams consumed by the backtest engine.
@@ -91,19 +113,31 @@ type BacktestEngine interface {
 	// open of the next trade bar starting at or after T plus the strategy interval.
 	// Open positions evaluate exits on every trade-side bar, even when no signal
 	// candle exists for that timestamp.
-	// capital is the user's starting capital and is used as the drawdown denominator
-	// when the equity curve has not yet gone positive (avoids division by zero).
+	// capital is the user's starting capital. It seeds running equity and the
+	// initial drawdown peak; MaxDrawdown is reported as a fraction of the
+	// running equity peak.
 	// Returns an error only if the strategy configuration is invalid.
+	//
+	// Each returned Trade carries a full charge breakdown (Slippage, Brokerage, STT,
+	// ExchangeFees, SEBIFees, GST, StampDuty, TotalCharges) and both GrossPnL and
+	// NetPnL = GrossPnL − TotalCharges. The aggregate BacktestResult mirrors this:
+	// GrossPnL, TotalCharges, and NetPnL are summed from trade-level values, and the
+	// equity curve and drawdown are driven by NetPnL (the post-charges series).
 	RunBacktest(strategy *Strategy, inputs EngineInputs, capital float64) (*BacktestResult, error)
 	// ComputeTradeStats derives performance statistics from a completed trade list.
 	// from and to are the backtest date range used to compute tradesPerWeek.
 	// Pointer fields in the result are nil when mathematically undefined.
 	ComputeTradeStats(trades []Trade, from, to time.Time) *TradeStats
-	// BuildChartData builds equity-curve and drawdown time series from a completed trade list.
-	// Each point is keyed by the trade's ExitTimestamp.
-	// capital is the user's starting capital and is used as the drawdown denominator
-	// when the running equity peak has not yet gone positive.
-	BuildChartData(trades []Trade, capital float64) *ChartData
+	// BuildChartData builds equity-curve and drawdown time series spanning the
+	// backtest run window. Equity values are absolute account balance (capital +
+	// cumulative NetPnL). The first point is (from, capital); each trade exit
+	// emits (exitTs, capital + cumPnLSoFar); a terminal (to, capital + finalCumPnL)
+	// is appended unless the last trade's exit timestamp equals to. Result has
+	// at least 2 points whenever from < to; an empty result is returned for
+	// invalid windows (from >= to). Drawdown is the percentage decline from the
+	// running equity peak; the peak is seeded at capital, so capital must be > 0
+	// for meaningful drawdown values (capital <= 0 emits zero drawdowns).
+	BuildChartData(trades []Trade, capital float64, from, to time.Time) *ChartData
 }
 
 // BacktestRepository is the storage contract for persisting backtest run records.
@@ -120,12 +154,14 @@ type BacktestRepository interface {
 	// GetByIDWithTrades returns the run with the given ID including the trades_json blob, or models.ErrNotFound.
 	// Use only when trade-level data is needed (e.g. the paginated trades endpoint).
 	GetByIDWithTrades(ctx context.Context, id uuid.UUID) (*BacktestRun, error)
-	// ListByStrategy returns all runs for a strategy, newest first.
-	ListByStrategy(ctx context.Context, strategyID uuid.UUID) ([]BacktestRun, error)
 	// LatestCompletedBySlug returns the most recent COMPLETED backtest for a built-in strategy slug.
 	// Returns models.ErrNotFound if no completed run exists.
 	LatestCompletedBySlug(ctx context.Context, slug string) (*BacktestRun, error)
-	// ListCompleted returns completed backtest runs ordered by completed_at descending.
+	// ListCompleted returns completed backtest runs that produced at least one trade,
+	// ordered by completed_at descending. 0-trade runs are persisted (and reachable
+	// via GetByID) but excluded from this user-facing list view — they are noise on
+	// the results screen, not history worth scanning. The returned total reflects
+	// the same filter so callers can paginate correctly.
 	ListCompleted(ctx context.Context, page, limit int) ([]BacktestRun, int, error)
 }
 
@@ -140,11 +176,13 @@ type BacktestRun struct {
 	CandleInterval        string
 	Status                string
 	NetPnl                *float64
+	GrossPnl              *float64
+	TotalCharges          *float64
 	TotalTrades           *int
 	WinCount              *int
 	LossCount             *int
 	MaxDrawdown           *float64
-	Trades                json.RawMessage
+	Trades                []Trade
 	ErrorMessage          *string
 	CreatedAt             time.Time
 	CompletedAt           *time.Time

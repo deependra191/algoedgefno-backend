@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -51,8 +52,12 @@ func (s *BacktestStore) UpdateStatus(ctx context.Context, run *models.BacktestRu
 func (s *BacktestStore) UpdateResult(ctx context.Context, run *models.BacktestRun) error {
 	ent := toBacktestEntity(run)
 	var tradesJSON, resultStatsJSON, chartDataJSON any
-	if len(ent.TradesJSON) > 0 {
-		tradesJSON = string(ent.TradesJSON)
+	if len(run.Trades) > 0 {
+		b, err := encodeTradesJSON(run.Trades)
+		if err != nil {
+			return fmt.Errorf("encoding trades_json for backtest %s: %w", run.ID, err)
+		}
+		tradesJSON = string(b)
 	}
 	if len(ent.ResultStatsJSON) > 0 {
 		resultStatsJSON = string(ent.ResultStatsJSON)
@@ -72,11 +77,14 @@ func (s *BacktestStore) UpdateResult(ctx context.Context, run *models.BacktestRu
 			error_message = $9,
 			result_stats  = $10::jsonb,
 			chart_data    = $11::jsonb,
+			gross_pnl     = $12,
+			total_charges = $13,
 			completed_at  = NOW()
 		WHERE id = $1`,
 		ent.ID, ent.Status, ent.NetPnl, ent.TotalTrades, ent.WinCount,
 		ent.LossCount, ent.MaxDrawdown, tradesJSON, ent.ErrorMessage,
 		resultStatsJSON, chartDataJSON,
+		ent.GrossPnl, ent.TotalCharges,
 	)
 	return err
 }
@@ -87,7 +95,8 @@ func (s *BacktestStore) GetByID(ctx context.Context, id uuid.UUID) (*models.Back
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
 		       error_message, created_at, completed_at,
 		       strategy_slug, capital, lots, underlying,
-		       result_stats, chart_data
+		       result_stats, chart_data,
+		       gross_pnl, total_charges
 		FROM backtest_runs WHERE id = $1`, id)
 	ent, err := scanBacktestRun(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -105,7 +114,8 @@ func (s *BacktestStore) GetByIDWithTrades(ctx context.Context, id uuid.UUID) (*m
 		SELECT id, strategy_id, instrument_token, signal_instrument_token, from_ts, to_ts, candle_interval, status,
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
 		       trades_json, error_message, created_at, completed_at,
-		       strategy_slug, capital, lots, underlying
+		       strategy_slug, capital, lots, underlying,
+		       gross_pnl, total_charges
 		FROM backtest_runs WHERE id = $1`, id)
 	ent, err := scanBacktestRunWithTrades(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -114,38 +124,25 @@ func (s *BacktestStore) GetByIDWithTrades(ctx context.Context, id uuid.UUID) (*m
 	if err != nil {
 		return nil, err
 	}
-	return toBacktestModel(ent), nil
-}
-
-func (s *BacktestStore) ListByStrategy(ctx context.Context, strategyID uuid.UUID) ([]models.BacktestRun, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, strategy_id, instrument_token, signal_instrument_token, from_ts, to_ts, candle_interval, status,
-		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
-		       error_message, created_at, completed_at,
-		       strategy_slug, capital, lots, underlying
-		FROM backtest_runs WHERE strategy_id = $1 ORDER BY created_at DESC`, strategyID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var result []models.BacktestRun
-	for rows.Next() {
-		ent, err := scanBacktestRunRow(rows)
+	run := toBacktestModel(ent)
+	if len(ent.TradesJSON) > 0 {
+		trades, err := decodeTradesJSON(ent.TradesJSON)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("decoding trades_json for backtest %s: %w", id, err)
 		}
-		result = append(result, *toBacktestModel(ent))
+		run.Trades = trades
 	}
-	return result, rows.Err()
+	return run, nil
 }
 
-// ListCompleted returns completed backtest runs ordered by completion time.
+// ListCompleted implements BacktestRepository. The total_trades > 0 predicate is
+// repeated in both the COUNT and the paginated SELECT — they must stay in sync,
+// otherwise the returned total and the page contents disagree and pagination breaks.
 func (s *BacktestStore) ListCompleted(ctx context.Context, page, limit int) ([]models.BacktestRun, int, error) {
 	var total int
 	if err := s.pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM backtest_runs
-		WHERE status = $1 AND completed_at IS NOT NULL`, models.BacktestCompleted).Scan(&total); err != nil {
+		WHERE status = $1 AND completed_at IS NOT NULL AND total_trades > 0`, models.BacktestCompleted).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
@@ -154,9 +151,10 @@ func (s *BacktestStore) ListCompleted(ctx context.Context, page, limit int) ([]m
 		SELECT id, strategy_id, instrument_token, signal_instrument_token, from_ts, to_ts, candle_interval, status,
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
 		       error_message, created_at, completed_at,
-		       strategy_slug, capital, lots, underlying
+		       strategy_slug, capital, lots, underlying,
+		       gross_pnl, total_charges
 		FROM backtest_runs
-		WHERE status = $1 AND completed_at IS NOT NULL
+		WHERE status = $1 AND completed_at IS NOT NULL AND total_trades > 0
 		ORDER BY completed_at DESC, created_at DESC
 		LIMIT $2 OFFSET $3`, models.BacktestCompleted, limit, offset)
 	if err != nil {
@@ -182,7 +180,8 @@ func (s *BacktestStore) LatestCompletedBySlug(ctx context.Context, slug string) 
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
 		       error_message, created_at, completed_at,
 		       strategy_slug, capital, lots, underlying,
-		       result_stats, chart_data
+		       result_stats, chart_data,
+		       gross_pnl, total_charges
 		FROM backtest_runs
 		WHERE strategy_slug = $1 AND status = $2
 		ORDER BY created_at DESC LIMIT 1`, slug, models.BacktestCompleted)

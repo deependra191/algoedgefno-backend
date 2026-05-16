@@ -21,24 +21,24 @@ func ComputeTradeStats(trades []models.Trade, from, to time.Time) *models.TradeS
 	var totalHolding float64
 	var winSum, lossSum float64
 	winCount, lossCount := 0, 0
-	best := trades[0].PnL
-	worst := trades[0].PnL
+	best := trades[0].NetPnL
+	worst := trades[0].NetPnL
 
 	for _, tr := range trades {
-		if tr.PnL > best {
-			best = tr.PnL
+		if tr.NetPnL > best {
+			best = tr.NetPnL
 		}
-		if tr.PnL < worst {
-			worst = tr.PnL
+		if tr.NetPnL < worst {
+			worst = tr.NetPnL
 		}
 		totalHolding += tr.ExitTimestamp.Sub(tr.EntryTimestamp).Minutes()
-		if tr.PnL > 0 {
-			winSum += tr.PnL
-			grossWins += tr.PnL
+		if tr.NetPnL > 0 {
+			winSum += tr.NetPnL
+			grossWins += tr.NetPnL
 			winCount++
-		} else if tr.PnL < 0 {
-			lossSum += tr.PnL
-			grossLosses += tr.PnL
+		} else if tr.NetPnL < 0 {
+			lossSum += tr.NetPnL
+			grossLosses += tr.NetPnL
 			lossCount++
 		}
 	}
@@ -72,31 +72,47 @@ func ComputeTradeStats(trades []models.Trade, from, to time.Time) *models.TradeS
 	return stats
 }
 
-// BuildChartData builds equity-curve and drawdown time series from a completed trade list.
-// Each point is keyed by the trade's ExitTimestamp.
-// Equity is the cumulative PnL from zero after each exit.
-// Drawdown is the percentage decline from the running equity peak
-// (0 = at peak; 6.8 = 6.8% below peak); computed as (peak−equity)/peak×100.
-// When the equity peak has not yet gone positive, capital is used as the denominator
-// so that early losses are expressed as a percentage of the user's starting capital.
-func BuildChartData(trades []models.Trade, capital float64) *models.ChartData {
-	equity := make([]models.ChartPoint, len(trades))
-	drawdown := make([]models.ChartPoint, len(trades))
+// BuildChartData implements models.BacktestEngine. The legacy capital-fallback
+// branch from the cumPnL-from-zero contract is gone: with peak seeded at capital,
+// peak >= capital > 0 is invariant for the normal call path, so the branch was
+// dead. The capital <= 0 case (only reachable from tests) emits zero drawdowns.
+func BuildChartData(trades []models.Trade, capital float64, from, to time.Time) *models.ChartData {
+	if !from.Before(to) {
+		return &models.ChartData{Equity: []models.ChartPoint{}, Drawdown: []models.ChartPoint{}}
+	}
 
-	var cumPnL, peak float64
-	for i, tr := range trades {
-		cumPnL += tr.PnL
-		if cumPnL > peak {
-			peak = cumPnL
+	equity := make([]models.ChartPoint, 0, len(trades)+2)
+	drawdown := make([]models.ChartPoint, 0, len(trades)+2)
+
+	peak := capital
+	equity = append(equity, models.ChartPoint{Ts: from, Value: round2(capital)})
+	drawdown = append(drawdown, models.ChartPoint{Ts: from, Value: 0})
+
+	var cumPnL float64
+	var lastExit time.Time
+	for _, tr := range trades {
+		cumPnL += tr.NetPnL
+		eq := capital + cumPnL
+		if eq > peak {
+			peak = eq
 		}
-		var dd float64
+		dd := 0.0
 		if peak > 0 {
-			dd = round2((peak - cumPnL) / peak * 100)
-		} else if capital > 0 && cumPnL < 0 {
-			dd = round2(-cumPnL / capital * 100)
+			dd = round2((peak - eq) / peak * 100)
 		}
-		equity[i] = models.ChartPoint{Ts: tr.ExitTimestamp, Value: round2(cumPnL)}
-		drawdown[i] = models.ChartPoint{Ts: tr.ExitTimestamp, Value: dd}
+		equity = append(equity, models.ChartPoint{Ts: tr.ExitTimestamp, Value: round2(eq)})
+		drawdown = append(drawdown, models.ChartPoint{Ts: tr.ExitTimestamp, Value: dd})
+		lastExit = tr.ExitTimestamp
+	}
+
+	if len(trades) == 0 || !lastExit.Equal(to) {
+		finalEq := capital + cumPnL
+		dd := 0.0
+		if peak > 0 {
+			dd = round2((peak - finalEq) / peak * 100)
+		}
+		equity = append(equity, models.ChartPoint{Ts: to, Value: round2(finalEq)})
+		drawdown = append(drawdown, models.ChartPoint{Ts: to, Value: dd})
 	}
 
 	return &models.ChartData{Equity: equity, Drawdown: drawdown}
@@ -108,21 +124,21 @@ func (b *Backtester) ComputeTradeStats(trades []models.Trade, from, to time.Time
 }
 
 // BuildChartData implements models.BacktestEngine.
-func (b *Backtester) BuildChartData(trades []models.Trade, capital float64) *models.ChartData {
-	return BuildChartData(trades, capital)
+func (b *Backtester) BuildChartData(trades []models.Trade, capital float64, from, to time.Time) *models.ChartData {
+	return BuildChartData(trades, capital, from, to)
 }
 
 func computeStreaks(trades []models.Trade) (longestWin, longestLoss int) {
 	curWin, curLoss := 0, 0
 	for _, tr := range trades {
 		switch {
-		case tr.PnL > 0:
+		case tr.NetPnL > 0:
 			curWin++
 			curLoss = 0
 			if curWin > longestWin {
 				longestWin = curWin
 			}
-		case tr.PnL < 0:
+		case tr.NetPnL < 0:
 			curLoss++
 			curWin = 0
 			if curLoss > longestLoss {

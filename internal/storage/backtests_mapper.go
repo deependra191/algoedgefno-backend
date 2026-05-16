@@ -21,6 +21,8 @@ func toBacktestModel(e *entities.BacktestRun) *models.BacktestRun {
 		CandleInterval:        e.CandleInterval,
 		Status:                e.Status,
 		NetPnl:                e.NetPnl,
+		GrossPnl:              e.GrossPnl,
+		TotalCharges:          e.TotalCharges,
 		TotalTrades:           e.TotalTrades,
 		WinCount:              e.WinCount,
 		LossCount:             e.LossCount,
@@ -28,7 +30,7 @@ func toBacktestModel(e *entities.BacktestRun) *models.BacktestRun {
 		ErrorMessage:          e.ErrorMessage,
 		CreatedAt:             e.CreatedAt,
 		CompletedAt:           e.CompletedAt,
-		Trades:                json.RawMessage(e.TradesJSON),
+		Trades:                nil, // decoded separately in GetByIDWithTrades via decodeTradesJSON
 		StrategySlug:          e.StrategySlug,
 		Capital:               e.Capital,
 		Lots:                  e.Lots,
@@ -64,6 +66,8 @@ func toBacktestEntity(r *models.BacktestRun) *entities.BacktestRun {
 		CandleInterval:        r.CandleInterval,
 		Status:                r.Status,
 		NetPnl:                r.NetPnl,
+		GrossPnl:              r.GrossPnl,
+		TotalCharges:          r.TotalCharges,
 		TotalTrades:           r.TotalTrades,
 		WinCount:              r.WinCount,
 		LossCount:             r.LossCount,
@@ -71,7 +75,7 @@ func toBacktestEntity(r *models.BacktestRun) *entities.BacktestRun {
 		ErrorMessage:          r.ErrorMessage,
 		CreatedAt:             r.CreatedAt,
 		CompletedAt:           r.CompletedAt,
-		TradesJSON:            []byte(r.Trades),
+		TradesJSON:            nil, // encoded separately in UpdateResult via encodeTradesJSON
 		StrategySlug:          r.StrategySlug,
 		Capital:               r.Capital,
 		Lots:                  r.Lots,
@@ -95,7 +99,7 @@ func toBacktestEntity(r *models.BacktestRun) *entities.BacktestRun {
 func scanBacktestRun(row pgx.Row) (*entities.BacktestRun, error) {
 	var r entities.BacktestRun
 	var resultStatsBytes, chartDataBytes []byte
-	var netPnl, maxDrawdown *float64
+	var netPnl, maxDrawdown, grossPnl, totalCharges *float64
 	var totalTrades, winCount, lossCount *int
 	var errMsg *string
 	err := row.Scan(
@@ -105,6 +109,7 @@ func scanBacktestRun(row pgx.Row) (*entities.BacktestRun, error) {
 		&errMsg, &r.CreatedAt, &r.CompletedAt,
 		&r.StrategySlug, &r.Capital, &r.Lots, &r.Underlying,
 		&resultStatsBytes, &chartDataBytes,
+		&grossPnl, &totalCharges,
 	)
 	if err != nil {
 		return nil, err
@@ -117,6 +122,8 @@ func scanBacktestRun(row pgx.Row) (*entities.BacktestRun, error) {
 	r.ErrorMessage = errMsg
 	r.ResultStatsJSON = resultStatsBytes
 	r.ChartDataJSON = chartDataBytes
+	r.GrossPnl = grossPnl
+	r.TotalCharges = totalCharges
 	return &r, nil
 }
 
@@ -125,7 +132,7 @@ func scanBacktestRun(row pgx.Row) (*entities.BacktestRun, error) {
 func scanBacktestRunWithTrades(row pgx.Row) (*entities.BacktestRun, error) {
 	var r entities.BacktestRun
 	var tradesBytes []byte
-	var netPnl, maxDrawdown *float64
+	var netPnl, maxDrawdown, grossPnl, totalCharges *float64
 	var totalTrades, winCount, lossCount *int
 	var errMsg *string
 	err := row.Scan(
@@ -134,6 +141,7 @@ func scanBacktestRunWithTrades(row pgx.Row) (*entities.BacktestRun, error) {
 		&netPnl, &totalTrades, &winCount, &lossCount, &maxDrawdown,
 		&tradesBytes, &errMsg, &r.CreatedAt, &r.CompletedAt,
 		&r.StrategySlug, &r.Capital, &r.Lots, &r.Underlying,
+		&grossPnl, &totalCharges,
 	)
 	if err != nil {
 		return nil, err
@@ -145,13 +153,15 @@ func scanBacktestRunWithTrades(row pgx.Row) (*entities.BacktestRun, error) {
 	r.LossCount = lossCount
 	r.MaxDrawdown = maxDrawdown
 	r.ErrorMessage = errMsg
+	r.GrossPnl = grossPnl
+	r.TotalCharges = totalCharges
 	return &r, nil
 }
 
 // scanBacktestRunRow scans a row from list queries, which do not SELECT large JSON blobs.
 func scanBacktestRunRow(rows pgx.Rows) (*entities.BacktestRun, error) {
 	var r entities.BacktestRun
-	var netPnl, maxDrawdown *float64
+	var netPnl, maxDrawdown, grossPnl, totalCharges *float64
 	var totalTrades, winCount, lossCount *int
 	var errMsg *string
 	err := rows.Scan(
@@ -160,6 +170,7 @@ func scanBacktestRunRow(rows pgx.Rows) (*entities.BacktestRun, error) {
 		&netPnl, &totalTrades, &winCount, &lossCount, &maxDrawdown,
 		&errMsg, &r.CreatedAt, &r.CompletedAt,
 		&r.StrategySlug, &r.Capital, &r.Lots, &r.Underlying,
+		&grossPnl, &totalCharges,
 	)
 	if err != nil {
 		return nil, err
@@ -170,5 +181,7 @@ func scanBacktestRunRow(rows pgx.Rows) (*entities.BacktestRun, error) {
 	r.LossCount = lossCount
 	r.MaxDrawdown = maxDrawdown
 	r.ErrorMessage = errMsg
+	r.GrossPnl = grossPnl
+	r.TotalCharges = totalCharges
 	return &r, nil
 }

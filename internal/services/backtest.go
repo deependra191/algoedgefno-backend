@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -371,23 +370,20 @@ func (s *BacktestService) createAndStartRun(
 	return run, nil
 }
 
-// applyResult marshals trade data, computes derived stats and chart data,
-// stamps all metrics onto the run, and persists the final COMPLETED state.
+// applyResult stamps all engine metrics onto the run and persists the final COMPLETED state.
+// Trade JSON encoding is handled inside storage via the tradePersist DTO.
 func (s *BacktestService) applyResult(ctx context.Context, run *models.BacktestRun, result *models.BacktestResult, capital float64) error {
-	tradesJSON, err := json.Marshal(result.Trades)
-	if err != nil {
-		_, cause := s.failRun(ctx, run, fmt.Errorf("failed to marshal trade results: %w", err))
-		return cause
-	}
 	run.Status = models.BacktestCompleted
 	run.NetPnl = &result.NetPnL
+	run.GrossPnl = &result.GrossPnL
+	run.TotalCharges = &result.TotalCharges
 	run.TotalTrades = &result.TotalTrades
 	run.WinCount = &result.WinCount
 	run.LossCount = &result.LossCount
 	run.MaxDrawdown = &result.MaxDrawdown
-	run.Trades = tradesJSON
+	run.Trades = result.Trades
 	run.ResultStats = s.engine.ComputeTradeStats(result.Trades, run.FromTs, run.ToTs)
-	run.ChartData = s.engine.BuildChartData(result.Trades, capital)
+	run.ChartData = s.engine.BuildChartData(result.Trades, capital, run.FromTs, run.ToTs)
 	if err := s.backtestStore.UpdateResult(ctx, run); err != nil {
 		return fmt.Errorf("failed to save backtest results: %w", err)
 	}

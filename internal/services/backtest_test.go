@@ -47,9 +47,6 @@ func (m *mockBacktestRepo) UpdateResult(_ context.Context, run *models.BacktestR
 func (m *mockBacktestRepo) GetByID(_ context.Context, _ uuid.UUID) (*models.BacktestRun, error) {
 	return m.getByIDResult, m.getByIDErr
 }
-func (m *mockBacktestRepo) ListByStrategy(_ context.Context, _ uuid.UUID) ([]models.BacktestRun, error) {
-	return m.listResult, m.listErr
-}
 func (m *mockBacktestRepo) LatestCompletedBySlug(_ context.Context, _ string) (*models.BacktestRun, error) {
 	return nil, models.ErrNotFound
 }
@@ -147,7 +144,7 @@ func (m *mockEngine) RunBacktest(_ *models.Strategy, inputs models.EngineInputs,
 func (m *mockEngine) ComputeTradeStats(trades []models.Trade, from, to time.Time) *models.TradeStats {
 	return &models.TradeStats{}
 }
-func (m *mockEngine) BuildChartData(_ []models.Trade, _ float64) *models.ChartData {
+func (m *mockEngine) BuildChartData(_ []models.Trade, _ float64, _, _ time.Time) *models.ChartData {
 	return &models.ChartData{}
 }
 

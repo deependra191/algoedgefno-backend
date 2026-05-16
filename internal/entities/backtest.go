@@ -17,11 +17,14 @@ type BacktestRun struct {
 	CandleInterval        string
 	Status                string
 	NetPnl                *float64
+	GrossPnl              *float64
+	TotalCharges          *float64
 	TotalTrades           *int
 	WinCount              *int
 	LossCount             *int
 	MaxDrawdown           *float64
-	TradesJSON            []byte
+	// Populated only by scanBacktestRunWithTrades; consumed only by decodeTradesJSON. Mappers must not touch this field.
+	TradesJSON []byte
 	ErrorMessage          *string
 	CreatedAt             time.Time
 	CompletedAt           *time.Time
