@@ -221,9 +221,10 @@ curl -i https://staging-api.<domain>/version
 
 Or copy `scripts/smoke-staging.sh` to `/opt/algoedgefno/scripts/smoke-staging.sh`,
 make it executable, and run the scripted staging smoke check from the VPS after
-setting the immutable commit SHA. The script reads the staging token from
-`/opt/algoedgefno/env/staging.env` when `STAGING_TOKEN` is not already set, and
-it does not print the token.
+setting the immutable commit SHA and expected clean migration version. The script
+reads the staging token and database name from `/opt/algoedgefno/env/staging.env`
+when `STAGING_TOKEN` and `STAGING_DB_NAME` are not already set, and it does not
+print the token.
 
 ```bash
 cd /opt/algoedgefno/compose
