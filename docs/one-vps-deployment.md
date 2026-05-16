@@ -252,4 +252,4 @@ Expected results:
 
 ## Known follow-ups
 
-- CI image publishing and deploy automation are separate tasks after manual deployment is proven.
+- Deploy automation is a separate task after manual deployment is proven.
