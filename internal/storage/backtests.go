@@ -135,36 +135,14 @@ func (s *BacktestStore) GetByIDWithTrades(ctx context.Context, id uuid.UUID) (*m
 	return run, nil
 }
 
-func (s *BacktestStore) ListByStrategy(ctx context.Context, strategyID uuid.UUID) ([]models.BacktestRun, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, strategy_id, instrument_token, signal_instrument_token, from_ts, to_ts, candle_interval, status,
-		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
-		       error_message, created_at, completed_at,
-		       strategy_slug, capital, lots, underlying,
-		       gross_pnl, total_charges
-		FROM backtest_runs WHERE strategy_id = $1 ORDER BY created_at DESC`, strategyID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var result []models.BacktestRun
-	for rows.Next() {
-		ent, err := scanBacktestRunRow(rows)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, *toBacktestModel(ent))
-	}
-	return result, rows.Err()
-}
-
-// ListCompleted returns completed backtest runs ordered by completion time.
+// ListCompleted implements BacktestRepository. The total_trades > 0 predicate is
+// repeated in both the COUNT and the paginated SELECT — they must stay in sync,
+// otherwise the returned total and the page contents disagree and pagination breaks.
 func (s *BacktestStore) ListCompleted(ctx context.Context, page, limit int) ([]models.BacktestRun, int, error) {
 	var total int
 	if err := s.pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM backtest_runs
-		WHERE status = $1 AND completed_at IS NOT NULL`, models.BacktestCompleted).Scan(&total); err != nil {
+		WHERE status = $1 AND completed_at IS NOT NULL AND total_trades > 0`, models.BacktestCompleted).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
@@ -176,7 +154,7 @@ func (s *BacktestStore) ListCompleted(ctx context.Context, page, limit int) ([]m
 		       strategy_slug, capital, lots, underlying,
 		       gross_pnl, total_charges
 		FROM backtest_runs
-		WHERE status = $1 AND completed_at IS NOT NULL
+		WHERE status = $1 AND completed_at IS NOT NULL AND total_trades > 0
 		ORDER BY completed_at DESC, created_at DESC
 		LIMIT $2 OFFSET $3`, models.BacktestCompleted, limit, offset)
 	if err != nil {

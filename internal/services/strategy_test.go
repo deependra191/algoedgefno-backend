@@ -28,9 +28,6 @@ func (m *mockBacktestRepoForStrategy) UpdateResult(_ context.Context, _ *models.
 func (m *mockBacktestRepoForStrategy) GetByID(_ context.Context, _ uuid.UUID) (*models.BacktestRun, error) {
 	return nil, models.ErrNotFound
 }
-func (m *mockBacktestRepoForStrategy) ListByStrategy(_ context.Context, _ uuid.UUID) ([]models.BacktestRun, error) {
-	return nil, nil
-}
 func (m *mockBacktestRepoForStrategy) LatestCompletedBySlug(_ context.Context, slug string) (*models.BacktestRun, error) {
 	if run, ok := m.latestBySlug[slug]; ok {
 		return run, nil
