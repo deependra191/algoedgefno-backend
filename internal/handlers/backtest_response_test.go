@@ -70,7 +70,7 @@ func TestBacktestResultPayloadJSONShape(t *testing.T) {
 	assertKeysEqual(t, keys, want)
 }
 
-func TestBacktestChartResponseJSONShape(t *testing.T) {
+func TestBacktestChartResponseJSONShape_OmitsDrawdown(t *testing.T) {
 	resp := backtestChartResponse{
 		Equity: []chartPointResponse{},
 	}
