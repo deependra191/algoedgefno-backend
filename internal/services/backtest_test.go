@@ -144,7 +144,7 @@ func (m *mockEngine) RunBacktest(_ *models.Strategy, inputs models.EngineInputs,
 func (m *mockEngine) ComputeTradeStats(trades []models.Trade, from, to time.Time) *models.TradeStats {
 	return &models.TradeStats{}
 }
-func (m *mockEngine) BuildChartData(_ []models.Trade, _ float64) *models.ChartData {
+func (m *mockEngine) BuildChartData(_ []models.Trade, _ float64, _, _ time.Time) *models.ChartData {
 	return &models.ChartData{}
 }
 

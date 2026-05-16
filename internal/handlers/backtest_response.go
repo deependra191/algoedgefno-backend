@@ -76,8 +76,7 @@ type backtestResultPayload struct {
 }
 
 type backtestChartResponse struct {
-	Equity   []chartPointResponse `json:"equity"`
-	Drawdown []chartPointResponse `json:"drawdown"`
+	Equity []chartPointResponse `json:"equity"`
 }
 
 type chartPointResponse struct {
@@ -206,8 +205,7 @@ func toBacktestResultPayload(run *models.BacktestRun) *backtestResultPayload {
 		WinRate:        computeWinRate(run),
 		MaxDrawdownPct: round2(derefFloat(run.MaxDrawdown) * 100),
 		Chart: backtestChartResponse{
-			Equity:   []chartPointResponse{},
-			Drawdown: []chartPointResponse{},
+			Equity: []chartPointResponse{},
 		},
 	}
 
@@ -237,11 +235,7 @@ func toBacktestChartResponse(cd *models.ChartData) backtestChartResponse {
 	for i, pt := range cd.Equity {
 		equity[i] = chartPointResponse{Ts: pt.Ts.UTC().Format(time.RFC3339), Value: pt.Value}
 	}
-	drawdown := make([]chartPointResponse, len(cd.Drawdown))
-	for i, pt := range cd.Drawdown {
-		drawdown[i] = chartPointResponse{Ts: pt.Ts.UTC().Format(time.RFC3339), Value: pt.Value}
-	}
-	return backtestChartResponse{Equity: equity, Drawdown: drawdown}
+	return backtestChartResponse{Equity: equity}
 }
 
 func toBacktestTradesPageResponse(trades []models.Trade, page, limit int) (backtestTradesPageResponse, error) {
