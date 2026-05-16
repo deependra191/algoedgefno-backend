@@ -5,10 +5,11 @@ BASE_URL="${STAGING_BASE_URL:-https://staging-api.algoedgefno.com}"
 COMPOSE_DIR="${COMPOSE_DIR:-/opt/algoedgefno/compose}"
 CONTAINER_NAME="${CONTAINER_NAME:-algoedgefno-backend-staging}"
 EXPECTED_ENV="${EXPECTED_ENV:-staging}"
-EXPECTED_MIGRATION="${EXPECTED_MIGRATION:-12}"
+EXPECTED_MIGRATION="${EXPECTED_MIGRATION:-}"
 EXPECTED_IMAGE="${EXPECTED_IMAGE:-}"
 EXPECTED_COMMIT="${EXPECTED_COMMIT:-}"
 STAGING_ENV_FILE="${STAGING_ENV_FILE:-/opt/algoedgefno/env/staging.env}"
+STAGING_DB_NAME="${STAGING_DB_NAME:-}"
 LOG_SINCE="${LOG_SINCE:-10m}"
 
 tmpdir="$(mktemp -d)"
@@ -44,26 +45,43 @@ status_code() {
     pass "${name}: HTTP ${want}"
 }
 
-load_staging_token() {
-    if [[ -n "${STAGING_TOKEN:-}" ]]; then
+env_file_value() {
+    local key="$1"
+    local file="$2"
+    local line
+    line="$(grep -E "^${key}=" "${file}" | tail -1 || true)"
+    if [[ -z "${line}" ]]; then
+        return 1
+    fi
+
+    local value="${line#*=}"
+    value="${value%\"}"
+    value="${value#\"}"
+    value="${value%\'}"
+    value="${value#\'}"
+    printf '%s' "${value}"
+}
+
+load_staging_env() {
+    if [[ -n "${STAGING_TOKEN:-}" && -n "${STAGING_DB_NAME}" ]]; then
         return
     fi
     if [[ ! -r "${STAGING_ENV_FILE}" ]]; then
-        fail "STAGING_TOKEN unset and ${STAGING_ENV_FILE} is not readable"
+        fail "staging env values unset and ${STAGING_ENV_FILE} is not readable"
     fi
 
-    local token_line
-    token_line="$(grep -E '^APP_SECRET_TOKEN=' "${STAGING_ENV_FILE}" | tail -1 || true)"
-    if [[ -z "${token_line}" ]]; then
-        fail "APP_SECRET_TOKEN missing from ${STAGING_ENV_FILE}"
+    if [[ -z "${STAGING_TOKEN:-}" ]]; then
+        STAGING_TOKEN="$(env_file_value APP_SECRET_TOKEN "${STAGING_ENV_FILE}" || true)"
+        if [[ -z "${STAGING_TOKEN}" ]]; then
+            fail "APP_SECRET_TOKEN missing or empty in ${STAGING_ENV_FILE}"
+        fi
     fi
-    STAGING_TOKEN="${token_line#APP_SECRET_TOKEN=}"
-    STAGING_TOKEN="${STAGING_TOKEN%\"}"
-    STAGING_TOKEN="${STAGING_TOKEN#\"}"
-    STAGING_TOKEN="${STAGING_TOKEN%\'}"
-    STAGING_TOKEN="${STAGING_TOKEN#\'}"
-    if [[ -z "${STAGING_TOKEN}" ]]; then
-        fail "APP_SECRET_TOKEN in ${STAGING_ENV_FILE} is empty"
+
+    if [[ -z "${STAGING_DB_NAME}" ]]; then
+        STAGING_DB_NAME="$(env_file_value DB_NAME "${STAGING_ENV_FILE}" || true)"
+        if [[ -z "${STAGING_DB_NAME}" ]]; then
+            fail "DB_NAME missing or empty in ${STAGING_ENV_FILE}"
+        fi
     fi
 }
 
@@ -96,6 +114,9 @@ require_cmd python3
 if [[ -z "${EXPECTED_COMMIT}" ]]; then
     fail "EXPECTED_COMMIT must be set to the immutable commit SHA"
 fi
+if [[ -z "${EXPECTED_MIGRATION}" ]]; then
+    fail "EXPECTED_MIGRATION must be set to the expected clean migration version"
+fi
 if [[ -z "${EXPECTED_IMAGE}" ]]; then
     EXPECTED_IMAGE="ghcr.io/deependra191/algoedgefno-backend:${EXPECTED_COMMIT}"
 fi
@@ -126,7 +147,7 @@ pass "version: commit/environment/migration match"
 status_code protected-no-token 401 "${BASE_URL}/api/v1/config/app"
 status_code protected-bad-token 401 -H 'Authorization: Bearer bad-token' "${BASE_URL}/api/v1/config/app"
 
-load_staging_token
+load_staging_env
 status_code protected-valid-token 200 --config "$(auth_config)" "${BASE_URL}/api/v1/config/app"
 
 actual_image="$(docker inspect "${CONTAINER_NAME}" --format '{{.Config.Image}}')"
@@ -137,7 +158,8 @@ pass "container image: ${EXPECTED_IMAGE}"
 
 migration_state="$(
     cd "${COMPOSE_DIR}" && docker compose exec -T postgres sh -c \
-        'psql -U "$POSTGRES_USER" -d algoedgefno_staging -tA -F "|" -c "SELECT version, dirty FROM schema_migrations ORDER BY version DESC LIMIT 1;"'
+        'psql -U "$POSTGRES_USER" -d "$1" -tA -F "|" -c "SELECT version, dirty FROM schema_migrations ORDER BY version DESC LIMIT 1;"' \
+        sh "${STAGING_DB_NAME}"
 )"
 if [[ "${migration_state}" != "${EXPECTED_MIGRATION}|f" ]]; then
     fail "schema_migrations: got ${migration_state}, want ${EXPECTED_MIGRATION}|f"
