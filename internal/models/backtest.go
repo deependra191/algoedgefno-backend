@@ -2,7 +2,6 @@ package models
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -203,32 +202,3 @@ const (
 	BacktestCompleted = "COMPLETED"
 	BacktestFailed    = "FAILED"
 )
-
-// TODO(persist-dto): legacy shim — delete once all pre-B14 rows have been re-run or confirmed
-// unreachable, AND tradePersist.UnmarshalJSON in internal/storage has handled all production
-// reads for at least one tagged release. See scratch/trades-json-persist-dto.md.
-//
-// UnmarshalJSON decodes a Trade with backward compatibility for pre-B14 records.
-// Before B14, persisted trades_json used Go's default marshaling of the legacy
-// Trade.PnL field, producing objects with a "PnL" key. Post-B14 the field was
-// split into GrossPnL/NetPnL/TotalCharges and never marshals "PnL" again.
-//
-// When a legacy "PnL" key is present, we mirror it to both NetPnL and GrossPnL
-// and leave the charge breakdown at zero. Detection is unambiguous because
-// current code cannot emit "PnL" — so a non-nil legacy pointer always means a
-// pre-B14 record, regardless of whether the new fields happen to be zero.
-func (t *Trade) UnmarshalJSON(data []byte) error {
-	type tradeAlias Trade
-	aux := struct {
-		*tradeAlias
-		LegacyPnL *float64 `json:"PnL"`
-	}{tradeAlias: (*tradeAlias)(t)}
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-	if aux.LegacyPnL != nil {
-		t.NetPnL = *aux.LegacyPnL
-		t.GrossPnL = *aux.LegacyPnL
-	}
-	return nil
-}
