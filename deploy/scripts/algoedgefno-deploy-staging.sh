@@ -1,6 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
+PATH="/usr/sbin:/usr/bin:/sbin:/bin"
+
 if [[ $# -ne 2 ]]; then
     printf 'usage: %s <digest-qualified-image> <staging-base-url>\n' "$0" >&2
     exit 2
@@ -61,6 +63,8 @@ fi
 if [[ ! "${STAGING_BASE_URL}" =~ ^https://(staging-api\.[A-Za-z0-9.-]+|staging-[A-Za-z0-9.-]+|[A-Za-z0-9.-]+\.staging\.[A-Za-z0-9.-]+)(:[0-9]{1,5})?$ ]]; then
     fail "staging base URL must be an https staging host without a path"
 fi
+staging_host="${STAGING_BASE_URL#https://}"
+staging_host="${staging_host%%:*}"
 
 require_cmd awk
 require_cmd curl
@@ -70,6 +74,17 @@ require_cmd python3
 
 [[ -f "${ENV_FILE}" ]] || fail "${ENV_FILE} is missing"
 grep -q '^BACKEND_PROD_IMAGE=' "${ENV_FILE}" || fail "BACKEND_PROD_IMAGE must already be set; production image was not modified"
+configured_staging_host="$(grep '^STAGING_API_HOST=' "${ENV_FILE}" | tail -1 | cut -d= -f2-)"
+configured_staging_host="${configured_staging_host%\"}"
+configured_staging_host="${configured_staging_host#\"}"
+configured_staging_host="${configured_staging_host%\'}"
+configured_staging_host="${configured_staging_host#\'}"
+if [[ -z "${configured_staging_host}" ]]; then
+    fail "STAGING_API_HOST must be set in ${ENV_FILE}"
+fi
+if [[ "${staging_host}" != "${configured_staging_host}" ]]; then
+    fail "staging URL host ${staging_host} does not match configured STAGING_API_HOST ${configured_staging_host}"
+fi
 
 tmp_env="$(mktemp)"
 version_body="$(mktemp)"
