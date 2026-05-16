@@ -41,7 +41,7 @@ services:
       - db
 
   backend-prod:
-    image: ${BACKEND_IMAGE}
+    image: ${BACKEND_PROD_IMAGE}
     container_name: algoedgefno-backend-prod
     restart: unless-stopped
     mem_limit: 768m
@@ -56,7 +56,7 @@ services:
       - db
 
   backend-staging:
-    image: ${BACKEND_IMAGE}
+    image: ${BACKEND_STAGING_IMAGE}
     container_name: algoedgefno-backend-staging
     profiles:
       - staging
@@ -73,7 +73,7 @@ services:
       - db
 
   migrate-prod:
-    image: ${BACKEND_IMAGE}
+    image: ${BACKEND_PROD_IMAGE}
     container_name: algoedgefno-migrate-prod
     profiles:
       - migrate-prod
@@ -92,7 +92,7 @@ services:
       - db
 
   migrate-staging:
-    image: ${BACKEND_IMAGE}
+    image: ${BACKEND_STAGING_IMAGE}
     container_name: algoedgefno-migrate-staging
     profiles:
       - migrate-staging
@@ -111,7 +111,7 @@ services:
       - db
 
   sync-prod:
-    image: ${BACKEND_IMAGE}
+    image: ${BACKEND_PROD_IMAGE}
     container_name: algoedgefno-sync-prod
     profiles:
       - sync-prod
@@ -129,7 +129,7 @@ services:
       - egress
 
   sync-staging:
-    image: ${BACKEND_IMAGE}
+    image: ${BACKEND_STAGING_IMAGE}
     container_name: algoedgefno-sync-staging
     profiles:
       - sync-staging
