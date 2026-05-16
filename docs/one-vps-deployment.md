@@ -58,6 +58,7 @@ Copy these repo files to the server:
 
 - `deploy/docker-compose.yml` -> `/opt/algoedgefno/compose/docker-compose.yml`
 - `deploy/Caddyfile` -> `/opt/algoedgefno/caddy/Caddyfile`
+- `deploy/scripts/algoedgefno-deploy-staging.sh` -> `/usr/local/sbin/algoedgefno-deploy-staging`
 - `deploy/deploy.env.example` -> `/opt/algoedgefno/compose/.env`, then edit values.
 - `deploy/env/prod.env.example` -> `/opt/algoedgefno/env/prod.env`, then replace placeholders.
 - `deploy/env/staging.env.example` -> `/opt/algoedgefno/env/staging.env`, then replace placeholders.
@@ -68,6 +69,8 @@ Lock down env files:
 ```bash
 sudo chown root:root /opt/algoedgefno/env/*.env /opt/algoedgefno/compose/.env
 sudo chmod 600 /opt/algoedgefno/env/*.env /opt/algoedgefno/compose/.env
+sudo chown root:root /usr/local/sbin/algoedgefno-deploy-staging
+sudo chmod 755 /usr/local/sbin/algoedgefno-deploy-staging
 ```
 
 ## Image references
@@ -282,7 +285,13 @@ from the repository.
 Do not configure `APP_SECRET_TOKEN`, database passwords, JWT secrets, GHCR tokens,
 or VPS passwords in this workflow.
 
-Configure a GitHub environment named `staging` with these secrets:
+Configure a GitHub environment named `staging` with required reviewer approval.
+This approval is the v1 provenance gate: reviewers must only approve digests
+copied from the `Publish backend image` workflow summary for this repository.
+Do not approve arbitrary GHCR digests, even when they match the repository
+prefix.
+
+Configure the `staging` environment with these secrets:
 
 - `VPS_HOST` — VPS hostname or IP address.
 - `VPS_DEPLOY_USER` — deploy-only SSH username.
@@ -295,12 +304,17 @@ Configure these GitHub environment variables:
 - `VPS_SSH_PORT` — optional SSH port; defaults to `22`.
 
 The deploy-only VPS user must be key-only, must not use passwords, and must have
-the minimum server permissions needed to:
+exactly one passwordless sudo capability:
 
-- Run `sudo -n docker compose ...` in `/opt/algoedgefno/compose`.
-- Run `sudo -n docker inspect algoedgefno-backend-staging`.
-- Read and rewrite `/opt/algoedgefno/compose/.env` only for the
-  `BACKEND_STAGING_IMAGE` update.
+```sudoers
+algoedgefno-deploy ALL=(root) NOPASSWD: /usr/local/sbin/algoedgefno-deploy-staging *
+```
+
+Do not grant the deploy user direct `docker`, `docker compose`, shell, editor,
+or arbitrary file-copy sudo permissions. The root-owned wrapper validates the
+digest and staging URL, updates only `BACKEND_STAGING_IMAGE`, pulls and restarts
+only `backend-staging`, asserts `/version` reports `environment=staging`, checks
+the no-token protected endpoint, and confirms the running staging container image.
 
 Keep `/opt/algoedgefno/compose/.env` non-secret. It must define both
 `BACKEND_PROD_IMAGE` and `BACKEND_STAGING_IMAGE`. The workflow fails if
@@ -312,9 +326,11 @@ Manual operator flow:
 1. Copy the digest-qualified image from the `Publish backend image` workflow
    summary, for example
    `ghcr.io/deependra191/algoedgefno-backend@sha256:<digest>`.
-2. Run the `Deploy staging` workflow with that image.
+2. Run the `Deploy staging` workflow with that image and approve the `staging`
+   environment only after confirming the digest came from that publish summary.
 3. Verify the workflow smoke checks for `/health`, `/ready`, `/version`, and the
-   no-token protected endpoint.
+   no-token protected endpoint. The wrapper also fails if `/version` does not
+   report `environment=staging`.
 4. Later, promote the exact same digest to production through a separate future
    workflow or a manual production step. Do not rebuild or republish the backend
    image between staging verification and production promotion.

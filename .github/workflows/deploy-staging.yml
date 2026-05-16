@@ -16,7 +16,6 @@ concurrency:
 
 env:
   IMAGE_PREFIX: "ghcr.io/deependra191/algoedgefno-backend@sha256:"
-  COMPOSE_DIR: /opt/algoedgefno/compose
 
 jobs:
   deploy-staging:
@@ -54,19 +53,27 @@ jobs:
             echo "VPS_HOST, VPS_DEPLOY_USER, VPS_SSH_PRIVATE_KEY, and VPS_KNOWN_HOSTS must be configured" >&2
             exit 1
           fi
+          if [[ ! "${VPS_DEPLOY_USER}" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]]; then
+            echo "VPS_DEPLOY_USER has an invalid format" >&2
+            exit 1
+          fi
+          if [[ ! "${VPS_HOST}" =~ ^[A-Za-z0-9.-]+$ ]]; then
+            echo "VPS_HOST must be a hostname or IP address without shell metacharacters" >&2
+            exit 1
+          fi
+          if [[ ! "${VPS_SSH_PORT}" =~ ^[0-9]{1,5}$ ]]; then
+            echo "VPS_SSH_PORT must be numeric" >&2
+            exit 1
+          fi
 
           if [[ -z "${STAGING_BASE_URL}" ]]; then
             echo "STAGING_BASE_URL must be configured" >&2
             exit 1
           fi
-
-          case "${STAGING_BASE_URL}" in
-            https://*) ;;
-            *)
-              echo "STAGING_BASE_URL must start with https://" >&2
-              exit 1
-              ;;
-          esac
+          if [[ ! "${STAGING_BASE_URL}" =~ ^https://(staging-api\.[A-Za-z0-9.-]+|staging-[A-Za-z0-9.-]+|[A-Za-z0-9.-]+\.staging\.[A-Za-z0-9.-]+)(:[0-9]{1,5})?$ ]]; then
+            echo "STAGING_BASE_URL must be an https staging host without a path" >&2
+            exit 1
+          fi
 
       - name: Configure SSH
         run: |
@@ -88,95 +95,7 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="${HOME}/.ssh/known_hosts" \
             "${VPS_DEPLOY_USER}@${VPS_HOST}" \
-            'bash -s' -- "${DEPLOY_IMAGE}" "${STAGING_BASE_URL}" "${COMPOSE_DIR}" <<'REMOTE'
-          set -euo pipefail
-
-          deploy_image="$1"
-          staging_base_url="${2%/}"
-          compose_dir="$3"
-          env_file="${compose_dir}/.env"
-          image_prefix="ghcr.io/deependra191/algoedgefno-backend@sha256:"
-          staging_container="algoedgefno-backend-staging"
-
-          fail() {
-              printf 'FAIL %s\n' "$1" >&2
-              exit 1
-          }
-
-          pass() {
-              printf 'PASS %s\n' "$1"
-          }
-
-          status_code() {
-              local name="$1"
-              local want="$2"
-              local url="$3"
-              local code
-
-              code="$(curl -sS -o /dev/null -w '%{http_code}' "${url}" || true)"
-              if [[ "${code}" != "${want}" ]]; then
-                  fail "${name}: got HTTP ${code}, want ${want}"
-              fi
-              pass "${name}: HTTP ${want}"
-          }
-
-          case "${deploy_image}" in
-              "${image_prefix}"*) ;;
-              *) fail "image must start with ${image_prefix}" ;;
-          esac
-          if [[ ! "${deploy_image}" =~ ^ghcr\.io/deependra191/algoedgefno-backend@sha256:[0-9a-f]{64}$ ]]; then
-              fail "image must be a digest-qualified GHCR reference with a 64-character sha256 digest"
-          fi
-
-          case "${staging_base_url}" in
-              https://*) ;;
-              *) fail "staging base URL must start with https://" ;;
-          esac
-
-          command -v curl >/dev/null 2>&1 || fail "missing curl on VPS"
-          command -v docker >/dev/null 2>&1 || fail "missing docker on VPS"
-          sudo -n test -f "${env_file}" || fail "${env_file} is missing or not readable"
-          sudo -n grep -q '^BACKEND_PROD_IMAGE=' "${env_file}" || fail "BACKEND_PROD_IMAGE must already be set; production image was not modified"
-
-          tmp_env="$(mktemp)"
-          cleanup() {
-              rm -f "${tmp_env}"
-          }
-          trap cleanup EXIT
-
-          sudo -n awk -v image="${deploy_image}" '
-              BEGIN { updated = 0 }
-              /^BACKEND_STAGING_IMAGE=/ {
-                  print "BACKEND_STAGING_IMAGE=" image
-                  updated = 1
-                  next
-              }
-              { print }
-              END {
-                  if (updated == 0) {
-                      print "BACKEND_STAGING_IMAGE=" image
-                  }
-              }
-          ' "${env_file}" > "${tmp_env}"
-          sudo -n install -o root -g root -m 600 "${tmp_env}" "${env_file}"
-
-          cd "${compose_dir}"
-          sudo -n docker compose pull backend-staging
-          sudo -n docker compose --profile staging up -d backend-staging
-
-          status_code health 200 "${staging_base_url}/health"
-          status_code ready 200 "${staging_base_url}/ready"
-          status_code version 200 "${staging_base_url}/version"
-          status_code protected-no-token 401 "${staging_base_url}/api/v1/config/app"
-
-          actual_image="$(sudo -n docker inspect "${staging_container}" --format '{{.Config.Image}}')"
-          if [[ "${actual_image}" != "${deploy_image}" ]]; then
-              fail "container image: got ${actual_image}, want ${deploy_image}"
-          fi
-          pass "container image: ${deploy_image}"
-
-          printf 'staging deploy passed for %s\n' "${deploy_image}"
-          REMOTE
+            sudo -n /usr/local/sbin/algoedgefno-deploy-staging "${DEPLOY_IMAGE}" "${STAGING_BASE_URL}"
 
       - name: Summarize staging deployment
         run: |
