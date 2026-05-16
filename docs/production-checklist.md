@@ -42,7 +42,7 @@ Run this twice — once for `APP_SECRET_TOKEN`, once for `JWT_SECRET`. Never reu
 - [ ] `AUTO_MIGRATE=false`
 - [ ] Browser CORS is disabled for Android-only production; add explicit CORS later only if a browser/admin client exists
 - [ ] `TRUSTED_PROXIES` is set to the private proxy range used by Caddy or left empty when no reverse proxy headers should be trusted
-- [ ] `BACKEND_IMAGE` is an immutable commit SHA tag or digest, not `latest`
+- [ ] `BACKEND_IMAGE` is the digest-qualified GHCR image reference from the publishing workflow summary, not `latest`
 
 ---
 
@@ -72,7 +72,7 @@ Run this twice — once for `APP_SECRET_TOKEN`, once for `JWT_SECRET`. Never reu
 
 ## 6. CI/CD — GitHub Actions (CRITICAL — must be in place before go-live)
 
-**Status: TODO — no workflows exist yet.**
+**Status: TODO — image publishing exists, but PR gate checks still need to be added.**
 
 The following gate checks must run automatically on every PR before merge. Running them manually is not sufficient for a production codebase.
 

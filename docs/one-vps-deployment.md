@@ -70,9 +70,19 @@ sudo chown root:root /opt/algoedgefno/env/*.env /opt/algoedgefno/compose/.env
 sudo chmod 600 /opt/algoedgefno/env/*.env /opt/algoedgefno/compose/.env
 ```
 
-## Image tags
+## Image references
 
-Use immutable image tags, preferably the exact Git commit SHA:
+Use the digest-qualified image reference from the `Publish backend image` workflow
+summary as the deployment source of truth:
+
+```bash
+BACKEND_IMAGE=ghcr.io/deependra191/algoedgefno-backend@sha256:<image-digest>
+```
+
+The workflow also publishes a commit-SHA tag for lookup/audit purposes. Do not
+use mutable `latest` tags for production deploys.
+
+For manual fallback builds, tag with the exact Git commit SHA:
 
 ```bash
 docker build \
@@ -85,7 +95,7 @@ docker build \
 
 The CPX22 server is `x86_64`, so images deployed to it must include `linux/amd64`. If building on an ARM laptop, publish a multi-arch image or build explicitly for `linux/amd64` with Docker Buildx.
 
-The normal production path should pull the reviewed image from a registry. Do not use mutable `latest` tags for production deploys.
+The normal production path should pull the reviewed image from a registry.
 
 ## First database setup
 
@@ -219,6 +229,18 @@ curl -i https://staging-api.<domain>/ready
 curl -i https://staging-api.<domain>/version
 ```
 
+Or copy `scripts/smoke-deploy.sh`, `scripts/smoke-staging.sh`, and
+`scripts/smoke-prod.sh` to `/opt/algoedgefno/scripts/`, make them executable, and
+run the scripted deploy smoke check from the VPS. The wrappers set the target
+environment, host, container, and env-file defaults; the shared deploy script reads
+the app token and database name from the environment file when `APP_TOKEN` and
+`DB_NAME` are not already set, and it does not print the token.
+
+```bash
+cd /opt/algoedgefno/compose
+/opt/algoedgefno/scripts/smoke-staging.sh "<commit-sha>" 12
+```
+
 Verify protected endpoints:
 
 ```bash
@@ -240,4 +262,4 @@ Expected results:
 
 ## Known follow-ups
 
-- CI image publishing and deploy automation are separate tasks after manual deployment is proven.
+- Deploy automation is a separate task after manual deployment is proven.
