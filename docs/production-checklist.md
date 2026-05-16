@@ -89,7 +89,19 @@ The following gate checks must run automatically on every PR before merge. Runni
 
 ---
 
-## 7. Before every deploy (ongoing)
+## 7. Scheduled sync (cron)
+
+- [ ] Staging sync cron is installed and has fired cleanly for ≥5 consecutive weekdays
+- [ ] Staging failure-alert cron is installed and has fired correctly at least once in a controlled test
+- [ ] Logrotate config is in place and has produced at least one rotated `.1` file
+- [ ] Phase 6 gating criteria in `docs/scheduled-sync-setup.md` are all satisfied before enabling the production sync cron
+- [ ] Production sync cron uses a separate lock file (`/opt/algoedgefno/locks/sync-prod.lock`) and a ≥30-minute gap from the staging window
+
+Full phased plan, operating rules, and debugging steps: **`docs/scheduled-sync-setup.md`**.
+
+---
+
+## 8. Before every deploy (ongoing)
 
 - [ ] Run `go build ./...` — confirm no compile errors
 - [ ] Run `go vet ./...` — confirm no vet warnings
