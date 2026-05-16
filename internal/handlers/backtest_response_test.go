@@ -35,8 +35,7 @@ func TestBacktestStatusResponseJSONShape_Completed(t *testing.T) {
 		Status: "COMPLETED",
 		Result: &backtestResultPayload{
 			Chart: backtestChartResponse{
-				Equity:   []chartPointResponse{},
-				Drawdown: []chartPointResponse{},
+				Equity: []chartPointResponse{},
 			},
 		},
 	}
@@ -56,8 +55,7 @@ func TestBacktestStatusResponseJSONShape_Failed(t *testing.T) {
 func TestBacktestResultPayloadJSONShape(t *testing.T) {
 	resp := backtestResultPayload{
 		Chart: backtestChartResponse{
-			Equity:   []chartPointResponse{},
-			Drawdown: []chartPointResponse{},
+			Equity: []chartPointResponse{},
 		},
 	}
 	keys := jsonKeys(t, resp)
@@ -69,6 +67,15 @@ func TestBacktestResultPayloadJSONShape(t *testing.T) {
 		"rewardRisk", "strategy", "to",
 		"totalCharges", "tradeCount", "tradesPerWeek", "underlying", "winRate", "worstTrade",
 	}
+	assertKeysEqual(t, keys, want)
+}
+
+func TestBacktestChartResponseJSONShape(t *testing.T) {
+	resp := backtestChartResponse{
+		Equity: []chartPointResponse{},
+	}
+	keys := jsonKeys(t, resp)
+	want := []string{"equity"}
 	assertKeysEqual(t, keys, want)
 }
 
