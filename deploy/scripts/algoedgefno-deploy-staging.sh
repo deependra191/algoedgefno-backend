@@ -93,6 +93,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
+docker pull "${DEPLOY_IMAGE}"
+
 awk -v image="${DEPLOY_IMAGE}" '
     BEGIN { updated = 0 }
     /^BACKEND_STAGING_IMAGE=/ {
@@ -110,7 +112,6 @@ awk -v image="${DEPLOY_IMAGE}" '
 install -o root -g root -m 600 "${tmp_env}" "${ENV_FILE}"
 
 cd "${COMPOSE_DIR}"
-docker compose pull backend-staging
 docker compose --profile staging up -d backend-staging
 
 status_code health 200 "${STAGING_BASE_URL}/health"

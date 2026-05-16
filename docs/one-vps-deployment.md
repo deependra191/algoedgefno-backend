@@ -312,11 +312,11 @@ algoedgefno-deploy ALL=(root) NOPASSWD: /usr/local/sbin/algoedgefno-deploy-stagi
 
 Do not grant the deploy user direct `docker`, `docker compose`, shell, editor,
 or arbitrary file-copy sudo permissions. The root-owned wrapper validates the
-digest and staging URL, updates only `BACKEND_STAGING_IMAGE`, pulls and restarts
-only `backend-staging`, confirms the staging URL host matches `STAGING_API_HOST`
-from `/opt/algoedgefno/compose/.env`, asserts `/version` reports
-`environment=staging`, checks the no-token protected endpoint, and confirms the
-running staging container image.
+digest and staging URL, pulls the exact digest before changing config, updates
+only `BACKEND_STAGING_IMAGE`, restarts only `backend-staging`, confirms the
+staging URL host matches `STAGING_API_HOST` from `/opt/algoedgefno/compose/.env`,
+asserts `/version` reports `environment=staging`, checks the no-token protected
+endpoint, and confirms the running staging container image.
 
 Keep `/opt/algoedgefno/compose/.env` non-secret. It must define both
 `BACKEND_PROD_IMAGE` and `BACKEND_STAGING_IMAGE`. The workflow fails if
