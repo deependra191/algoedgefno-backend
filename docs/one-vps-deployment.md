@@ -219,6 +219,19 @@ curl -i https://staging-api.<domain>/ready
 curl -i https://staging-api.<domain>/version
 ```
 
+Or copy `scripts/smoke-staging.sh` to `/opt/algoedgefno/scripts/smoke-staging.sh`,
+make it executable, and run the scripted staging smoke check from the VPS after
+setting the immutable commit SHA. The script reads the staging token from
+`/opt/algoedgefno/env/staging.env` when `STAGING_TOKEN` is not already set, and
+it does not print the token.
+
+```bash
+cd /opt/algoedgefno/compose
+EXPECTED_COMMIT="<commit-sha>" \
+EXPECTED_MIGRATION=12 \
+/opt/algoedgefno/scripts/smoke-staging.sh
+```
+
 Verify protected endpoints:
 
 ```bash
