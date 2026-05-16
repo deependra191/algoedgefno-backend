@@ -74,7 +74,7 @@ sudo chown -R $(whoami):$(whoami) /opt/algoedgefno/locks /opt/algoedgefno/logs
 File: `/etc/logrotate.d/algoedgefno-sync`
 
 ```text
-/opt/algoedgefno/logs/sync-*-cron.log {
+/opt/algoedgefno/logs/*-cron.log {
     daily
     rotate 30
     compress
@@ -84,6 +84,8 @@ File: `/etc/logrotate.d/algoedgefno-sync`
     copytruncate
 }
 ```
+
+> The glob is `*-cron.log` (not `sync-*-cron.log`) so it also covers `notify-staging-cron.log` and any future `notify-prod-cron.log` without further edits.
 
 Validate: `sudo logrotate -d /etc/logrotate.d/algoedgefno-sync` (dry run, no errors).
 
