@@ -219,6 +219,23 @@ curl -i https://staging-api.<domain>/ready
 curl -i https://staging-api.<domain>/version
 ```
 
+Or copy `scripts/smoke-deploy.sh` to `/opt/algoedgefno/scripts/smoke-deploy.sh`,
+make it executable, and run the scripted deploy smoke check from the VPS after
+setting the target environment, immutable commit SHA, and expected clean migration
+version. The script reads the app token and database name from the environment file
+when `APP_TOKEN` and `DB_NAME` are not already set, and it does not print the token.
+
+```bash
+cd /opt/algoedgefno/compose
+SMOKE_BASE_URL="https://staging-api.<domain>" \
+EXPECTED_ENV=staging \
+EXPECTED_COMMIT="<commit-sha>" \
+EXPECTED_MIGRATION=12 \
+CONTAINER_NAME=algoedgefno-backend-staging \
+APP_ENV_FILE=/opt/algoedgefno/env/staging.env \
+/opt/algoedgefno/scripts/smoke-deploy.sh
+```
+
 Verify protected endpoints:
 
 ```bash
