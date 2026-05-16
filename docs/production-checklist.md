@@ -42,7 +42,8 @@ Run this twice — once for `APP_SECRET_TOKEN`, once for `JWT_SECRET`. Never reu
 - [ ] `AUTO_MIGRATE=false`
 - [ ] Browser CORS is disabled for Android-only production; add explicit CORS later only if a browser/admin client exists
 - [ ] `TRUSTED_PROXIES` is set to the private proxy range used by Caddy or left empty when no reverse proxy headers should be trusted
-- [ ] `BACKEND_IMAGE` is the digest-qualified GHCR image reference from the publishing workflow summary, not `latest`
+- [ ] `BACKEND_PROD_IMAGE` is the digest-qualified GHCR image reference that already passed staging, not `latest`
+- [ ] `BACKEND_STAGING_IMAGE` is separate from `BACKEND_PROD_IMAGE` so staging candidate deploys cannot implicitly change production
 
 ---
 
@@ -106,5 +107,6 @@ Full phased plan, operating rules, and debugging steps: **`docs/scheduled-sync-s
 - [ ] Run `go build ./...` — confirm no compile errors
 - [ ] Run `go vet ./...` — confirm no vet warnings
 - [ ] Confirm no real env file is being copied into Git or image builds
+- [ ] Confirm the production digest being promoted exactly matches the digest that passed staging smoke checks
 - [ ] If schema changed — migration files are present and tested locally first
 - [ ] If schema changed — fresh production backup exists before production migration

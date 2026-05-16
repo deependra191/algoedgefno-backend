@@ -1,10 +1,10 @@
 # One-VPS deployment runbook
 
-This runbook is for the temporary private-staging and early-production setup on one Hetzner CPX22-class VPS. It is intentionally manual. Do not paste real secrets into Git, issue comments, screenshots, or chat.
+This runbook is for the temporary private-staging and early-production setup on one Hetzner CPX22-class VPS. Production remains intentionally manual; staging image deployment can be automated through the manual GitHub Actions workflow documented below. Do not paste real secrets into Git, issue comments, screenshots, or chat.
 
 ## Scope
 
-- Server-side steps are executed manually by the operator.
+- Production server-side steps are executed manually by the operator.
 - The repo provides templates only: Docker image, Compose, Caddy, and sanitized env examples.
 - PostgreSQL remains private on the DB-only internal Docker network; Caddy is attached only to the proxy network and publishes ports `80` and `443`.
 - Sync jobs attach to the DB network plus a separate egress network so they can reach NSE without putting PostgreSQL on the proxy network.
@@ -72,15 +72,22 @@ sudo chmod 600 /opt/algoedgefno/env/*.env /opt/algoedgefno/compose/.env
 
 ## Image references
 
-Use the digest-qualified image reference from the `Publish backend image` workflow
-summary as the deployment source of truth:
+Use digest-qualified image references from the `Publish backend image` workflow
+summary as deployment sources of truth:
 
 ```bash
-BACKEND_IMAGE=ghcr.io/deependra191/algoedgefno-backend@sha256:<image-digest>
+BACKEND_PROD_IMAGE=ghcr.io/deependra191/algoedgefno-backend@sha256:<production-image-digest>
+BACKEND_STAGING_IMAGE=ghcr.io/deependra191/algoedgefno-backend@sha256:<staging-image-digest>
 ```
 
 The workflow also publishes a commit-SHA tag for lookup/audit purposes. Do not
 use mutable `latest` tags for production deploys.
+
+Staging should receive a candidate digest first. After staging smoke checks pass,
+production should later be promoted to the exact same digest through a separate
+manual or future production workflow step. Do not rebuild or republish between
+staging verification and production promotion; that would create a different
+artifact.
 
 For manual fallback builds, tag with the exact Git commit SHA:
 
@@ -238,7 +245,8 @@ the app token and database name from the environment file when `APP_TOKEN` and
 
 ```bash
 cd /opt/algoedgefno/compose
-/opt/algoedgefno/scripts/smoke-staging.sh "<commit-sha>" 12
+EXPECTED_IMAGE="ghcr.io/deependra191/algoedgefno-backend@sha256:<image-digest>" \
+  /opt/algoedgefno/scripts/smoke-staging.sh "<commit-sha>" 12
 ```
 
 Verify protected endpoints:
@@ -262,4 +270,51 @@ Expected results:
 
 ## Known follow-ups
 
-- Deploy automation is a separate task after manual deployment is proven.
+- Production deploy automation is a separate task after staging automation is proven.
+
+## Staging deploy automation
+
+The `Deploy staging` GitHub Actions workflow is manual-only and deploys staging
+only. It does not run migrations, does not restart production services, and does
+not read app, database, JWT, or bearer-token secret files from the VPS.
+It does not use `rsync` or `scp`, and it does not overwrite server env files
+from the repository.
+Do not configure `APP_SECRET_TOKEN`, database passwords, JWT secrets, GHCR tokens,
+or VPS passwords in this workflow.
+
+Configure a GitHub environment named `staging` with these secrets:
+
+- `VPS_HOST` — VPS hostname or IP address.
+- `VPS_DEPLOY_USER` — deploy-only SSH username.
+- `VPS_SSH_PRIVATE_KEY` — private key for the deploy-only user.
+- `VPS_KNOWN_HOSTS` — pinned `known_hosts` line for the VPS host key.
+
+Configure these GitHub environment variables:
+
+- `STAGING_BASE_URL` — staging API base URL, for example `https://staging-api.<domain>`.
+- `VPS_SSH_PORT` — optional SSH port; defaults to `22`.
+
+The deploy-only VPS user must be key-only, must not use passwords, and must have
+the minimum server permissions needed to:
+
+- Run `sudo -n docker compose ...` in `/opt/algoedgefno/compose`.
+- Run `sudo -n docker inspect algoedgefno-backend-staging`.
+- Read and rewrite `/opt/algoedgefno/compose/.env` only for the
+  `BACKEND_STAGING_IMAGE` update.
+
+Keep `/opt/algoedgefno/compose/.env` non-secret. It must define both
+`BACKEND_PROD_IMAGE` and `BACKEND_STAGING_IMAGE`. The workflow fails if
+`BACKEND_PROD_IMAGE` is missing, and it never modifies the production image
+reference.
+
+Manual operator flow:
+
+1. Copy the digest-qualified image from the `Publish backend image` workflow
+   summary, for example
+   `ghcr.io/deependra191/algoedgefno-backend@sha256:<digest>`.
+2. Run the `Deploy staging` workflow with that image.
+3. Verify the workflow smoke checks for `/health`, `/ready`, `/version`, and the
+   no-token protected endpoint.
+4. Later, promote the exact same digest to production through a separate future
+   workflow or a manual production step. Do not rebuild or republish the backend
+   image between staging verification and production promotion.
