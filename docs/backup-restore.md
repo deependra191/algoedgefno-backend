@@ -51,7 +51,7 @@ Create a compressed custom-format dump inside the Postgres container:
 ```bash
 BACKUP_TS="$(date -u +%Y%m%dT%H%M%SZ)"
 MIGRATION_VERSION="$(docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_prod -tAc "SELECT version FROM schema_migrations WHERE dirty = false ORDER BY version DESC LIMIT 1;"' | tr -d "[:space:]")"
-BACKEND_IMAGE_TAG="$(grep '^BACKEND_IMAGE=' .env | cut -d= -f2-)"
+BACKEND_PROD_IMAGE="$(grep '^BACKEND_PROD_IMAGE=' .env | cut -d= -f2-)"
 BACKUP_NAME="prod-algoedgefno_prod-v${MIGRATION_VERSION}-${BACKUP_TS}.dump"
 
 docker compose exec postgres sh -c "pg_dump -U \"\$POSTGRES_USER\" -d algoedgefno_prod --format=custom --file=/tmp/${BACKUP_NAME}"
@@ -67,7 +67,7 @@ environment=production
 database=algoedgefno_prod
 created_at_utc=${BACKUP_TS}
 migration_version=${MIGRATION_VERSION}
-backend_image=${BACKEND_IMAGE_TAG:-unknown}
+backend_image=${BACKEND_PROD_IMAGE:-unknown}
 EOF
 sudo chmod 600 "/opt/algoedgefno/backups/${BACKUP_NAME}.meta"
 ```
