@@ -21,6 +21,7 @@ jobs:
   deploy-staging:
     name: Deploy image to staging VPS
     runs-on: [self-hosted, algoedgefno-staging]
+    if: github.ref == 'refs/heads/dev'
     environment: staging
     timeout-minutes: 15
     env:

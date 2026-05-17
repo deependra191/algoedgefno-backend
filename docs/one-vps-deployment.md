@@ -290,13 +290,20 @@ Configure a GitHub environment named `staging` with required reviewer approval.
 This approval is the v1 provenance gate: reviewers must only approve digests
 copied from the `Publish backend image` workflow summary for this repository.
 Do not approve arbitrary GHCR digests, even when they match the repository
-prefix.
+prefix. Restrict the `staging` environment deployment branches to the protected
+`dev` branch only. The workflow also has a `dev` branch guard as defense in
+depth, but the GitHub environment branch restriction is the control that keeps
+modified workflow files from other refs off the VPS runner.
 
 Register a self-hosted GitHub Actions runner on the VPS for this repository and
 give it the custom label `algoedgefno-staging`. The runner may be started only
-during manual deployments or left running as a service, but it must run as a
-limited Unix user such as `github-runner`, not as `root`. Do not add the runner
-user to the `docker`, `sudo`, or application env-file owner groups.
+during manual deployments or left running as a service. Prefer starting it only
+for deployment windows until the process is proven. If it is left running, treat
+the runner as a VPS entry point for any workflow that can target its labels:
+keep the label unique to this deploy workflow, audit that no other workflow uses
+it, and keep the runner user's home free of readable secrets. The runner must
+run as a limited Unix user such as `github-runner`, not as `root`. Do not add
+the runner user to the `docker`, `sudo`, or application env-file owner groups.
 
 Configure the `staging` GitHub environment with this variable:
 
@@ -318,6 +325,12 @@ restarts only `backend-staging`, confirms the staging URL host matches
 reports `environment=staging`, checks the no-token protected endpoint, and
 confirms the running staging container image.
 
+The wrapper runs `docker pull` as root through the narrow sudo rule. For private
+GHCR packages, the VPS must already have root-owned Docker credentials that can
+read `ghcr.io/deependra191/algoedgefno-backend`. Use a package-read-only token
+for that Docker login. Do not put GHCR credentials in the runner user's home,
+GitHub workflow secrets, or repository files.
+
 Keep `/opt/algoedgefno/compose/.env` non-secret. It must define both
 `BACKEND_PROD_IMAGE` and `BACKEND_STAGING_IMAGE`. The workflow fails if
 `BACKEND_PROD_IMAGE` is missing, and it never modifies the production image
@@ -328,8 +341,9 @@ Manual operator flow:
 1. Copy the digest-qualified image from the `Publish backend image` workflow
    summary, for example
    `ghcr.io/deependra191/algoedgefno-backend@sha256:<digest>`.
-2. Run the `Deploy staging` workflow with that image and approve the `staging`
-   environment only after confirming the digest came from that publish summary.
+2. From the `dev` branch workflow, run `Deploy staging` with that image and
+   approve the `staging` environment only after confirming the digest came from
+   that publish summary.
 3. Verify the workflow smoke checks for `/health`, `/ready`, `/version`, and the
    no-token protected endpoint. The wrapper also fails if `/version` does not
    report `environment=staging`.

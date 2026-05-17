@@ -45,6 +45,9 @@ Run this twice — once for `APP_SECRET_TOKEN`, once for `JWT_SECRET`. Never reu
 - [ ] `BACKEND_PROD_IMAGE` is the digest-qualified GHCR image reference that already passed staging, not `latest`
 - [ ] `BACKEND_STAGING_IMAGE` is separate from `BACKEND_PROD_IMAGE` so staging candidate deploys cannot implicitly change production
 - [ ] Staging deploy runner, if enabled, runs as a limited non-root user with only the `/usr/local/sbin/algoedgefno-deploy-staging *` sudo capability
+- [ ] GitHub `staging` environment requires reviewer approval and restricts deployment branches to protected `dev`
+- [ ] No workflow except `Deploy staging` uses the `algoedgefno-staging` self-hosted runner label
+- [ ] Root Docker auth on the VPS can pull the private GHCR backend package with read-only package credentials
 
 ---
 
