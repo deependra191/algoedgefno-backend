@@ -20,16 +20,12 @@ env:
 jobs:
   deploy-staging:
     name: Deploy image to staging VPS
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, algoedgefno-staging]
+    if: github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main'
     environment: staging
     timeout-minutes: 15
     env:
       DEPLOY_IMAGE: ${{ inputs.image }}
-      VPS_HOST: ${{ secrets.VPS_HOST }}
-      VPS_DEPLOY_USER: ${{ secrets.VPS_DEPLOY_USER }}
-      VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
-      VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
-      VPS_SSH_PORT: ${{ vars.VPS_SSH_PORT || '22' }}
       STAGING_BASE_URL: ${{ vars.STAGING_BASE_URL }}
 
     steps:
@@ -49,23 +45,6 @@ jobs:
             exit 1
           fi
 
-          if [[ -z "${VPS_HOST}" || -z "${VPS_DEPLOY_USER}" || -z "${VPS_SSH_PRIVATE_KEY}" || -z "${VPS_KNOWN_HOSTS}" ]]; then
-            echo "VPS_HOST, VPS_DEPLOY_USER, VPS_SSH_PRIVATE_KEY, and VPS_KNOWN_HOSTS must be configured" >&2
-            exit 1
-          fi
-          if [[ ! "${VPS_DEPLOY_USER}" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]]; then
-            echo "VPS_DEPLOY_USER has an invalid format" >&2
-            exit 1
-          fi
-          if [[ ! "${VPS_HOST}" =~ ^[A-Za-z0-9.-]+$ ]]; then
-            echo "VPS_HOST must be a hostname or IP address without shell metacharacters" >&2
-            exit 1
-          fi
-          if [[ ! "${VPS_SSH_PORT}" =~ ^[0-9]{1,5}$ ]]; then
-            echo "VPS_SSH_PORT must be numeric" >&2
-            exit 1
-          fi
-
           if [[ -z "${STAGING_BASE_URL}" ]]; then
             echo "STAGING_BASE_URL must be configured" >&2
             exit 1
@@ -75,27 +54,11 @@ jobs:
             exit 1
           fi
 
-      - name: Configure SSH
-        run: |
-          set -euo pipefail
-
-          install -d -m 700 "${HOME}/.ssh"
-          printf '%s\n' "${VPS_SSH_PRIVATE_KEY}" > "${HOME}/.ssh/deploy_key"
-          printf '%s\n' "${VPS_KNOWN_HOSTS}" > "${HOME}/.ssh/known_hosts"
-          chmod 600 "${HOME}/.ssh/deploy_key" "${HOME}/.ssh/known_hosts"
-
       - name: Deploy staging image
         run: |
           set -euo pipefail
 
-          ssh \
-            -i "${HOME}/.ssh/deploy_key" \
-            -p "${VPS_SSH_PORT}" \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile="${HOME}/.ssh/known_hosts" \
-            "${VPS_DEPLOY_USER}@${VPS_HOST}" \
-            sudo -n /usr/local/sbin/algoedgefno-deploy-staging "${DEPLOY_IMAGE}" "${STAGING_BASE_URL}"
+          sudo -n /usr/local/sbin/algoedgefno-deploy-staging "${DEPLOY_IMAGE}" "${STAGING_BASE_URL}"
 
       - name: Summarize staging deployment
         run: |

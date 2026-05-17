@@ -277,46 +277,59 @@ Expected results:
 
 ## Staging deploy automation
 
-The `Deploy staging` GitHub Actions workflow is manual-only and deploys staging
-only. It does not run migrations, does not restart production services, and does
-not read app, database, JWT, or bearer-token secret files from the VPS.
-It does not use `rsync` or `scp`, and it does not overwrite server env files
-from the repository.
+The `Deploy staging` GitHub Actions workflow is manual-only, runs on a
+self-hosted runner on the VPS, and deploys staging only. It does not run
+migrations, does not restart production services, and does not read app,
+database, JWT, or bearer-token secret files from the VPS. It does not use
+`rsync`, `scp`, or inbound SSH from GitHub-hosted runners, and it does not
+overwrite server env files from the repository.
 Do not configure `APP_SECRET_TOKEN`, database passwords, JWT secrets, GHCR tokens,
-or VPS passwords in this workflow.
+VPS passwords, or SSH private keys in this workflow.
 
 Configure a GitHub environment named `staging` with required reviewer approval.
 This approval is the v1 provenance gate: reviewers must only approve digests
 copied from the `Publish backend image` workflow summary for this repository.
 Do not approve arbitrary GHCR digests, even when they match the repository
-prefix.
+prefix. Restrict the `staging` environment deployment branches to the protected
+`dev` and `main` branches only. The workflow also has a `dev`/`main` branch
+guard as defense in depth, but the GitHub environment branch restriction is the
+control that keeps modified workflow files from other refs off the VPS runner.
 
-Configure the `staging` environment with these secrets:
+Register a self-hosted GitHub Actions runner on the VPS for this repository and
+give it the custom label `algoedgefno-staging`. The runner may be started only
+during manual deployments or left running as a service. Prefer starting it only
+for deployment windows until the process is proven. If it is left running, treat
+the runner as a VPS entry point for any workflow that can target its labels:
+keep the label unique to this deploy workflow, audit that no other workflow uses
+it, and keep the runner user's home free of readable secrets. The runner must
+run as a limited Unix user such as `github-runner`, not as `root`. Do not add
+the runner user to the `docker`, `sudo`, or application env-file owner groups.
 
-- `VPS_HOST` — VPS hostname or IP address.
-- `VPS_DEPLOY_USER` — deploy-only SSH username.
-- `VPS_SSH_PRIVATE_KEY` — private key for the deploy-only user.
-- `VPS_KNOWN_HOSTS` — pinned `known_hosts` line for the VPS host key.
-
-Configure these GitHub environment variables:
+Configure the `staging` GitHub environment with this variable:
 
 - `STAGING_BASE_URL` — staging API base URL, for example `https://staging-api.<domain>`.
-- `VPS_SSH_PORT` — optional SSH port; defaults to `22`.
 
-The deploy-only VPS user must be key-only, must not use passwords, and must have
-exactly one passwordless sudo capability:
+The runner VPS user must have exactly one passwordless sudo capability:
 
 ```sudoers
-algoedgefno-deploy ALL=(root) NOPASSWD: /usr/local/sbin/algoedgefno-deploy-staging *
+github-runner ALL=(root) NOPASSWD: /usr/local/sbin/algoedgefno-deploy-staging *
 ```
 
-Do not grant the deploy user direct `docker`, `docker compose`, shell, editor,
-or arbitrary file-copy sudo permissions. The root-owned wrapper validates the
-digest and staging URL, pulls the exact digest before changing config, updates
-only `BACKEND_STAGING_IMAGE`, restarts only `backend-staging`, confirms the
-staging URL host matches `STAGING_API_HOST` from `/opt/algoedgefno/compose/.env`,
-asserts `/version` reports `environment=staging`, checks the no-token protected
-endpoint, and confirms the running staging container image.
+If the runner uses a different Unix username, replace `github-runner` in the
+sudoers rule with that exact username. Do not grant the runner user direct
+`docker`, `docker compose`, shell, editor, or arbitrary file-copy sudo
+permissions. The root-owned wrapper validates the digest and staging URL, pulls
+the exact digest before changing config, updates only `BACKEND_STAGING_IMAGE`,
+restarts only `backend-staging`, confirms the staging URL host matches
+`STAGING_API_HOST` from `/opt/algoedgefno/compose/.env`, asserts `/version`
+reports `environment=staging`, checks the no-token protected endpoint, and
+confirms the running staging container image.
+
+The wrapper runs `docker pull` as root through the narrow sudo rule. For private
+GHCR packages, the VPS must already have root-owned Docker credentials that can
+read `ghcr.io/deependra191/algoedgefno-backend`. Use a package-read-only token
+for that Docker login. Do not put GHCR credentials in the runner user's home,
+GitHub workflow secrets, or repository files.
 
 Keep `/opt/algoedgefno/compose/.env` non-secret. It must define both
 `BACKEND_PROD_IMAGE` and `BACKEND_STAGING_IMAGE`. The workflow fails if
@@ -328,11 +341,22 @@ Manual operator flow:
 1. Copy the digest-qualified image from the `Publish backend image` workflow
    summary, for example
    `ghcr.io/deependra191/algoedgefno-backend@sha256:<digest>`.
-2. Run the `Deploy staging` workflow with that image and approve the `staging`
-   environment only after confirming the digest came from that publish summary.
+2. During validation, run `Deploy staging` from the `dev` branch. After this
+   workflow is promoted to `main`, future staging deploys may be run from
+   `main`. Approve the `staging` environment only after confirming the digest
+   came from the publish summary.
 3. Verify the workflow smoke checks for `/health`, `/ready`, `/version`, and the
    no-token protected endpoint. The wrapper also fails if `/version` does not
    report `environment=staging`.
 4. Later, promote the exact same digest to production through a separate future
    workflow or a manual production step. Do not rebuild or republish the backend
    image between staging verification and production promotion.
+
+Backlog cleanup after the self-hosted runner deployment succeeds:
+
+- Remove unused SSH deploy environment secrets, if they were created:
+  `VPS_HOST`, `VPS_DEPLOY_USER`, `VPS_SSH_PRIVATE_KEY`, `VPS_KNOWN_HOSTS`, and
+  `VPS_SSH_PORT`.
+- Remove any temporary GitHub Actions CIDR SSH firewall rules.
+- Remove the temporary `algoedgefno-deploy` user and SSH key only after no
+  active workflow depends on them.
