@@ -291,9 +291,9 @@ This approval is the v1 provenance gate: reviewers must only approve digests
 copied from the `Publish backend image` workflow summary for this repository.
 Do not approve arbitrary GHCR digests, even when they match the repository
 prefix. Restrict the `staging` environment deployment branches to the protected
-`dev` branch only. The workflow also has a `dev` branch guard as defense in
-depth, but the GitHub environment branch restriction is the control that keeps
-modified workflow files from other refs off the VPS runner.
+`dev` and `main` branches only. The workflow also has a `dev`/`main` branch
+guard as defense in depth, but the GitHub environment branch restriction is the
+control that keeps modified workflow files from other refs off the VPS runner.
 
 Register a self-hosted GitHub Actions runner on the VPS for this repository and
 give it the custom label `algoedgefno-staging`. The runner may be started only
@@ -341,9 +341,10 @@ Manual operator flow:
 1. Copy the digest-qualified image from the `Publish backend image` workflow
    summary, for example
    `ghcr.io/deependra191/algoedgefno-backend@sha256:<digest>`.
-2. From the `dev` branch workflow, run `Deploy staging` with that image and
-   approve the `staging` environment only after confirming the digest came from
-   that publish summary.
+2. During validation, run `Deploy staging` from the `dev` branch. After this
+   workflow is promoted to `main`, future staging deploys may be run from
+   `main`. Approve the `staging` environment only after confirming the digest
+   came from the publish summary.
 3. Verify the workflow smoke checks for `/health`, `/ready`, `/version`, and the
    no-token protected endpoint. The wrapper also fails if `/version` does not
    report `environment=staging`.
