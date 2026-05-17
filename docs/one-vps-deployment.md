@@ -1,6 +1,6 @@
 # One-VPS deployment runbook
 
-This runbook is for the temporary private-staging and early-production setup on one Hetzner CPX22-class VPS. Production remains intentionally manual; staging image deployment can be automated through the manual GitHub Actions workflow documented below. Do not paste real secrets into Git, issue comments, screenshots, or chat.
+This runbook is for the temporary private-staging and early-production setup on one Hetzner CPX22-class VPS. Production remains intentionally manual; staging image deployment is automated from the main image publish workflow, with a manual fallback workflow documented below. Do not paste real secrets into Git, issue comments, screenshots, or chat.
 
 ## Scope
 
@@ -277,33 +277,37 @@ Expected results:
 
 ## Staging deploy automation
 
-The `Deploy staging` GitHub Actions workflow is manual-only, runs on a
-self-hosted runner on the VPS, and deploys staging only. It does not run
-migrations, does not restart production services, and does not read app,
-database, JWT, or bearer-token secret files from the VPS. It does not use
-`rsync`, `scp`, or inbound SSH from GitHub-hosted runners, and it does not
-overwrite server env files from the repository.
+The `Publish backend image` GitHub Actions workflow runs on pushes to `main`.
+It publishes the backend image to GHCR, exports the immutable digest-qualified
+image reference, then deploys that exact digest to staging on the self-hosted VPS
+runner. If the staging deploy job fails, the GHCR image remains published and
+visible in the workflow summary; production remains untouched.
+
+The separate `Deploy staging` workflow is manual-only fallback for redeploying a
+specific digest. Both staging deploy paths run on the self-hosted runner and
+deploy staging only. They do not run migrations, do not restart production
+services, and do not read app, database, JWT, or bearer-token secret files from
+the VPS. They do not use `rsync`, `scp`, or inbound SSH from GitHub-hosted
+runners, and they do not overwrite server env files from the repository.
 Do not configure `APP_SECRET_TOKEN`, database passwords, JWT secrets, GHCR tokens,
 VPS passwords, or SSH private keys in this workflow.
 
-Configure a GitHub environment named `staging` with required reviewer approval.
-This approval is the v1 provenance gate: reviewers must only approve digests
-copied from the `Publish backend image` workflow summary for this repository.
-Do not approve arbitrary GHCR digests, even when they match the repository
-prefix. Restrict the `staging` environment deployment branches to the protected
-`dev` and `main` branches only. The workflow also has a `dev`/`main` branch
-guard as defense in depth, but the GitHub environment branch restriction is the
-control that keeps modified workflow files from other refs off the VPS runner.
+Configure a GitHub environment named `staging`. If the repository plan exposes
+required reviewers, enable them for this environment. Restrict the `staging`
+environment deployment branches to the protected `dev` and `main` branches
+only. The workflow also has a `dev`/`main` branch guard as defense in depth, but
+the GitHub environment branch restriction is the control that keeps modified
+workflow files from other refs off the VPS runner.
 
 Register a self-hosted GitHub Actions runner on the VPS for this repository and
 give it the custom label `algoedgefno-staging`. The runner may be started only
-during manual deployments or left running as a service. Prefer starting it only
-for deployment windows until the process is proven. If it is left running, treat
-the runner as a VPS entry point for any workflow that can target its labels:
-keep the label unique to this deploy workflow, audit that no other workflow uses
-it, and keep the runner user's home free of readable secrets. The runner must
-run as a limited Unix user such as `github-runner`, not as `root`. Do not add
-the runner user to the `docker`, `sudo`, or application env-file owner groups.
+during deployment windows or left running as a service. If it is left running,
+treat the runner as a VPS entry point for any workflow that can target its
+labels: keep the label unique to staging deploy workflows, audit that only
+`Publish backend image` and `Deploy staging` use it, and keep the runner user's
+home free of readable secrets. The runner must run as a limited Unix user such
+as `github-runner`, not as `root`. Do not add the runner user to the `docker`,
+`sudo`, or application env-file owner groups.
 
 Configure the `staging` GitHub environment with this variable:
 
@@ -336,21 +340,25 @@ Keep `/opt/algoedgefno/compose/.env` non-secret. It must define both
 `BACKEND_PROD_IMAGE` is missing, and it never modifies the production image
 reference.
 
-Manual operator flow:
+Normal operator flow:
 
-1. Copy the digest-qualified image from the `Publish backend image` workflow
-   summary, for example
-   `ghcr.io/deependra191/algoedgefno-backend@sha256:<digest>`.
-2. During validation, run `Deploy staging` from the `dev` branch. After this
-   workflow is promoted to `main`, future staging deploys may be run from
-   `main`. Approve the `staging` environment only after confirming the digest
-   came from the publish summary.
+1. Merge `dev` to `main`.
+2. Confirm `Publish backend image` publishes a GHCR image and automatically
+   starts the staging deploy job with the digest-qualified image it just built.
 3. Verify the workflow smoke checks for `/health`, `/ready`, `/version`, and the
    no-token protected endpoint. The wrapper also fails if `/version` does not
    report `environment=staging`.
 4. Later, promote the exact same digest to production through a separate future
    workflow or a manual production step. Do not rebuild or republish the backend
    image between staging verification and production promotion.
+
+Manual fallback flow:
+
+1. Copy the digest-qualified image from the `Publish backend image` workflow
+   summary, for example
+   `ghcr.io/deependra191/algoedgefno-backend@sha256:<digest>`.
+2. Run `Deploy staging` from the `dev` or `main` branch with that exact image.
+3. Verify the same smoke checks as the automatic staging deploy.
 
 Backlog cleanup after the self-hosted runner deployment succeeds:
 
