@@ -5,9 +5,7 @@ on:
     branches:
       - main
 
-permissions:
-  contents: read
-  packages: write
+permissions: {}
 
 env:
   REGISTRY: ghcr.io
@@ -19,6 +17,11 @@ jobs:
   publish:
     name: Build and push backend image
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      deployment_image: ${{ steps.deployment.outputs.deployment_image }}
 
     steps:
       - name: Check out main commit
@@ -61,13 +64,69 @@ jobs:
 
       - name: Summarize published image
         run: |
+          deployment_image="${REGISTRY}/${IMAGE_NAME}@${{ steps.build.outputs.digest }}"
+
           {
             echo "## Backend image published"
             echo ""
-            echo "- Deployment image: \`${REGISTRY}/${IMAGE_NAME}@${{ steps.build.outputs.digest }}\`"
+            echo "- Deployment image: \`${deployment_image}\`"
             echo "- Lookup tag: \`${{ steps.image.outputs.image }}\`"
             echo "- Digest: \`${{ steps.build.outputs.digest }}\`"
             echo "- Commit: \`${{ github.sha }}\`"
             echo "- Platform: \`${{ env.IMAGE_PLATFORM }}\`"
             echo "- Build time: \`${{ steps.image.outputs.build_time }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Export deployment image
+        id: deployment
+        run: |
+          echo "deployment_image=${REGISTRY}/${IMAGE_NAME}@${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
+
+  deploy-staging:
+    name: Deploy published image to staging VPS
+    needs: publish
+    runs-on: [self-hosted, algoedgefno-staging]
+    if: github.ref == 'refs/heads/main'
+    environment: staging
+    timeout-minutes: 15
+    permissions: {}
+    concurrency:
+      group: staging-vps-deploy
+      cancel-in-progress: false
+    env:
+      DEPLOY_IMAGE: ${{ needs.publish.outputs.deployment_image }}
+      STAGING_BASE_URL: ${{ vars.STAGING_BASE_URL }}
+
+    steps:
+      - name: Validate staging deploy inputs
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${DEPLOY_IMAGE}" =~ ^ghcr\.io/deependra191/algoedgefno-backend@sha256:[0-9a-f]{64}$ ]]; then
+            echo "published image must be a digest-qualified GHCR reference with a 64-character sha256 digest" >&2
+            exit 1
+          fi
+          if [[ -z "${STAGING_BASE_URL}" ]]; then
+            echo "STAGING_BASE_URL must be configured" >&2
+            exit 1
+          fi
+          if [[ ! "${STAGING_BASE_URL}" =~ ^https://(staging-api\.[A-Za-z0-9.-]+|staging-[A-Za-z0-9.-]+|[A-Za-z0-9.-]+\.staging\.[A-Za-z0-9.-]+)(:[0-9]{1,5})?$ ]]; then
+            echo "STAGING_BASE_URL must be an https staging host without a path" >&2
+            exit 1
+          fi
+
+      - name: Deploy staging image
+        run: |
+          set -euo pipefail
+
+          sudo -n /usr/local/sbin/algoedgefno-deploy-staging "${DEPLOY_IMAGE}" "${STAGING_BASE_URL}"
+
+      - name: Summarize staging deployment
+        run: |
+          {
+            echo "## Staging deployment"
+            echo ""
+            echo "- Image: \`${DEPLOY_IMAGE}\`"
+            echo "- Staging URL: \`${STAGING_BASE_URL}\`"
+            echo "- Result: smoke checks passed"
           } >> "$GITHUB_STEP_SUMMARY"
