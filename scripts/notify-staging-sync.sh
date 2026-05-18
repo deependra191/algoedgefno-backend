@@ -55,14 +55,14 @@ if ! result=$(docker compose -f "${COMPOSE_FILE}" exec -T postgres \
 fi
 
 if [[ -z "${result}" ]]; then
-    send_telegram "$(printf '<b>⚠️ AlgoEdge Staging Sync — NO RUN</b>\nNo sync_runs row found in the last 12 hours.\nExpected window: 18:45 UTC daily.')"
+    send_telegram "$(printf '<b>⚠️ AlgoEdge Staging Sync — NO RUN</b>\nNo sync_runs row found in the last 12 hours.\nExpected window: 00:15 IST daily.')"
     exit 0
 fi
 
 IFS="${sep}" read -r status records started completed error_msg <<< "${result}"
 
-started_fmt=$(date -d "${started}" +"%Y-%m-%d %H:%M UTC" 2>/dev/null || printf '%s' "${started}")
-completed_fmt=$(date -d "${completed}" +"%Y-%m-%d %H:%M UTC" 2>/dev/null || printf '%s' "${completed}")
+started_fmt=$(TZ="Asia/Kolkata" date -d "${started}" +"%Y-%m-%d %H:%M IST" 2>/dev/null || printf '%s' "${started}")
+completed_fmt=$(TZ="Asia/Kolkata" date -d "${completed}" +"%Y-%m-%d %H:%M IST" 2>/dev/null || printf '%s' "${completed}")
 
 if [[ "${status}" == "COMPLETED" ]]; then
     send_telegram "$(printf '<b>✅ AlgoEdge Staging Sync — SUCCESS</b>\nRecords: %s\nStarted: %s\nCompleted: %s' \
