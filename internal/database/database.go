@@ -20,9 +20,13 @@ const (
 )
 
 // Connect creates a PostgreSQL pool and runs startup migrations when enabled by config.
+//
+// Postgres TLS is gated by cfg.DBSSLRequired (env DB_SSL_REQUIRED, default true).
+// True selects sslmode=require, false selects sslmode=disable. When DATABASE_URL is
+// set, its embedded sslmode wins and cfg.DBSSLRequired is ignored for that DSN.
 func Connect(cfg *config.Config) *pgxpool.Pool {
 	sslMode := sslModeRequire
-	if cfg.Env != config.EnvProduction {
+	if !cfg.DBSSLRequired {
 		sslMode = sslModeDisable
 	}
 

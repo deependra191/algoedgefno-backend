@@ -40,6 +40,7 @@ Run this twice — once for `APP_SECRET_TOKEN`, once for `JWT_SECRET`. Never reu
 - [ ] `PORT` is set correctly
 - [ ] `MIGRATIONS_PATH=file:///app/migrations`
 - [ ] `AUTO_MIGRATE=false`
+- [ ] `DB_SSL_REQUIRED` is set explicitly per topology — `false` for the single-VPS private-Docker-network deployment, `true` for managed Postgres (Cloud SQL, RDS, Timescale Cloud, etc.). Unset defaults to `true` (fail-closed).
 - [ ] Browser CORS is disabled for Android-only production; add explicit CORS later only if a browser/admin client exists
 - [ ] `TRUSTED_PROXIES` is set to the private proxy range used by Caddy or left empty when no reverse proxy headers should be trusted
 - [ ] `BACKEND_PROD_IMAGE` is the digest-qualified GHCR image reference that already passed staging, not `latest`
