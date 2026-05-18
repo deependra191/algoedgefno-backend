@@ -38,6 +38,7 @@ const (
 	envVarBacktestMaxDays    = "BACKTEST_MAX_DAYS"
 	envVarBacktestMaxCandles = "BACKTEST_MAX_CANDLES"
 	envVarSyncEnabled        = "SYNC_ENABLED"
+	envVarDBSSLRequired      = "DB_SSL_REQUIRED"
 
 	// Operational defaults — safe to use as config fallbacks.
 	defaultPort           = "8080"
@@ -57,6 +58,11 @@ const (
 	defaultBacktestMaxDays    = 1825
 	defaultBacktestMaxCandles = 0
 	defaultSyncEnabled        = true
+
+	// DBSSLRequired defaults to true — fail-closed. Deployments where the DB is on
+	// a private network without TLS (e.g. the single-VPS Docker bridge) or where
+	// local Postgres has no TLS configured must set DB_SSL_REQUIRED=false explicitly.
+	defaultDBSSLRequired = true
 )
 
 // Environment identifies the runtime environment selected by APP_ENV.
@@ -97,6 +103,13 @@ type Config struct {
 	BacktestMaxDays    int
 	BacktestMaxCandles int
 	SyncEnabled        bool
+
+	// DBSSLRequired gates Postgres TLS in internal/database/database.go.
+	// True (default) selects sslmode=require; false selects sslmode=disable.
+	// Set DB_SSL_REQUIRED=false on deployments where Postgres has no TLS
+	// (e.g. local dev, single-VPS Docker bridge). DATABASE_URL (if set) wins:
+	// its embedded sslmode is used verbatim, and DBSSLRequired is ignored.
+	DBSSLRequired bool
 }
 
 // Load reads environment-backed configuration, including a local .env file when present.
@@ -176,6 +189,10 @@ func newFromEnv(lookup func(string) (string, bool)) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	dbSSLRequired, err := getBoolEnvFrom(lookup, envVarDBSSLRequired, defaultDBSSLRequired)
+	if err != nil {
+		return nil, err
+	}
 
 	cfg := &Config{
 		Port:               getEnvFrom(lookup, envVarPort, defaultPort),
@@ -197,6 +214,7 @@ func newFromEnv(lookup func(string) (string, bool)) (*Config, error) {
 		BacktestMaxDays:    backtestMaxDays,
 		BacktestMaxCandles: backtestMaxCandles,
 		SyncEnabled:        syncEnabled,
+		DBSSLRequired:      dbSSLRequired,
 	}
 
 	if cfg.DatabaseURL != "" {

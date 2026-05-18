@@ -805,3 +805,51 @@ func assertStringSlice(t *testing.T, got, want []string) {
 		}
 	}
 }
+
+func TestNewFromEnv_DBSSLRequired_DefaultsToTrue(t *testing.T) {
+	cfg, err := newFromEnv(mapLookup(minDevEnv()))
+	if err != nil {
+		t.Fatalf("newFromEnv() error = %v", err)
+	}
+	if !cfg.DBSSLRequired {
+		t.Fatal("DBSSLRequired = false when DB_SSL_REQUIRED is unset; want true (fail-closed default)")
+	}
+}
+
+func TestNewFromEnv_DBSSLRequired_HonorsEnvVar(t *testing.T) {
+	tests := []struct {
+		val  string
+		want bool
+	}{
+		{"true", true},
+		{"false", false},
+		{"TRUE", true},
+		{"FALSE", false},
+		{"1", true},
+		{"0", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.val, func(t *testing.T) {
+			env := minDevEnv()
+			env["DB_SSL_REQUIRED"] = tt.val
+
+			cfg, err := newFromEnv(mapLookup(env))
+			if err != nil {
+				t.Fatalf("newFromEnv() error = %v for DB_SSL_REQUIRED=%q", err, tt.val)
+			}
+			if cfg.DBSSLRequired != tt.want {
+				t.Fatalf("DBSSLRequired = %v, want %v for DB_SSL_REQUIRED=%q", cfg.DBSSLRequired, tt.want, tt.val)
+			}
+		})
+	}
+}
+
+func TestNewFromEnv_DBSSLRequired_RejectsInvalidValue(t *testing.T) {
+	env := minDevEnv()
+	env["DB_SSL_REQUIRED"] = "yes-please"
+
+	_, err := newFromEnv(mapLookup(env))
+	if err == nil {
+		t.Fatal("newFromEnv() error = nil, want error for non-boolean DB_SSL_REQUIRED")
+	}
+}
