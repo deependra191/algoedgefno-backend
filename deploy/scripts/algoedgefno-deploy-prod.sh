@@ -12,6 +12,8 @@ PROD_BASE_URL="${1%/}"
 STAGING_BASE_URL="${2%/}"
 IMAGE_PATTERN='^ghcr\.io/deependra191/algoedgefno-backend@sha256:[0-9a-f]{64}$'
 HTTPS_HOST_PATTERN='^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?$'
+COMMIT_SHA_PATTERN='^[0-9a-f]{7,64}$'
+MIGRATION_VERSION_PATTERN='^[0-9]+$'
 COMPOSE_DIR="/opt/algoedgefno/compose"
 ENV_FILE="${COMPOSE_DIR}/.env"
 PROD_CONTAINER="algoedgefno-backend-prod"
@@ -134,7 +136,7 @@ fi
 
 tmp_env="$(mktemp)"
 version_body="$(mktemp)"
-env_backup="$(mktemp "${ENV_BACKUP_PREFIX}XXXXXX")"
+env_backup=""
 cleanup() {
     rm -f "${tmp_env}" "${version_body}"
 }
@@ -146,6 +148,14 @@ restore_previous_prod_image() {
         cd "${COMPOSE_DIR}"
         docker compose up -d backend-prod
     )
+}
+
+rollback_and_fail() {
+    local reason="$1"
+    if ! restore_previous_prod_image; then
+        fail "ROLLBACK FAILED after ${reason} on ${deploy_image}; manual recovery required (env backup at ${env_backup})"
+    fi
+    fail "${reason} on ${deploy_image}; restored previous BACKEND_PROD_IMAGE ${previous_prod_image}"
 }
 
 actual_staging_image="$(docker inspect "${STAGING_CONTAINER}" --format '{{.Config.Image}}' 2>/dev/null || true)"
@@ -175,13 +185,20 @@ fi
 if [[ -z "${expected_commit}" ]]; then
     fail "staging version must report commit_sha"
 fi
+if [[ ! "${expected_commit}" =~ ${COMMIT_SHA_PATTERN} ]]; then
+    fail "staging version commit_sha must be 7-64 lowercase hex chars"
+fi
 if [[ -z "${expected_migration}" ]]; then
     fail "staging version must report migration_version"
+fi
+if [[ ! "${expected_migration}" =~ ${MIGRATION_VERSION_PATTERN} ]]; then
+    fail "staging version migration_version must be a non-negative integer"
 fi
 pass "staging version: commit ${expected_commit}, migration ${expected_migration}"
 
 docker pull "${deploy_image}"
 
+env_backup="$(mktemp "${ENV_BACKUP_PREFIX}XXXXXX")"
 cp "${ENV_FILE}" "${env_backup}"
 awk -v image="${deploy_image}" '
     BEGIN { updated = 0 }
@@ -201,21 +218,18 @@ install -o root -g root -m 600 "${tmp_env}" "${ENV_FILE}"
 
 cd "${COMPOSE_DIR}"
 if ! docker compose up -d backend-prod; then
-    restore_previous_prod_image
-    fail "failed to restart backend-prod on ${deploy_image}; restored previous BACKEND_PROD_IMAGE ${previous_prod_image}"
+    rollback_and_fail "failed to restart backend-prod"
 fi
 
 if ! EXPECTED_IMAGE="${deploy_image}" \
     SMOKE_BASE_URL="${PROD_BASE_URL}" \
         "${SMOKE_SCRIPT}" "${expected_commit}" "${expected_migration}"; then
-    restore_previous_prod_image
-    fail "production smoke failed on ${deploy_image}; restored previous BACKEND_PROD_IMAGE ${previous_prod_image}"
+    rollback_and_fail "production smoke failed"
 fi
 
 actual_prod_image="$(docker inspect "${PROD_CONTAINER}" --format '{{.Config.Image}}')"
 if [[ "${actual_prod_image}" != "${deploy_image}" ]]; then
-    restore_previous_prod_image
-    fail "prod container image: got ${actual_prod_image}, want ${deploy_image}; restored previous BACKEND_PROD_IMAGE ${previous_prod_image}"
+    rollback_and_fail "prod container image mismatch (got ${actual_prod_image}, want ${deploy_image})"
 fi
 pass "prod container image: ${deploy_image}"
 
@@ -223,5 +237,4 @@ printf 'PROMOTED_IMAGE=%s\n' "${deploy_image}"
 printf 'PROMOTED_COMMIT=%s\n' "${expected_commit}"
 printf 'PROMOTED_MIGRATION=%s\n' "${expected_migration}"
 printf 'PREVIOUS_PROD_IMAGE=%s\n' "${previous_prod_image}"
-printf 'ENV_BACKUP=%s\n' "${env_backup}"
 printf 'production deploy passed for %s\n' "${deploy_image}"

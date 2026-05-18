@@ -56,6 +56,8 @@ jobs:
           set -euo pipefail
 
           deploy_log="$(mktemp)"
+          trap 'rm -f "${deploy_log}"' EXIT
+
           sudo -n /usr/local/sbin/algoedgefno-deploy-prod "${PROD_BASE_URL}" "${STAGING_BASE_URL}" | tee "${deploy_log}"
 
           promoted_image="$(grep '^PROMOTED_IMAGE=' "${deploy_log}" | tail -1 | cut -d= -f2- || true)"
@@ -75,19 +77,22 @@ jobs:
             echo "previous_prod_image=${previous_prod_image}"
           } >> "${GITHUB_OUTPUT}"
 
-          rm -f "${deploy_log}"
-
       - name: Summarize production deployment
+        env:
+          PROMOTED_IMAGE: ${{ steps.deploy.outputs.promoted_image }}
+          PROMOTED_COMMIT: ${{ steps.deploy.outputs.promoted_commit }}
+          PROMOTED_MIGRATION: ${{ steps.deploy.outputs.promoted_migration }}
+          PREVIOUS_PROD_IMAGE: ${{ steps.deploy.outputs.previous_prod_image }}
         run: |
           {
             echo "## Production deployment"
             echo ""
             echo "- Source staging URL: \`${STAGING_BASE_URL}\`"
             echo "- Production URL: \`${PROD_BASE_URL}\`"
-            echo "- Promoted image: \`${{ steps.deploy.outputs.promoted_image }}\`"
-            echo "- Promoted commit: \`${{ steps.deploy.outputs.promoted_commit }}\`"
-            echo "- Migration version: \`${{ steps.deploy.outputs.promoted_migration }}\`"
-            echo "- Previous prod image: \`${{ steps.deploy.outputs.previous_prod_image }}\`"
+            echo "- Promoted image: \`${PROMOTED_IMAGE}\`"
+            echo "- Promoted commit: \`${PROMOTED_COMMIT}\`"
+            echo "- Migration version: \`${PROMOTED_MIGRATION}\`"
+            echo "- Previous prod image: \`${PREVIOUS_PROD_IMAGE}\`"
             echo "- Promotion path: current \`BACKEND_STAGING_IMAGE\` pinned on the VPS"
             echo "- Result: production smoke checks passed"
           } >> "${GITHUB_STEP_SUMMARY}"
