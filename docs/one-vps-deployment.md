@@ -309,6 +309,45 @@ home free of readable secrets. The runner must run as a limited Unix user such
 as `github-runner`, not as `root`. Do not add the runner user to the `docker`,
 `sudo`, or application env-file owner groups.
 
+To manually start or restart the runner, run it from the `github-runner` user's
+home directory, not from `/root`:
+
+```bash
+sudo su - github-runner
+cd ~/actions-runner
+./run.sh
+```
+
+From a root shell, the equivalent one-liner is:
+
+```bash
+sudo -u github-runner -H bash -lc 'cd ~/actions-runner && ./run.sh'
+```
+
+Leave the terminal open while the runner is needed. Stop a manually started
+runner with `Ctrl+C`.
+
+To leave the runner running in the background, install it as a systemd service
+after configuring it in `/home/github-runner/actions-runner`:
+
+```bash
+cd /home/github-runner/actions-runner
+sudo ./svc.sh install github-runner
+sudo ./svc.sh start
+sudo ./svc.sh status
+```
+
+Manage the service later with:
+
+```bash
+cd /home/github-runner/actions-runner
+sudo ./svc.sh stop
+sudo ./svc.sh start
+sudo ./svc.sh status
+```
+
+The service should run as `github-runner`, not as `root`.
+
 Configure the `staging` GitHub environment with this variable:
 
 - `STAGING_BASE_URL` — staging API base URL, for example `https://staging-api.<domain>`.
