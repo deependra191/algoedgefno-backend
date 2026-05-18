@@ -100,28 +100,54 @@ Keep this file until production smoke checks pass and the imported data has bake
 
 ## Export staging market data
 
-Export only the allowlisted tables:
+Export `instruments` and `candles` separately.
+
+`instruments` is a regular table, so a table-filtered logical dump is fine:
 
 ```bash
-docker compose exec postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d algoedgefno_staging --format=custom --data-only --table=instruments --table=candles --file=/tmp/staging-market-data.dump'
+docker compose exec postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d algoedgefno_staging --format=custom --data-only --table=instruments --file=/tmp/staging-instruments.dump'
 ```
 
-Optional: copy the export to the host for auditability:
+`candles` is a Timescale hypertable. Do not rely on a table-filtered `pg_dump` / `pg_restore`
+pair for it. Export it with `\COPY` instead:
 
 ```bash
-sudo docker cp algoedgefno-postgres:/tmp/staging-market-data.dump /opt/algoedgefno/backups/staging-market-data.dump
-sudo chmod 600 /opt/algoedgefno/backups/staging-market-data.dump
+docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_staging -c "\COPY (SELECT * FROM candles) TO '\''/tmp/staging-candles.csv'\'' CSV"'
+```
+
+Optional: copy the exports to the host for auditability:
+
+```bash
+sudo docker cp algoedgefno-postgres:/tmp/staging-instruments.dump /opt/algoedgefno/backups/staging-instruments.dump
+sudo docker cp algoedgefno-postgres:/tmp/staging-candles.csv     /opt/algoedgefno/backups/staging-candles.csv
+sudo chmod 600 /opt/algoedgefno/backups/staging-instruments.dump /opt/algoedgefno/backups/staging-candles.csv
 ```
 
 ## Import into production
 
-Import inside one transaction:
+If you are retrying after a failed or partial import, clear both market-data tables first:
 
 ```bash
-docker compose exec postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d algoedgefno_prod --data-only --single-transaction --disable-triggers /tmp/staging-market-data.dump'
+docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_prod -c "TRUNCATE TABLE candles, instruments;"'
 ```
 
-If this command fails, do not retry blindly. Check the error first. Duplicate-key errors usually mean production was not empty and this runbook is not the right tool.
+Import `instruments` first:
+
+```bash
+docker compose exec postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d algoedgefno_prod --data-only --single-transaction /tmp/staging-instruments.dump'
+```
+
+Import `candles` second:
+
+```bash
+docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_prod -c "\COPY candles FROM '\''/tmp/staging-candles.csv'\'' CSV"'
+```
+
+Notes:
+
+- `--disable-triggers` is not valid for the Timescale `candles` hypertable. It fails with `hypertables do not support enabling or disabling triggers`.
+- The `candles` import can take significantly longer than the export. While the `\COPY` is still running, other sessions may continue to see `0` rows until the statement commits.
+- If either import fails, do not retry blindly. Check the error first. Duplicate-key errors usually mean production was not empty and this runbook is not the right tool.
 
 ## Post-import validation
 
@@ -172,3 +198,11 @@ Expected:
 If the import fails before commit, `--single-transaction` should leave production unchanged.
 
 If the import succeeds but validation fails, keep `backend-prod` stopped and restore from `/opt/algoedgefno/backups/prod-before-market-data.dump` only after reviewing the failure. Do not use staging data as a rollback source.
+
+## Cleanup
+
+Remove the temporary export files from the Postgres container after validation:
+
+```bash
+docker compose exec postgres sh -c 'rm -f /tmp/staging-instruments.dump /tmp/staging-candles.csv'
+```
