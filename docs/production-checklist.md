@@ -45,9 +45,10 @@ Run this twice — once for `APP_SECRET_TOKEN`, once for `JWT_SECRET`. Never reu
 - [ ] `TRUSTED_PROXIES` is set to the private proxy range used by Caddy or left empty when no reverse proxy headers should be trusted
 - [ ] `BACKEND_PROD_IMAGE` is the digest-qualified GHCR image reference that already passed staging, not `latest`
 - [ ] `BACKEND_STAGING_IMAGE` is separate from `BACKEND_PROD_IMAGE` so staging candidate deploys cannot implicitly change production
-- [ ] Staging deploy runner, if enabled, runs as a limited non-root user with only the `/usr/local/sbin/algoedgefno-deploy-staging *` sudo capability
+- [ ] Deploy runner, if enabled, runs as a limited non-root user with only the `/usr/local/sbin/algoedgefno-deploy-staging *` and `/usr/local/sbin/algoedgefno-deploy-prod *` sudo capabilities
 - [ ] GitHub `staging` environment restricts deployment branches to protected `dev` and `main`; reviewer approval is enabled if the repository plan supports it
-- [ ] Only `Publish backend image` and `Deploy staging` use the `algoedgefno-staging` self-hosted runner label
+- [ ] GitHub `production` environment restricts deployment branches to protected `main`; reviewer approval is enabled if the repository plan supports it
+- [ ] Only `Publish backend image`, `Deploy staging`, and `Deploy production` use the `algoedgefno-staging` self-hosted runner label
 - [ ] Root Docker auth on the VPS can pull the private GHCR backend package with read-only package credentials
 
 ---

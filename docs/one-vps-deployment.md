@@ -1,6 +1,6 @@
 # One-VPS deployment runbook
 
-This runbook is for the temporary private-staging and early-production setup on one Hetzner CPX22-class VPS. Production remains intentionally manual; staging image deployment is automated from the main image publish workflow, with a manual fallback workflow documented below. Do not paste real secrets into Git, issue comments, screenshots, or chat.
+This runbook is for the temporary private-staging and early-production setup on one Hetzner CPX22-class VPS. Staging image deployment is automated from the main image publish workflow, and production image promotion can be triggered manually through a separate workflow that promotes the image already pinned on staging. Do not paste real secrets into Git, issue comments, screenshots, or chat.
 
 ## Scope
 
@@ -59,6 +59,7 @@ Copy these repo files to the server:
 - `deploy/docker-compose.yml` -> `/opt/algoedgefno/compose/docker-compose.yml`
 - `deploy/Caddyfile` -> `/opt/algoedgefno/caddy/Caddyfile`
 - `deploy/scripts/algoedgefno-deploy-staging.sh` -> `/usr/local/sbin/algoedgefno-deploy-staging`
+- `deploy/scripts/algoedgefno-deploy-prod.sh` -> `/usr/local/sbin/algoedgefno-deploy-prod`
 - `deploy/deploy.env.example` -> `/opt/algoedgefno/compose/.env`, then edit values.
 - `deploy/env/prod.env.example` -> `/opt/algoedgefno/env/prod.env`, then replace placeholders.
 - `deploy/env/staging.env.example` -> `/opt/algoedgefno/env/staging.env`, then replace placeholders.
@@ -69,8 +70,8 @@ Lock down env files:
 ```bash
 sudo chown root:root /opt/algoedgefno/env/*.env /opt/algoedgefno/compose/.env
 sudo chmod 600 /opt/algoedgefno/env/*.env /opt/algoedgefno/compose/.env
-sudo chown root:root /usr/local/sbin/algoedgefno-deploy-staging
-sudo chmod 755 /usr/local/sbin/algoedgefno-deploy-staging
+sudo chown root:root /usr/local/sbin/algoedgefno-deploy-staging /usr/local/sbin/algoedgefno-deploy-prod
+sudo chmod 755 /usr/local/sbin/algoedgefno-deploy-staging /usr/local/sbin/algoedgefno-deploy-prod
 ```
 
 ## Image references
@@ -87,8 +88,8 @@ The workflow also publishes a commit-SHA tag for lookup/audit purposes. Do not
 use mutable `latest` tags for production deploys.
 
 Staging should receive a candidate digest first. After staging smoke checks pass,
-production should later be promoted to the exact same digest through a separate
-manual or future production workflow step. Do not rebuild or republish between
+production should later be promoted to the exact same digest through the manual
+`Deploy production` workflow or a lower-level manual fallback step. Do not rebuild or republish between
 staging verification and production promotion; that would create a different
 artifact.
 
@@ -277,10 +278,6 @@ Expected results:
 - Browser CORS response headers are absent. CORS is intentionally disabled for v1 because there is no browser client; future browser/admin CORS support should be added in a separate PR when needed.
 - Backend container health is validated through Caddy/manual smoke checks for now. Compose-level backend `healthcheck` entries can be added later after the runtime image includes a small HTTP probe tool or the app exposes a dependency-free internal probe strategy.
 
-## Known follow-ups
-
-- Production deploy automation is a separate task after staging automation is proven.
-
 ## Staging deploy automation
 
 The `Publish backend image` GitHub Actions workflow runs on pushes to `main`.
@@ -309,8 +306,8 @@ Register a self-hosted GitHub Actions runner on the VPS for this repository and
 give it the custom label `algoedgefno-staging`. The runner may be started only
 during deployment windows or left running as a service. If it is left running,
 treat the runner as a VPS entry point for any workflow that can target its
-labels: keep the label unique to staging deploy workflows, audit that only
-`Publish backend image` and `Deploy staging` use it, and keep the runner user's
+labels: keep the label unique to deployment workflows, audit that only
+`Publish backend image`, `Deploy staging`, and `Deploy production` use it, and keep the runner user's
 home free of readable secrets. The runner must run as a limited Unix user such
 as `github-runner`, not as `root`. Do not add the runner user to the `docker`,
 `sudo`, or application env-file owner groups.
@@ -358,14 +355,19 @@ Configure the `staging` GitHub environment with this variable:
 
 - `STAGING_BASE_URL` — staging API base URL, for example `https://staging-api.<domain>`.
 
-The runner VPS user must have exactly one passwordless sudo capability:
+Configure the `production` GitHub environment with this variable:
+
+- `PROD_BASE_URL` — production API base URL, for example `https://api.<domain>`.
+
+The runner VPS user must have exactly two passwordless sudo capabilities:
 
 ```sudoers
 github-runner ALL=(root) NOPASSWD: /usr/local/sbin/algoedgefno-deploy-staging *
+github-runner ALL=(root) NOPASSWD: /usr/local/sbin/algoedgefno-deploy-prod *
 ```
 
 If the runner uses a different Unix username, replace `github-runner` in the
-sudoers rule with that exact username. Do not grant the runner user direct
+sudoers rules with that exact username. Do not grant the runner user direct
 `docker`, `docker compose`, shell, editor, or arbitrary file-copy sudo
 permissions. The root-owned wrapper validates the digest and staging URL, pulls
 the exact digest before changing config, updates only `BACKEND_STAGING_IMAGE`,
@@ -374,7 +376,13 @@ restarts only `backend-staging`, confirms the staging URL host matches
 reports `environment=staging`, checks the no-token protected endpoint, and
 confirms the running staging container image.
 
-The wrapper runs `docker pull` as root through the narrow sudo rule. For private
+The production wrapper promotes the image already pinned in
+`BACKEND_STAGING_IMAGE`, confirms staging is healthy and actually running that
+digest, reads the expected commit and migration version from staging `/version`,
+updates only `BACKEND_PROD_IMAGE`, restarts only `backend-prod`, and then runs
+the production smoke checks before confirming the running prod container image.
+
+The wrappers run `docker pull` as root through the narrow sudo rules. For private
 GHCR packages, the VPS must already have root-owned Docker credentials that can
 read `ghcr.io/deependra191/algoedgefno-backend`. Use a package-read-only token
 for that Docker login. Do not put GHCR credentials in the runner user's home,
@@ -400,10 +408,27 @@ Normal operator flow:
 Manual fallback flow:
 
 1. Copy the digest-qualified image from the `Publish backend image` workflow
-   summary, for example
-   `ghcr.io/deependra191/algoedgefno-backend@sha256:<digest>`.
+summary, for example
+`ghcr.io/deependra191/algoedgefno-backend@sha256:<digest>`.
 2. Run `Deploy staging` from the `dev` or `main` branch with that exact image.
 3. Verify the same smoke checks as the automatic staging deploy.
+
+## Production deploy automation
+
+The `Deploy production` GitHub Actions workflow is manual-only and must be run
+from `main`. It does not accept or require a manual digest by default. Instead,
+it promotes the image already pinned in `BACKEND_STAGING_IMAGE` on the VPS,
+which should be the exact digest that previously passed staging smoke checks.
+
+The workflow targets the `production` GitHub environment, runs on the same
+self-hosted runner label, and calls the root-owned
+`/usr/local/sbin/algoedgefno-deploy-prod` wrapper. The wrapper validates the
+configured staging and prod hosts, confirms staging is healthy and serving the
+pinned staging digest, updates only `BACKEND_PROD_IMAGE`, restarts only
+`backend-prod`, runs production smoke checks, and confirms the running prod
+container image.
+
+Restrict the `production` GitHub environment to the protected `main` branch.
 
 Backlog cleanup after the self-hosted runner deployment succeeds:
 
