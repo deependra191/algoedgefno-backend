@@ -35,12 +35,14 @@ No secrets in any other file. No secrets in logs.
 
 ### 0.4 Pick time slots now (do not defer)
 
-- Staging sync: **00:15 IST** daily = `45 18 * * *` in UTC.
-- Production sync (when later enabled): **00:45 IST** daily = `15 19 * * *` in UTC.
-- Staging alert: **06:00 IST** daily = `30 0 * * *` in UTC (must be ≥5h after the sync to give the 12h lookback window real data to see).
+- Staging sync: **00:15 IST Tue–Sat** (= UTC Mon–Fri at 18:45) = `45 18 * * 1-5` in UTC.
+- Production sync (when later enabled): **00:45 IST Tue–Sat** (= UTC Mon–Fri at 19:15) = `15 19 * * 1-5` in UTC.
+- Staging alert: **06:00 IST Tue–Sat** (= UTC Tue–Sat at 00:30) = `30 0 * * 2-6` in UTC. Must be ≥5h after the sync to give the 12h lookback window real data to see.
 - 30-minute separation between staging and production sync windows; both well after NSE EOD publish window; never `00:00`.
 
-> **Server timezone is UTC** on the Hetzner VPS. Crontab times are in UTC. Convert IST → UTC by subtracting 5h30m. `timedatectl` should be checked once at setup; do not assume the VPS local time.
+> **Weekday-only by design.** NSE publishes bhavcopies for Mon–Fri IST trading days only. Running sync on UTC weekends produces FAILED runs (NSE 404) that pollute `sync_runs` and create alert noise. The day-of-week field (`1-5` for sync, `2-6` for alert) is what enforces this — without it the cron runs daily.
+
+> **Server timezone is UTC** on the Hetzner VPS. Crontab times are in UTC. Convert IST → UTC by subtracting 5h30m. The day-of-week field follows UTC dates, not IST — UTC Mon–Fri at 18:45 = IST Tue–Sat at 00:15. `timedatectl` should be checked once at setup; do not assume the VPS local time.
 
 ### 0.5 Stale `sync_runs` reconciliation SQL (write into runbook now)
 
@@ -116,8 +118,10 @@ This makes the cron-vs-manual race impossible.
 ### 3.1 Crontab entry (root crontab on the VPS)
 
 ```text
-45 18 * * * flock -n /opt/algoedgefno/locks/sync-staging.lock -c 'cd /opt/algoedgefno/compose && docker compose --profile sync-staging run --rm sync-staging' >> /opt/algoedgefno/logs/sync-staging-cron.log 2>&1
+45 18 * * 1-5 flock -n /opt/algoedgefno/locks/sync-staging.lock -c 'cd /opt/algoedgefno/compose && docker compose --profile sync-staging run --rm sync-staging' >> /opt/algoedgefno/logs/sync-staging-cron.log 2>&1
 ```
+
+`1-5` = UTC Mon–Fri (= IST Tue–Sat at 00:15). NSE has no bhavcopy on weekends, so weekend syncs would 404 and pollute `sync_runs` with non-incident FAILED rows.
 
 ### 3.2 Verify timezone
 
@@ -148,12 +152,14 @@ A second cron at **06:00 IST = 00:30 UTC** runs `scripts/notify-staging-sync.sh`
 Crontab line (root):
 
 ```text
-30 0 * * * /opt/algoedgefno/scripts/notify-staging-sync.sh >> /opt/algoedgefno/logs/notify-staging-cron.log 2>&1
+30 0 * * 2-6 /opt/algoedgefno/scripts/notify-staging-sync.sh >> /opt/algoedgefno/logs/notify-staging-cron.log 2>&1
 ```
+
+`2-6` = UTC Tue–Sat — the day after each weekday sync. UTC Mon sync (= IST Tue 00:15) is reported by the UTC Tue alert (= IST Tue 06:00); UTC Fri sync (= IST Sat 00:15) is reported by the UTC Sat alert (= IST Sat 06:00).
 
 Token + chat ID live in `/opt/algoedgefno/env/telegram.env` (root-owned, mode `600`). The script writes the bot token to a temp curl config file so it does not appear in the process list.
 
-> **Earlier draft used `08:00 IST = 02:30 UTC`** and an email-based alert. Both have been superseded: Telegram replaced email (PR #50), and the time was pulled forward to 06:00 IST so the operator sees the result before the workday starts. The 5h45m gap from sync (00:15 IST) to alert (06:00 IST) is still well within the script's 12-hour lookback.
+> **Earlier drafts** used `30 2 * * *` (08:00 IST) and an email-based alert. Both have been superseded: Telegram replaced email (PR #50), the time moved to 06:00 IST so the operator sees the result before the workday starts, and the day-of-week field was tightened to `2-6` once a full Sat→Mon natural-failure cycle proved the failure-alert path end-to-end.
 
 Without this cron, "staging stable" cannot be observed.
 
@@ -179,7 +185,13 @@ When Phase 6 is satisfied:
 - Crontab adds:
 
   ```text
-  15 19 * * * flock -n /opt/algoedgefno/locks/sync-prod.lock -c 'cd /opt/algoedgefno/compose && docker compose --profile sync-prod run --rm sync-prod' >> /opt/algoedgefno/logs/sync-prod-cron.log 2>&1
+  15 19 * * 1-5 flock -n /opt/algoedgefno/locks/sync-prod.lock -c 'cd /opt/algoedgefno/compose && docker compose --profile sync-prod run --rm sync-prod' >> /opt/algoedgefno/logs/sync-prod-cron.log 2>&1
+  ```
+
+  And a matching prod alert at UTC Tue–Sat 00:30:
+
+  ```text
+  30 0 * * 2-6 /opt/algoedgefno/scripts/notify-prod-sync.sh >> /opt/algoedgefno/logs/notify-prod-cron.log 2>&1
   ```
 
 - Manual prod-sync command is also wrapped in `flock` against `/opt/algoedgefno/locks/sync-prod.lock`.
