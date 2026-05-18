@@ -159,6 +159,12 @@ docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_stag
 
 Before future production migrations, take a fresh production backup and confirm the identity row still says `production`. Use `docs/backup-restore.md` for production backup commands and restore rehearsal steps.
 
+Timescale restore rehearsal has extra requirements beyond plain PostgreSQL:
+create the `timescaledb` extension in the target database first, run
+`timescaledb_pre_restore()` / `timescaledb_post_restore()`, restore with
+`--no-comments`, and re-grant the staging app role access to restored `public`
+tables and sequences before expecting `/ready` to pass.
+
 ## Start services
 
 Start production:
