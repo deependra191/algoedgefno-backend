@@ -10,6 +10,15 @@ allow:
   # is enforced by the component rules; deep scan creates false positives here.
   deepScan: false
 
+excludeFiles:
+  # External test packages (package middleware_test, package logging_test)
+  # legitimately import the package they test. go-arch-lint reports this as
+  # a component self-import. Exclude these specific test files only — other
+  # rules (vendor allowance, cross-component imports) remain enforced via
+  # the rest of the project structure.
+  - ".*/internal/middleware/.*_test\\.go$"
+  - ".*/internal/logging/.*_test\\.go$"
+
 components:
   models:
     in: internal/models
@@ -37,6 +46,14 @@ components:
     in: internal/database
   routes:
     in: internal/routes
+  buildinfo:
+    in: internal/buildinfo
+  csvutil:
+    in: internal/csvutil
+  logging:
+    in: internal/logging
+  strategies:
+    in: internal/strategies
   cmd_server:
     in: cmd/server
   cmd_sync:
@@ -69,6 +86,7 @@ deps:
     mayDependOn:
       - models
       - providers
+      - csvutil
     anyVendorDeps: true
 
   vendor_stub:
@@ -80,12 +98,15 @@ deps:
   services:
     mayDependOn:
       - models
+      - config
     anyVendorDeps: true
 
   handlers:
     mayDependOn:
       - models
       - services
+      - buildinfo
+      - config
     anyVendorDeps: true
 
   middleware:
@@ -114,6 +135,27 @@ deps:
       - services
       - handlers
       - middleware
+      - engine
+      - strategies
+    anyVendorDeps: true
+
+  buildinfo:
+    anyVendorDeps: true
+
+  logging:
+    mayDependOn:
+      - config
+    anyVendorDeps: true
+
+  csvutil:
+    mayDependOn:
+      - models
+      - logging
+    anyVendorDeps: true
+
+  strategies:
+    mayDependOn:
+      - models
     anyVendorDeps: true
 
   cmd_server:
