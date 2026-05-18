@@ -17,6 +17,7 @@ ENV_FILE="${COMPOSE_DIR}/.env"
 PROD_CONTAINER="algoedgefno-backend-prod"
 STAGING_CONTAINER="algoedgefno-backend-staging"
 SMOKE_SCRIPT="/opt/algoedgefno/scripts/smoke-prod.sh"
+ENV_BACKUP_PREFIX="${ENV_FILE}.bak.preflight."
 
 fail() {
     printf 'FAIL %s\n' "$1" >&2
@@ -104,6 +105,7 @@ require_cmd python3
 configured_prod_host="$(env_file_value PROD_API_HOST || true)"
 configured_staging_host="$(env_file_value STAGING_API_HOST || true)"
 deploy_image="$(env_file_value BACKEND_STAGING_IMAGE || true)"
+previous_prod_image="$(env_file_value BACKEND_PROD_IMAGE || true)"
 
 if [[ -z "${configured_prod_host}" ]]; then
     fail "PROD_API_HOST must be set in ${ENV_FILE}"
@@ -123,13 +125,28 @@ fi
 if [[ ! "${deploy_image}" =~ ${IMAGE_PATTERN} ]]; then
     fail "BACKEND_STAGING_IMAGE must be ghcr.io/deependra191/algoedgefno-backend@sha256:<64 lowercase hex chars>"
 fi
+if [[ -z "${previous_prod_image}" ]]; then
+    fail "BACKEND_PROD_IMAGE must already be set in ${ENV_FILE}"
+fi
+if [[ ! "${previous_prod_image}" =~ ${IMAGE_PATTERN} ]]; then
+    fail "BACKEND_PROD_IMAGE must be ghcr.io/deependra191/algoedgefno-backend@sha256:<64 lowercase hex chars>"
+fi
 
 tmp_env="$(mktemp)"
 version_body="$(mktemp)"
+env_backup="$(mktemp "${ENV_BACKUP_PREFIX}XXXXXX")"
 cleanup() {
     rm -f "${tmp_env}" "${version_body}"
 }
 trap cleanup EXIT
+
+restore_previous_prod_image() {
+    install -o root -g root -m 600 "${env_backup}" "${ENV_FILE}"
+    (
+        cd "${COMPOSE_DIR}"
+        docker compose up -d backend-prod
+    )
+}
 
 actual_staging_image="$(docker inspect "${STAGING_CONTAINER}" --format '{{.Config.Image}}' 2>/dev/null || true)"
 if [[ -z "${actual_staging_image}" ]]; then
@@ -165,7 +182,7 @@ pass "staging version: commit ${expected_commit}, migration ${expected_migration
 
 docker pull "${deploy_image}"
 
-cp "${ENV_FILE}" "${ENV_FILE}.bak.preflight"
+cp "${ENV_FILE}" "${env_backup}"
 awk -v image="${deploy_image}" '
     BEGIN { updated = 0 }
     /^BACKEND_PROD_IMAGE=/ {
@@ -183,16 +200,28 @@ awk -v image="${deploy_image}" '
 install -o root -g root -m 600 "${tmp_env}" "${ENV_FILE}"
 
 cd "${COMPOSE_DIR}"
-docker compose up -d backend-prod
+if ! docker compose up -d backend-prod; then
+    restore_previous_prod_image
+    fail "failed to restart backend-prod on ${deploy_image}; restored previous BACKEND_PROD_IMAGE ${previous_prod_image}"
+fi
 
-EXPECTED_IMAGE="${deploy_image}" \
-SMOKE_BASE_URL="${PROD_BASE_URL}" \
-    "${SMOKE_SCRIPT}" "${expected_commit}" "${expected_migration}"
+if ! EXPECTED_IMAGE="${deploy_image}" \
+    SMOKE_BASE_URL="${PROD_BASE_URL}" \
+        "${SMOKE_SCRIPT}" "${expected_commit}" "${expected_migration}"; then
+    restore_previous_prod_image
+    fail "production smoke failed on ${deploy_image}; restored previous BACKEND_PROD_IMAGE ${previous_prod_image}"
+fi
 
 actual_prod_image="$(docker inspect "${PROD_CONTAINER}" --format '{{.Config.Image}}')"
 if [[ "${actual_prod_image}" != "${deploy_image}" ]]; then
-    fail "prod container image: got ${actual_prod_image}, want ${deploy_image}"
+    restore_previous_prod_image
+    fail "prod container image: got ${actual_prod_image}, want ${deploy_image}; restored previous BACKEND_PROD_IMAGE ${previous_prod_image}"
 fi
 pass "prod container image: ${deploy_image}"
 
+printf 'PROMOTED_IMAGE=%s\n' "${deploy_image}"
+printf 'PROMOTED_COMMIT=%s\n' "${expected_commit}"
+printf 'PROMOTED_MIGRATION=%s\n' "${expected_migration}"
+printf 'PREVIOUS_PROD_IMAGE=%s\n' "${previous_prod_image}"
+printf 'ENV_BACKUP=%s\n' "${env_backup}"
 printf 'production deploy passed for %s\n' "${deploy_image}"
