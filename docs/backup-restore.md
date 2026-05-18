@@ -59,6 +59,10 @@ sudo docker cp "algoedgefno-postgres:/tmp/${BACKUP_NAME}" "/opt/algoedgefno/back
 sudo chmod 600 "/opt/algoedgefno/backups/${BACKUP_NAME}"
 ```
 
+Timescale may print warnings about circular foreign-key constraints on internal
+tables such as `hypertable`, `chunk`, or `continuous_agg`. For a full custom-format
+dump, these warnings are expected and do not by themselves mean the backup failed.
+
 Write non-secret metadata next to the dump:
 
 ```bash
@@ -90,6 +94,9 @@ Preconditions:
 
 - `backend-staging` is stopped.
 - You have a fresh production backup in `/opt/algoedgefno/backups/`.
+- If production changed materially after an earlier backup (for example, after a
+  market-data seed), take a newer production backup first and use that latest
+  backup for the rehearsal.
 - You are restoring into `algoedgefno_staging`, never `algoedgefno_prod`.
 - You are comfortable replacing staging data.
 
@@ -119,16 +126,37 @@ docker compose exec postgres sh -c 'dropdb -U "$POSTGRES_USER" --if-exists algoe
 docker compose exec postgres sh -c 'createdb -U "$POSTGRES_USER" -O algoedgefno_staging_app algoedgefno_staging'
 ```
 
+Prepare the staging database for a Timescale restore:
+
+```bash
+docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_staging -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"'
+docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_staging -c "SELECT timescaledb_pre_restore();"'
+```
+
 Restore the production backup into staging:
 
 ```bash
-docker compose exec postgres sh -c "pg_restore -U \"\$POSTGRES_USER\" -d algoedgefno_staging --single-transaction --no-owner --role=algoedgefno_staging_app /tmp/${BACKUP_NAME}"
+docker compose exec postgres sh -c "pg_restore -U \"\$POSTGRES_USER\" -d algoedgefno_staging --single-transaction --no-owner --no-comments /tmp/${BACKUP_NAME}"
+docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_staging -c "SELECT timescaledb_post_restore();"'
 ```
+
+Do not pass `--role=algoedgefno_staging_app` for this full restore. Timescale's
+internal schemas and chunk tables require broader ownership/privileges during the
+restore, and `--role` fails with `_timescaledb_internal` permission errors.
+
+Use `--no-comments` because the restored `COMMENT ON EXTENSION timescaledb` can fail
+unless the restoring role owns the extension.
 
 Rewrite the database identity row so the staging backend can start:
 
 ```bash
 docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_staging -c "INSERT INTO environment_identity (id, identity) VALUES (TRUE, '\''staging'\'') ON CONFLICT (id) DO UPDATE SET identity = EXCLUDED.identity;"'
+```
+
+Re-grant the staging app role access to restored public objects:
+
+```bash
+docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_staging -c "GRANT USAGE ON SCHEMA public TO algoedgefno_staging_app; GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO algoedgefno_staging_app; GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO algoedgefno_staging_app;"'
 ```
 
 Validate staging identity and migration version:
@@ -212,7 +240,7 @@ Minimum local retention before closed beta:
 Clean up temporary container files after copying verified backups:
 
 ```bash
-docker compose exec postgres sh -c 'rm -f /tmp/*.dump'
+docker compose exec postgres sh -c 'rm -f /tmp/*.dump /tmp/*.csv'
 ```
 
 Watch disk usage before and after backup jobs:

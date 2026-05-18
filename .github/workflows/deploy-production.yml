@@ -1,0 +1,98 @@
+name: Deploy production
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: vps-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy-production:
+    name: Promote staging image to production VPS
+    runs-on: [self-hosted, algoedgefno-staging]
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    timeout-minutes: 20
+    env:
+      PROD_BASE_URL: ${{ vars.PROD_BASE_URL }}
+      STAGING_BASE_URL: ${{ vars.STAGING_BASE_URL }}
+
+    steps:
+      - name: Validate deploy inputs
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${PROD_BASE_URL}" ]]; then
+            echo "PROD_BASE_URL must be configured on the production GitHub environment" >&2
+            exit 1
+          fi
+          if [[ -z "${STAGING_BASE_URL}" ]]; then
+            echo "STAGING_BASE_URL must also be configured on the production GitHub environment because prod promotion verifies the currently deployed staging image first" >&2
+            exit 1
+          fi
+          if [[ ! "${PROD_BASE_URL}" =~ ^https://(api\.[A-Za-z0-9.-]+|api-[A-Za-z0-9.-]+|[A-Za-z0-9.-]+\.api\.[A-Za-z0-9.-]+)(:[0-9]{1,5})?$ ]]; then
+            echo "PROD_BASE_URL must be an https production API host without a path" >&2
+            exit 1
+          fi
+          if [[ ! "${STAGING_BASE_URL}" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?$ ]]; then
+            echo "STAGING_BASE_URL must be an https host without a path" >&2
+            exit 1
+          fi
+          prod_host="${PROD_BASE_URL#https://}"
+          prod_host="${prod_host%%:*}"
+          staging_host="${STAGING_BASE_URL#https://}"
+          staging_host="${staging_host%%:*}"
+          if [[ "${prod_host}" == "${staging_host}" ]]; then
+            echo "PROD_BASE_URL and STAGING_BASE_URL must point at different hosts" >&2
+            exit 1
+          fi
+
+      - name: Promote staging image to production
+        id: deploy
+        run: |
+          set -euo pipefail
+
+          deploy_log="$(mktemp)"
+          trap 'rm -f "${deploy_log}"' EXIT
+
+          sudo -n /usr/local/sbin/algoedgefno-deploy-prod "${PROD_BASE_URL}" "${STAGING_BASE_URL}" | tee "${deploy_log}"
+
+          promoted_image="$(grep '^PROMOTED_IMAGE=' "${deploy_log}" | tail -1 | cut -d= -f2- || true)"
+          promoted_commit="$(grep '^PROMOTED_COMMIT=' "${deploy_log}" | tail -1 | cut -d= -f2- || true)"
+          promoted_migration="$(grep '^PROMOTED_MIGRATION=' "${deploy_log}" | tail -1 | cut -d= -f2- || true)"
+          previous_prod_image="$(grep '^PREVIOUS_PROD_IMAGE=' "${deploy_log}" | tail -1 | cut -d= -f2- || true)"
+
+          if [[ -z "${promoted_image}" || -z "${promoted_commit}" || -z "${promoted_migration}" || -z "${previous_prod_image}" ]]; then
+            echo "deploy wrapper did not emit the expected promotion metadata" >&2
+            exit 1
+          fi
+
+          {
+            echo "promoted_image=${promoted_image}"
+            echo "promoted_commit=${promoted_commit}"
+            echo "promoted_migration=${promoted_migration}"
+            echo "previous_prod_image=${previous_prod_image}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Summarize production deployment
+        env:
+          PROMOTED_IMAGE: ${{ steps.deploy.outputs.promoted_image }}
+          PROMOTED_COMMIT: ${{ steps.deploy.outputs.promoted_commit }}
+          PROMOTED_MIGRATION: ${{ steps.deploy.outputs.promoted_migration }}
+          PREVIOUS_PROD_IMAGE: ${{ steps.deploy.outputs.previous_prod_image }}
+        run: |
+          {
+            echo "## Production deployment"
+            echo ""
+            echo "- Source staging URL: \`${STAGING_BASE_URL}\`"
+            echo "- Production URL: \`${PROD_BASE_URL}\`"
+            echo "- Promoted image: \`${PROMOTED_IMAGE}\`"
+            echo "- Promoted commit: \`${PROMOTED_COMMIT}\`"
+            echo "- Migration version: \`${PROMOTED_MIGRATION}\`"
+            echo "- Previous prod image: \`${PREVIOUS_PROD_IMAGE}\`"
+            echo "- Promotion path: current \`BACKEND_STAGING_IMAGE\` pinned on the VPS"
+            echo "- Result: production smoke checks passed"
+          } >> "${GITHUB_STEP_SUMMARY}"
