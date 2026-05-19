@@ -50,7 +50,14 @@ Android is a thin client — all computation happens here.
    - **Bug fixes and follow-ups after a feature has merged**: create PRs against `dev`.
    - **`main` is reserved for `dev → main` integration PRs only** — never the target of a task or feature branch PR.
    - **Branch from the same ref the PR will target** (`git checkout -b task/x origin/dev`) so the PR diff contains only the intended changes. Branching from `main` and PR-ing to `dev` happens to produce a clean diff only when `dev` and `main` are structurally identical, which is not guaranteed.
-24. When asked to create/open a PR, create it ready for review
+
+24. **AI agents never push to long-lived branches and never merge PRs** — AI assistants (Claude Code, Codex, any future agent) must never run `git push origin dev`, `git push origin main`, `git push --force` against long-lived branches, or `gh pr merge` for any PR. All AI-driven work flows through a `task/*` or `feature/*` branch pushed to origin, then a PR opened against `dev` (or the relevant feature branch per rule 23). The human is the sole actor who clicks Merge or pushes to `dev`/`main`. This rule is also enforced mechanically via `permissions.deny` patterns in `.claude/settings.local.json`; if a deny pattern is removed, this rule still applies — the human is the only safety net once the harness is bypassed.
+
+## Codex-only rules
+
+These rules apply only to Codex; Claude Code can ignore them.
+
+C1. When asked to create/open a PR, create it ready for review.
 
 ## Build commands
 
