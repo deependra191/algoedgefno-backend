@@ -8,11 +8,26 @@ source /opt/algoedgefno/env/telegram.env
 : "${TELEGRAM_BOT_TOKEN:?telegram.env must set TELEGRAM_BOT_TOKEN}"
 : "${TELEGRAM_CHAT_ID:?telegram.env must set TELEGRAM_CHAT_ID}"
 
+# HC_PING_NOTIFY_STAGING is optional — omitting it skips the HC ping.
+# Omitting it in production means the staging-alert-cron HC check will alert
+# "no ping received" on schedule. See docs/monitoring-setup.md Phase 2.
+# shellcheck source=/dev/null
+source /opt/algoedgefno/env/healthchecks.env 2>/dev/null || true
+HC_PING_NOTIFY_STAGING="${HC_PING_NOTIFY_STAGING:-}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/monitoring/_hc-ping.sh"
+
 COMPOSE_FILE="/opt/algoedgefno/compose/docker-compose.yml"
 
 # Always remove the curl config temp file on exit (holds the bot token).
 _cfg=""
-cleanup() { [[ -n "${_cfg}" ]] && rm -f "${_cfg}"; }
+cleanup() {
+    [[ -n "${_cfg}" ]] && rm -f "${_cfg}"
+    [[ -n "${_hc_cfg}" ]] && rm -f "${_hc_cfg}"
+}
 trap cleanup EXIT
 
 html_escape() {
@@ -69,6 +84,9 @@ if [[ "${status}" == "COMPLETED" ]]; then
         "$(html_escape "${records}")" \
         "$(html_escape "${started_fmt}")" \
         "$(html_escape "${completed_fmt}")")"
+    # HC ping on success only — the Telegram alert above is already the failure
+    # path; pinging /fail here too would produce duplicate operator alerts.
+    hc_ping "${HC_PING_NOTIFY_STAGING}" ""
 else
     send_telegram "$(printf '<b>❌ AlgoEdge Staging Sync — %s</b>\nRecords: %s\nStarted: %s\nError: %s' \
         "$(html_escape "${status}")" \

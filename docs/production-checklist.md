@@ -104,6 +104,7 @@ The following gate checks now run automatically on every PR. Merge gating itself
 - [ ] Logrotate config is in place and has produced at least one rotated `.1` file
 - [ ] Phase 6 gating criteria in `docs/scheduled-sync-setup.md` are all satisfied before enabling the production sync cron
 - [ ] Production sync cron uses a separate lock file (`/opt/algoedgefno/locks/sync-prod.lock`) and a ≥30-minute gap from the staging window
+- [ ] Sync-cron HC heartbeats are wired per `docs/monitoring-setup.md` Phase 3 (Option A wrapper) so a missed sync raises a Telegram alert via Healthchecks.io
 
 Full phased plan, operating rules, and debugging steps: **`docs/scheduled-sync-setup.md`**.
 
@@ -117,3 +118,15 @@ Full phased plan, operating rules, and debugging steps: **`docs/scheduled-sync-s
 - [ ] Confirm the production digest being promoted exactly matches the digest that was published from `main` and passed staging smoke checks
 - [ ] If schema changed — migration files are present and tested locally first
 - [ ] If schema changed — fresh production backup exists before production migration
+
+---
+
+## 9. Monitoring & alerting
+
+- [ ] `/opt/algoedgefno/env/healthchecks.env` exists on the VPS, owned by root:root, mode 600
+- [ ] All 5 active Healthchecks.io checks are configured and green per `docs/monitoring-setup.md` Phase 1 (HTTP probes 1–3 deferred until first non-friend user — moves to Kuma on a second machine then)
+- [ ] `vps-health.sh` cron entry is installed and has fired at least once (`/opt/algoedgefno/logs/vps-health-cron.log` has recent entries)
+- [ ] At least one synthetic subsystem failure has produced a Telegram alert per Phase 4 verification
+- [ ] Off-host test passed: stopping the cron daemon produced an HC "no ping received" alert within the grace window
+
+Full monitoring setup, ping URL inventory, and verification: `docs/monitoring-setup.md`.
