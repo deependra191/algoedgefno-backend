@@ -48,7 +48,7 @@ Create each check below. For **Active uptime** checks, HC pings the URL you prov
 | 1 | prod-health-uptime | Active uptime | every 5 min | 2 min | HC pings `https://api.algoedgefno.com/health` — no env var needed |
 | 2 | staging-health-uptime | Active uptime | every 5 min | 2 min | HC pings `https://staging-api.algoedgefno.com/health` — no env var needed |
 | 3 | prod-ready-uptime | Active uptime | every 5 min | 2 min | HC pings `https://api.algoedgefno.com/ready` — no env var needed |
-| 4 | vps-health-meta | Cron heartbeat | `0 * * * *` | 15 min | Copy ping URL → `HC_PING_VPS_HEALTH` in `healthchecks.env` |
+| 4 | vps-health-meta | Cron heartbeat | `0 * * * *` | 60 min | Copy ping URL → `HC_PING_VPS_HEALTH` in `healthchecks.env` |
 | 5 | prod-sync | Cron heartbeat | `15 19 * * 1-5` | 6 h | Copy ping URL → `HC_PING_SYNC_PROD` in `healthchecks.env` |
 | 6 | staging-sync | Cron heartbeat | `45 18 * * 1-5` | 6 h | Copy ping URL → `HC_PING_SYNC_STAGING` in `healthchecks.env` |
 | — | backup-nudge | — | deferred | — | Do not create yet. Tracked in `docs/post-beta-checklist.md` item 1. The vps-health.sh backup-freshness check already fires a Telegram alert; this HC slot is reserved for when a scheduled backup cron exists. |
@@ -112,7 +112,7 @@ Run `sudo crontab -e` (root crontab) and add or replace the entries below.
 0 * * * * /opt/algoedgefno/scripts/monitoring/vps-health.sh >> /opt/algoedgefno/logs/vps-health-cron.log 2>&1
 ```
 
-Closed-beta cadence is hourly (worst-case detection lag: 75 min with the 15-min HC grace). Tighten to `*/5 * * * *` with 2-min grace once real users exist — see `docs/post-beta-checklist.md`.
+Closed-beta cadence is hourly with 60-min HC grace — a single missed ping is silently tolerated; only TWO consecutive misses fire an alert. Worst-case detection lag: 120 min. Acceptable while zero external users hit the platform; trades fast signal for a low false-positive rate on a 4GB VPS that occasionally has cron hiccups. Tighten to `*/5 * * * *` with 2-min grace once real users exist — see `docs/post-beta-checklist.md`.
 
 The script sources `healthchecks.env` and handles the HC ping internally. On any subsystem failure it pings `…/fail` with the diagnostic body, writes the same body to stderr (captured by `2>&1` into the cron log), and exits non-zero — exit non-zero makes manual debugging straightforward (`./vps-health.sh && echo PASS || echo FAIL`).
 
