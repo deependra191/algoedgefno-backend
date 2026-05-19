@@ -122,6 +122,21 @@ sudo stat -c '%U %G %a' /opt/algoedgefno/env/healthchecks.env
 
 Run `sudo crontab -e` (root crontab) and add or replace the entries below.
 
+> **CRITICAL — replace, do not append.** The sync entries (checks 5 and 6) MODIFY the existing sync crontab lines installed per `docs/scheduled-sync-setup.md` Phase 3 and 7 — they do not coexist with the original lines. If you append the new lines without removing the old ones, both fire at the same minute: `flock -n` makes the duplicate sync non-destructive but order-dependent, and your HC sync-heartbeat ping fires only when the new line happens to win the race — a silent flakiness that produces false "no ping received" alerts.
+>
+> Same risk for the alert entries (checks 8 and 9): the runbook installs `30 0 * * 2-6 notify-prod-sync.sh` (and staging). If those lines were already installed per `docs/scheduled-sync-setup.md`, do not duplicate — the existing lines now ping HC automatically because the scripts source `healthchecks.env`. Just confirm the existing lines are present.
+>
+> Before editing: run `sudo crontab -l > /root/crontab.before.bak` so you can diff after your change (`sudo crontab -l | diff /root/crontab.before.bak -`).
+>
+> After editing, sanity-check there is exactly one line per logical entry:
+> ```bash
+> sudo crontab -l | grep -cE "sync-(prod|staging)\.lock"   # expect: 2
+> sudo crontab -l | grep -c "notify-prod-sync.sh"          # expect: 1
+> sudo crontab -l | grep -c "notify-staging-sync.sh"       # expect: 1
+> sudo crontab -l | grep -c "vps-health.sh"                # expect: 1
+> sudo crontab -l | grep -c "ping-sync-completion"         # expect: 2
+> ```
+
 ### vps-health.sh (meta-check, check 4)
 
 ```text
