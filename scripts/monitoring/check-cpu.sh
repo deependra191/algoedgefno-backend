@@ -7,8 +7,9 @@ loadavg_5min=$(awk '{print $2}' /proc/loadavg)
 nproc=$(nproc)
 
 # Use awk for the floating-point comparison (bash arithmetic is integer-only).
-overloaded=$(awk -v load="${loadavg_5min}" -v cores="${nproc}" \
-    'BEGIN { print (load >= cores * 0.9) ? "1" : "0" }')
+# Variable name `la` (not `load`): gawk reserves `load` for the @load directive.
+overloaded=$(awk -v la="${loadavg_5min}" -v cores="${nproc}" \
+    'BEGIN { print (la >= cores * 0.9) ? "1" : "0" }')
 
 if [[ "${overloaded}" == "1" ]]; then
     printf 'cpu: 5min load %s >= %s cores * 0.9\n' "${loadavg_5min}" "${nproc}" >&2
