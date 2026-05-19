@@ -148,9 +148,6 @@ deps:
     anyVendorDeps: true
 
   csvutil:
-    mayDependOn:
-      - models
-      - logging
     anyVendorDeps: true
 
   strategies:
