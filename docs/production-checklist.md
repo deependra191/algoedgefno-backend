@@ -124,7 +124,7 @@ Full phased plan, operating rules, and debugging steps: **`docs/scheduled-sync-s
 ## 9. Monitoring & alerting
 
 - [ ] `/opt/algoedgefno/env/healthchecks.env` exists on the VPS, owned by root:root, mode 600
-- [ ] All 8 active Healthchecks.io checks are configured and green per `docs/monitoring-setup.md` Phase 1
+- [ ] All 5 active Healthchecks.io checks are configured and green per `docs/monitoring-setup.md` Phase 1 (HTTP probes 1–3 deferred until first non-friend user — moves to Kuma on a second machine then)
 - [ ] `vps-health.sh` cron entry is installed and has fired at least once (`/opt/algoedgefno/logs/vps-health-cron.log` has recent entries)
 - [ ] At least one synthetic subsystem failure has produced a Telegram alert per Phase 4 verification
 - [ ] Off-host test passed: stopping the cron daemon produced an HC "no ping received" alert within the grace window

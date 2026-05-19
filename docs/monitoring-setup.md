@@ -10,19 +10,19 @@ This runbook complements `docs/scheduled-sync-setup.md` (sync cron) and `docs/ba
 
 ## Overview — what is monitored
 
-| # | Check name | What it detects |
-|---|---|---|
-| 1 | prod-health-uptime | Production API `/health` endpoint unreachable |
-| 2 | staging-health-uptime | Staging API `/health` endpoint unreachable |
-| 3 | prod-ready-uptime | Production API `/ready` endpoint unreachable (DB connectivity) |
-| 4 | vps-health-meta | VPS-side subsystem failures: disk, TLS certs, memory, CPU, container restarts, backup freshness |
-| 5 | prod-sync | Prod sync cron heartbeat — no ping in scheduled window |
-| 6 | staging-sync | Staging sync cron heartbeat — no ping in scheduled window |
-| 7 | backup-nudge | Reserved for future scheduled-backup cron (deferred — see Backup framing section) |
-| 8 | prod-alert-cron | `notify-prod-sync.sh` cron heartbeat — alert job itself has stopped |
-| 9 | staging-alert-cron | `notify-staging-sync.sh` cron heartbeat — alert job itself has stopped |
+| # | Check name | What it detects | Status |
+|---|---|---|---|
+| 1 | prod-health-uptime | Production API `/health` endpoint unreachable | **Deferred** — needs external HTTP probing; revisit when first non-friend user signs up. See Phase 1 § "External HTTP probing". |
+| 2 | staging-health-uptime | Staging API `/health` endpoint unreachable | **Deferred** — same as 1. |
+| 3 | prod-ready-uptime | Production API `/ready` endpoint unreachable (DB connectivity) | **Deferred** — same as 1. |
+| 4 | vps-health-meta | VPS-side subsystem failures: disk, TLS certs, memory, CPU, container restarts, backup freshness | Active |
+| 5 | prod-sync | Prod sync cron heartbeat — no ping in scheduled window | Active |
+| 6 | staging-sync | Staging sync cron heartbeat — no ping in scheduled window | Active |
+| 7 | backup-nudge | Reserved for future scheduled-backup cron | **Deferred** — see Backup framing section |
+| 8 | prod-alert-cron | `notify-prod-sync.sh` cron heartbeat — alert job itself has stopped | Active |
+| 9 | staging-alert-cron | `notify-staging-sync.sh` cron heartbeat — alert job itself has stopped | Active |
 
-Alerts for checks 1–3 (active uptime) are sent by Healthchecks.io directly when the endpoint does not respond. Alerts for checks 4–9 (cron heartbeat) are sent when the expected heartbeat ping fails to arrive within the grace window.
+All active checks (4, 5, 6, 8, 9) are **cron heartbeat** — Healthchecks.io alerts when an expected ping fails to arrive within the grace window. The deferred HTTP-probe checks (1–3) require an external prober and are tracked for post-beta — see Phase 1.
 
 **Off-host property:** Healthchecks.io is a third-party hosted service. The VPS dying — cron not running, container crashing, kernel panic — causes the heartbeat to stop arriving, which triggers the alert. If the monitor were on the same VPS, a full-server failure would silently kill the alerter too.
 
@@ -30,7 +30,7 @@ Alerts for checks 1–3 (active uptime) are sent by Healthchecks.io directly whe
 
 ## Phase 0 — Healthchecks.io account setup
 
-1. Create an account at [healthchecks.io](https://healthchecks.io). The free tier supports 20 checks — this setup uses 8 now (check 7 is reserved).
+1. Create an account at [healthchecks.io](https://healthchecks.io). The free tier supports 20 checks — this setup uses 5 now; checks 1–3 (HTTP probes) and 7 (backup-cron) are deferred until later triggers (see Phase 1).
 2. Create a project named **algoedgefno-prod**.
 3. Under **Integrations**, add a Telegram integration:
    - Bot token: copy from `/opt/algoedgefno/env/telegram.env` → `TELEGRAM_BOT_TOKEN`
@@ -39,9 +39,9 @@ Alerts for checks 1–3 (active uptime) are sent by Healthchecks.io directly whe
 
 ---
 
-## Phase 1 — Create the 8 active checks in the HC dashboard
+## Phase 1 — Create the 5 active checks in the HC dashboard
 
-Create each check below. For **Active uptime** checks, HC pings the URL you provide on schedule and alerts if it does not return 2xx. For **Cron heartbeat** checks, HC waits for a ping from your script and alerts if none arrives.
+Create each check below. All are **Cron heartbeat** type — HC waits for a ping from your script on schedule and alerts if none arrives. HTTP probing (checks 1–3) is deferred — see "External HTTP probing" section after the table.
 
 **Timezone for all HC schedules below: `Asia/Kolkata` (IST).** The VPS itself runs UTC at the OS level (see `docs/scheduled-sync-setup.md` § 0.4) — this is intentional and not changing. But HC lets you pick the schedule timezone independently, and IST display matches the wall clock you read at 3am, which makes the dashboard easier to reason about. The actual VPS crontab lines in Phase 3 remain UTC; the IST expressions below are computed to fire at the same instant in time.
 
@@ -49,27 +49,37 @@ Create each check below. For **Active uptime** checks, HC pings the URL you prov
 
 | # | Check name | Type | Schedule (IST) | Grace | Env var / action |
 |---|---|---|---|---|---|
-| 1 | prod-health-uptime | Active uptime | every 5 min | 2 min | HC pings `https://api.algoedgefno.com/health` — no env var needed |
-| 2 | staging-health-uptime | Active uptime | every 5 min | 2 min | HC pings `https://staging-api.algoedgefno.com/health` — no env var needed |
-| 3 | prod-ready-uptime | Active uptime | every 5 min | 2 min | HC pings `https://api.algoedgefno.com/ready` — no env var needed |
+| 1 | prod-health-uptime | — | deferred | — | Do not create. See "External HTTP probing" below — moves to Kuma-on-second-VPS when traffic justifies it. |
+| 2 | staging-health-uptime | — | deferred | — | Same as 1. |
+| 3 | prod-ready-uptime | — | deferred | — | Same as 1. |
 | 4 | vps-health-meta | Cron heartbeat | `30 * * * *` | 60 min | Copy ping URL → `HC_PING_VPS_HEALTH` in `healthchecks.env` |
 | 5 | prod-sync | Cron heartbeat | `45 0 * * 2-6` | 6 h | Copy ping URL → `HC_PING_SYNC_PROD` in `healthchecks.env` |
 | 6 | staging-sync | Cron heartbeat | `15 0 * * 2-6` | 6 h | Copy ping URL → `HC_PING_SYNC_STAGING` in `healthchecks.env` |
-| — | backup-nudge | — | deferred | — | Do not create yet. Tracked in `docs/post-beta-checklist.md` item 1. The vps-health.sh backup-freshness check already fires a Telegram alert; this HC slot is reserved for when a scheduled backup cron exists. |
+| 7 | backup-nudge | — | deferred | — | Do not create. Tracked in `docs/post-beta-checklist.md` item 1. The vps-health.sh backup-freshness check already fires a Telegram alert; this HC slot is reserved for when a scheduled backup cron exists. |
 | 8 | prod-alert-cron | Cron heartbeat | `0 6 * * 2-6` | 1 h | Copy ping URL → `HC_PING_NOTIFY_PROD` in `healthchecks.env` |
 | 9 | staging-alert-cron | Cron heartbeat | `0 6 * * 2-6` | 1 h | Copy ping URL → `HC_PING_NOTIFY_STAGING` in `healthchecks.env` |
 
-**Total checks created now:** 8. Reserved for future backup cron heartbeat: 1. Net 8 of 20 free-tier slots used.
-
-For active uptime checks (1–3), set:
-- Method: GET
-- Expected status: 2xx
-- Interval: 5 minutes
-- Grace: 2 minutes
+**Total checks created now:** 5. Reserved for future use (HTTP probes 1–3, backup cron heartbeat 7): 4. Net 5 of 20 free-tier slots used — plenty of room.
 
 For cron heartbeat checks (5–6), the 6-hour grace period covers the full next-trading-day window — a sync that ran but whose ping failed to arrive should not alarm until the next expected window is also missed. Grace is calibrated to the operator's response window (alerter at 06:00 IST), not the 24-hour cron interval — applying grace = interval here would push detection out two days, which defeats the purpose.
 
 For cron heartbeat checks (8–9), grace = 1 h gives the alert script (which runs at 06:00 IST) enough cushion before declaring it missed without delaying the page significantly past breakfast.
+
+### External HTTP probing (checks 1–3) — deferred
+
+Healthchecks.io's free tier does not include outbound HTTP probing. Checks 1–3 would have covered failure modes that VPS-internal monitoring cannot:
+
+- Backend process running but hung (container "running", endpoint times out)
+- Network routing or firewall blocking the VPS from the internet
+- DNS misconfigured for `api.algoedgefno.com` / `staging-api.algoedgefno.com`
+- Caddy proxying to the wrong upstream
+- Backend code bug returning 5xx on `/health`
+
+**Why deferred:** during closed beta the operator is the only user. Any of the above is discoverable within seconds of opening the Android app — the marginal alerting value is small. Setting up an external prober (UptimeRobot free tier, or a self-hosted alternative) adds operational complexity that is only justified when there are real users who would hit the failure before the operator does.
+
+**When to add it:** when the first non-friend user signs up. Recommended path at that point is to deploy **Uptime Kuma on a second machine** (Oracle Cloud Always Free VM, home Raspberry Pi, or cheapest possible second VPS). Kuma's strengths are exactly HTTP/TCP/DNS probing, with built-in Telegram integration. The same Kuma instance can also receive push pings for the cron-heartbeat checks, optionally consolidating monitoring under one tool. Kuma was rejected for the initial setup *only* because hosting it on the same VPS it monitors defeats the off-host property — a second machine resolves that.
+
+This decision and the trigger (first non-friend user) are tracked in `docs/post-beta-checklist.md`.
 
 ---
 
