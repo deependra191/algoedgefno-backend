@@ -118,6 +118,62 @@ sudo stat -c '%U %G %a' /opt/algoedgefno/env/healthchecks.env
 
 ---
 
+## Phase 2.5 — Deploy scripts to the VPS
+
+The scripts referenced in Phase 3 (`vps-health.sh`, `ping-sync-completion.sh`, and the modified `notify-{prod,staging}-sync.sh`) live in this repo; they must be copied to `/opt/algoedgefno/scripts/` on the VPS before any cron line will work. There is no automated sync — the operator does this manually.
+
+This phase also creates `/var/lib/algoedge-monitoring/`, which `check-containers.sh` uses to persist per-container restart counts for drift detection.
+
+From the local checkout of the merged-to-main branch (or, before merge, the open PR branch):
+
+```bash
+# Adjust to your actual local checkout path and VPS ssh target:
+REPO=/Users/deependrasingh/algoedgefno-backend
+VPS=root@<your-vps-host-or-ip>
+
+ssh $VPS "mkdir -p /opt/algoedgefno/scripts/monitoring /var/lib/algoedge-monitoring"
+
+rsync -avz --chmod=u+rwx,go+rx,go-w \
+    $REPO/scripts/monitoring/ \
+    $VPS:/opt/algoedgefno/scripts/monitoring/
+
+rsync -avz --chmod=u+rwx,go+rx,go-w \
+    $REPO/scripts/notify-prod-sync.sh \
+    $REPO/scripts/notify-staging-sync.sh \
+    $VPS:/opt/algoedgefno/scripts/
+
+ssh $VPS "chown -R root:root /opt/algoedgefno/scripts/monitoring /opt/algoedgefno/scripts/notify-*-sync.sh /var/lib/algoedge-monitoring"
+```
+
+Verify deployment:
+
+```bash
+ssh $VPS bash -lc '
+  ls -la /opt/algoedgefno/scripts/monitoring/
+  ls -la /opt/algoedgefno/scripts/notify-*-sync.sh
+  for f in /opt/algoedgefno/scripts/monitoring/*.sh /opt/algoedgefno/scripts/notify-*-sync.sh; do
+    bash -n "$f" && echo "OK $f" || echo "FAIL $f"
+  done
+'
+```
+
+All eight files in `scripts/monitoring/` should be present and mode 755. Both notify scripts should have recent mtimes and be mode 755. Every `bash -n` line should say `OK`.
+
+Dry-run `vps-health.sh` once to confirm it reaches HC:
+
+```bash
+ssh $VPS /opt/algoedgefno/scripts/monitoring/vps-health.sh
+```
+
+Expected:
+- All subsystems pass → exit 0, no stderr, HC check 4 transitions to green.
+- A subsystem fails → exit 1, stderr lists the failing subsystem, HC check 4 pings `/fail` and a Telegram alert lands.
+- If `healthchecks.env` is missing or `HC_PING_VPS_HEALTH` is empty, you will see a clear stderr message — fix Phase 2 and re-run.
+
+**Redeploy whenever scripts change.** Re-running the rsync block above is the standard "deploy scripts after a merge" step. It is idempotent.
+
+---
+
 ## Phase 3 — Install cron entries on the VPS
 
 Run `sudo crontab -e` (root crontab) and add or replace the entries below.
