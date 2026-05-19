@@ -22,11 +22,15 @@ source "${SCRIPT_DIR}/monitoring/_hc-ping.sh"
 
 COMPOSE_FILE="/opt/algoedgefno/compose/docker-compose.yml"
 
-# Always remove the curl config temp file on exit (holds the bot token).
+# Always remove the curl config temp files on exit (each holds a credential).
+# `return 0` is load-bearing: under `set -e`, an EXIT trap that returns
+# non-zero overrides the script's exit status, masking a successful run
+# as exit 1 when both vars are empty at exit time.
 _cfg=""
 cleanup() {
     [[ -n "${_cfg}" ]] && rm -f "${_cfg}"
     [[ -n "${_hc_cfg}" ]] && rm -f "${_hc_cfg}"
+    return 0
 }
 trap cleanup EXIT
 
