@@ -7,6 +7,8 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_DIR"
 
-echo "=== NSE EOD sync started at $(date) ===" >> logs/sync.log
-./bin/sync >> logs/sync.log 2>&1
-echo "=== NSE EOD sync finished at $(date) ===" >> logs/sync.log
+{
+    echo "=== NSE EOD sync started at $(date) ==="
+    ./bin/sync 2>&1
+    echo "=== NSE EOD sync finished at $(date) ==="
+} >> logs/sync.log

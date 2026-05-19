@@ -117,3 +117,15 @@ Full phased plan, operating rules, and debugging steps: **`docs/scheduled-sync-s
 - [ ] Confirm the production digest being promoted exactly matches the digest that was published from `main` and passed staging smoke checks
 - [ ] If schema changed — migration files are present and tested locally first
 - [ ] If schema changed — fresh production backup exists before production migration
+
+---
+
+## 10. Monitoring & alerting
+
+- [ ] `/opt/algoedgefno/env/healthchecks.env` exists on the VPS, owned by root:root, mode 600
+- [ ] All 8 active Healthchecks.io checks are configured and green per `docs/monitoring-setup.md` Phase 1
+- [ ] `vps-health.sh` cron entry is installed and has fired at least once (`/opt/algoedgefno/logs/vps-health-cron.log` has recent entries)
+- [ ] At least one synthetic subsystem failure has produced a Telegram alert per Phase 4 verification
+- [ ] Off-host test passed: stopping the cron daemon produced an HC "no ping received" alert within the grace window
+
+Full monitoring setup, ping URL inventory, and verification: `docs/monitoring-setup.md`.
