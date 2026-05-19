@@ -11,12 +11,12 @@ host="${1:?usage: check-cert.sh <hostname>}"
 
 end_date=$(timeout 8 bash -c "echo | openssl s_client -connect \"${host}:443\" -servername \"${host}\" 2>/dev/null \
     | openssl x509 -noout -enddate" | cut -d= -f2) || {
-    printf 'cert_%s: TLS handshake failed for %s\n' "${host}" "${host}" >&2
+    printf 'TLS handshake failed for %s\n' "${host}" >&2
     exit 1
 }
 
 expiry_epoch=$(date -d "${end_date}" +%s 2>/dev/null) || {
-    printf 'cert_%s: could not parse cert date for %s\n' "${host}" "${host}" >&2
+    printf 'could not parse cert date for %s\n' "${host}" >&2
     exit 1
 }
 

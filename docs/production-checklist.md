@@ -104,6 +104,7 @@ The following gate checks now run automatically on every PR. Merge gating itself
 - [ ] Logrotate config is in place and has produced at least one rotated `.1` file
 - [ ] Phase 6 gating criteria in `docs/scheduled-sync-setup.md` are all satisfied before enabling the production sync cron
 - [ ] Production sync cron uses a separate lock file (`/opt/algoedgefno/locks/sync-prod.lock`) and a ≥30-minute gap from the staging window
+- [ ] Sync-cron HC heartbeats are wired per `docs/monitoring-setup.md` Phase 3 (Option A wrapper) so a missed sync raises a Telegram alert via Healthchecks.io
 
 Full phased plan, operating rules, and debugging steps: **`docs/scheduled-sync-setup.md`**.
 
@@ -120,7 +121,7 @@ Full phased plan, operating rules, and debugging steps: **`docs/scheduled-sync-s
 
 ---
 
-## 10. Monitoring & alerting
+## 9. Monitoring & alerting
 
 - [ ] `/opt/algoedgefno/env/healthchecks.env` exists on the VPS, owned by root:root, mode 600
 - [ ] All 8 active Healthchecks.io checks are configured and green per `docs/monitoring-setup.md` Phase 1

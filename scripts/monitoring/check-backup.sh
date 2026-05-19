@@ -8,6 +8,7 @@ set -euo pipefail
 readonly BACKUP_DIR="/opt/algoedgefno/backups"
 readonly MAX_AGE_DAYS=7
 
+# find -printf is GNU-only; the VPS runs Linux. macOS BSD find does not support it.
 newest=$(find "${BACKUP_DIR}" -maxdepth 1 -name '*.dump' \
     -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1)
 
