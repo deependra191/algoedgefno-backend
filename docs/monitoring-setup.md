@@ -43,17 +43,21 @@ Alerts for checks 1–3 (active uptime) are sent by Healthchecks.io directly whe
 
 Create each check below. For **Active uptime** checks, HC pings the URL you provide on schedule and alerts if it does not return 2xx. For **Cron heartbeat** checks, HC waits for a ping from your script and alerts if none arrives.
 
-| # | Check name | Type | Schedule | Grace | Env var / action |
+**Timezone for all HC schedules below: `Asia/Kolkata` (IST).** The VPS itself runs UTC at the OS level (see `docs/scheduled-sync-setup.md` § 0.4) — this is intentional and not changing. But HC lets you pick the schedule timezone independently, and IST display matches the wall clock you read at 3am, which makes the dashboard easier to reason about. The actual VPS crontab lines in Phase 3 remain UTC; the IST expressions below are computed to fire at the same instant in time.
+
+**Grace policy for the variable-cadence check (4):** grace equals the cron interval. One missed cycle is silently absorbed; only TWO consecutive misses fire an alert. When the cadence tightens post-beta (`*/5 * * * *`), grace tightens with it (5 min). The fixed-cadence daily checks (5, 6, 8, 9) keep grace values calibrated to operator response time, not the schedule interval — see note below the table.
+
+| # | Check name | Type | Schedule (IST) | Grace | Env var / action |
 |---|---|---|---|---|---|
 | 1 | prod-health-uptime | Active uptime | every 5 min | 2 min | HC pings `https://api.algoedgefno.com/health` — no env var needed |
 | 2 | staging-health-uptime | Active uptime | every 5 min | 2 min | HC pings `https://staging-api.algoedgefno.com/health` — no env var needed |
 | 3 | prod-ready-uptime | Active uptime | every 5 min | 2 min | HC pings `https://api.algoedgefno.com/ready` — no env var needed |
-| 4 | vps-health-meta | Cron heartbeat | `0 * * * *` | 60 min | Copy ping URL → `HC_PING_VPS_HEALTH` in `healthchecks.env` |
-| 5 | prod-sync | Cron heartbeat | `15 19 * * 1-5` | 6 h | Copy ping URL → `HC_PING_SYNC_PROD` in `healthchecks.env` |
-| 6 | staging-sync | Cron heartbeat | `45 18 * * 1-5` | 6 h | Copy ping URL → `HC_PING_SYNC_STAGING` in `healthchecks.env` |
+| 4 | vps-health-meta | Cron heartbeat | `30 * * * *` | 60 min | Copy ping URL → `HC_PING_VPS_HEALTH` in `healthchecks.env` |
+| 5 | prod-sync | Cron heartbeat | `45 0 * * 2-6` | 6 h | Copy ping URL → `HC_PING_SYNC_PROD` in `healthchecks.env` |
+| 6 | staging-sync | Cron heartbeat | `15 0 * * 2-6` | 6 h | Copy ping URL → `HC_PING_SYNC_STAGING` in `healthchecks.env` |
 | — | backup-nudge | — | deferred | — | Do not create yet. Tracked in `docs/post-beta-checklist.md` item 1. The vps-health.sh backup-freshness check already fires a Telegram alert; this HC slot is reserved for when a scheduled backup cron exists. |
-| 8 | prod-alert-cron | Cron heartbeat | `30 0 * * 2-6` | 1 h | Copy ping URL → `HC_PING_NOTIFY_PROD` in `healthchecks.env` |
-| 9 | staging-alert-cron | Cron heartbeat | `30 0 * * 2-6` | 1 h | Copy ping URL → `HC_PING_NOTIFY_STAGING` in `healthchecks.env` |
+| 8 | prod-alert-cron | Cron heartbeat | `0 6 * * 2-6` | 1 h | Copy ping URL → `HC_PING_NOTIFY_PROD` in `healthchecks.env` |
+| 9 | staging-alert-cron | Cron heartbeat | `0 6 * * 2-6` | 1 h | Copy ping URL → `HC_PING_NOTIFY_STAGING` in `healthchecks.env` |
 
 **Total checks created now:** 8. Reserved for future backup cron heartbeat: 1. Net 8 of 20 free-tier slots used.
 
@@ -63,7 +67,9 @@ For active uptime checks (1–3), set:
 - Interval: 5 minutes
 - Grace: 2 minutes
 
-For cron heartbeat checks (5–6), the 6-hour grace period covers the full next-trading-day window — a sync that ran but whose ping failed to arrive should not alarm until the next expected window is also missed.
+For cron heartbeat checks (5–6), the 6-hour grace period covers the full next-trading-day window — a sync that ran but whose ping failed to arrive should not alarm until the next expected window is also missed. Grace is calibrated to the operator's response window (alerter at 06:00 IST), not the 24-hour cron interval — applying grace = interval here would push detection out two days, which defeats the purpose.
+
+For cron heartbeat checks (8–9), grace = 1 h gives the alert script (which runs at 06:00 IST) enough cushion before declaring it missed without delaying the page significantly past breakfast.
 
 ---
 
@@ -112,7 +118,9 @@ Run `sudo crontab -e` (root crontab) and add or replace the entries below.
 0 * * * * /opt/algoedgefno/scripts/monitoring/vps-health.sh >> /opt/algoedgefno/logs/vps-health-cron.log 2>&1
 ```
 
-Closed-beta cadence is hourly with 60-min HC grace — a single missed ping is silently tolerated; only TWO consecutive misses fire an alert. Worst-case detection lag: 120 min. Acceptable while zero external users hit the platform; trades fast signal for a low false-positive rate on a 4GB VPS that occasionally has cron hiccups. Tighten to `*/5 * * * *` with 2-min grace once real users exist — see `docs/post-beta-checklist.md`.
+Closed-beta cadence is hourly with 60-min HC grace — a single missed ping is silently tolerated; only TWO consecutive misses fire an alert. Worst-case detection lag: 120 min. Acceptable while zero external users hit the platform; trades fast signal for a low false-positive rate on a 4GB VPS that occasionally has cron hiccups.
+
+**Grace policy:** for this check, HC grace always equals the cron interval. When the cadence tightens, grace tightens with it. Post-beta target: `*/5 * * * *` with 5-min HC grace — see `docs/post-beta-checklist.md`.
 
 The script sources `healthchecks.env` and handles the HC ping internally. On any subsystem failure it pings `…/fail` with the diagnostic body, writes the same body to stderr (captured by `2>&1` into the cron log), and exits non-zero — exit non-zero makes manual debugging straightforward (`./vps-health.sh && echo PASS || echo FAIL`).
 
@@ -215,7 +223,7 @@ The state file at `/var/lib/algoedge-monitoring/algoedgefno-backend-staging.rest
 
 This is the most important test — it verifies the off-host monitoring property. With the closed-beta hourly cadence the "wait for the alert" window is up to 75 minutes. To keep the test tractable, temporarily tighten the HC check schedule for this run.
 
-1. In the HC dashboard, edit check 4 (`vps-health-meta`): change schedule to `*/5 * * * *`, grace to `2 minutes`, save.
+1. In the HC dashboard, edit check 4 (`vps-health-meta`): change schedule to `*/5 * * * *` (in Asia/Kolkata is the same expression — minute-interval crons are timezone-independent), grace to `5 minutes`, save. Grace matches the cron interval per the grace policy.
 2. On the VPS, also temporarily tighten the crontab line to `*/5` so the script keeps pinging on schedule:
    ```bash
    sudo crontab -e
@@ -226,14 +234,14 @@ This is the most important test — it verifies the off-host monitoring property
    ```bash
    sudo systemctl stop cron
    ```
-5. Within ~7 minutes (5 min schedule + 2 min grace) the Telegram group should receive an HC alert: "`vps-health-meta` is DOWN".
+5. Within ~10 minutes (5 min schedule + 5 min grace) the Telegram group should receive an HC alert: "`vps-health-meta` is DOWN".
 6. Restart cron and revert the temporary tightening:
    ```bash
    sudo systemctl start cron
    sudo crontab -e
    # revert "*/5 * * * *" back to "0 * * * *" on the vps-health.sh line
    ```
-   In the HC dashboard, revert check 4's schedule to `0 * * * *` and grace to `15 minutes`.
+   In the HC dashboard, revert check 4's schedule to `30 * * * *` (IST) and grace to `60 minutes`.
 
 If no alert arrives in step 5, the HC check schedule or grace window is misconfigured, or the Telegram integration is not enabled on this specific check.
 
