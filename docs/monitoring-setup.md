@@ -48,7 +48,7 @@ Create each check below. For **Active uptime** checks, HC pings the URL you prov
 | 1 | prod-health-uptime | Active uptime | every 5 min | 2 min | HC pings `https://api.algoedgefno.com/health` — no env var needed |
 | 2 | staging-health-uptime | Active uptime | every 5 min | 2 min | HC pings `https://staging-api.algoedgefno.com/health` — no env var needed |
 | 3 | prod-ready-uptime | Active uptime | every 5 min | 2 min | HC pings `https://api.algoedgefno.com/ready` — no env var needed |
-| 4 | vps-health-meta | Cron heartbeat | `*/5 * * * *` | 2 min | Copy ping URL → `HC_PING_VPS_HEALTH` in `healthchecks.env` |
+| 4 | vps-health-meta | Cron heartbeat | `0 * * * *` | 15 min | Copy ping URL → `HC_PING_VPS_HEALTH` in `healthchecks.env` |
 | 5 | prod-sync | Cron heartbeat | `15 19 * * 1-5` | 6 h | Copy ping URL → `HC_PING_SYNC_PROD` in `healthchecks.env` |
 | 6 | staging-sync | Cron heartbeat | `45 18 * * 1-5` | 6 h | Copy ping URL → `HC_PING_SYNC_STAGING` in `healthchecks.env` |
 | — | backup-nudge | — | deferred | — | Do not create yet. Tracked in `docs/post-beta-checklist.md` item 1. The vps-health.sh backup-freshness check already fires a Telegram alert; this HC slot is reserved for when a scheduled backup cron exists. |
@@ -109,8 +109,10 @@ Run `sudo crontab -e` (root crontab) and add or replace the entries below.
 ### vps-health.sh (meta-check, check 4)
 
 ```text
-*/5 * * * * /opt/algoedgefno/scripts/monitoring/vps-health.sh >> /opt/algoedgefno/logs/vps-health-cron.log 2>&1
+0 * * * * /opt/algoedgefno/scripts/monitoring/vps-health.sh >> /opt/algoedgefno/logs/vps-health-cron.log 2>&1
 ```
+
+Closed-beta cadence is hourly (worst-case detection lag: 75 min with the 15-min HC grace). Tighten to `*/5 * * * *` with 2-min grace once real users exist — see `docs/post-beta-checklist.md`.
 
 The script sources `healthchecks.env` and handles the HC ping internally. On any subsystem failure it pings `…/fail` with the diagnostic body, writes the same body to stderr (captured by `2>&1` into the cron log), and exits non-zero — exit non-zero makes manual debugging straightforward (`./vps-health.sh && echo PASS || echo FAIL`).
 
@@ -211,14 +213,29 @@ The state file at `/var/lib/algoedge-monitoring/algoedgefno-backend-staging.rest
 
 ### Off-host test
 
-```bash
-sudo systemctl stop cron
-# Wait for the grace window of the vps-health-meta check (2 minutes after the
-# missed */5 ping). Telegram alert from HC: "vps-health-meta is DOWN".
-sudo systemctl start cron
-```
+This is the most important test — it verifies the off-host monitoring property. With the closed-beta hourly cadence the "wait for the alert" window is up to 75 minutes. To keep the test tractable, temporarily tighten the HC check schedule for this run.
 
-This is the most important test — it verifies the off-host monitoring property. If stopping cron does not produce an HC alert, the HC check schedule or grace window is misconfigured.
+1. In the HC dashboard, edit check 4 (`vps-health-meta`): change schedule to `*/5 * * * *`, grace to `2 minutes`, save.
+2. On the VPS, also temporarily tighten the crontab line to `*/5` so the script keeps pinging on schedule:
+   ```bash
+   sudo crontab -e
+   # change "0 * * * *" to "*/5 * * * *" on the vps-health.sh line, save
+   ```
+3. Wait at least 5 minutes for HC to register a fresh ping.
+4. Stop cron:
+   ```bash
+   sudo systemctl stop cron
+   ```
+5. Within ~7 minutes (5 min schedule + 2 min grace) the Telegram group should receive an HC alert: "`vps-health-meta` is DOWN".
+6. Restart cron and revert the temporary tightening:
+   ```bash
+   sudo systemctl start cron
+   sudo crontab -e
+   # revert "*/5 * * * *" back to "0 * * * *" on the vps-health.sh line
+   ```
+   In the HC dashboard, revert check 4's schedule to `0 * * * *` and grace to `15 minutes`.
+
+If no alert arrives in step 5, the HC check schedule or grace window is misconfigured, or the Telegram integration is not enabled on this specific check.
 
 ---
 
