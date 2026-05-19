@@ -164,12 +164,14 @@ The sync cron jobs are one-liner flock commands that do not know their own HC pi
 Crontab lines for the syncs become:
 
 ```text
-15 19 * * 1-5 flock -n /opt/algoedgefno/locks/sync-prod.lock -c 'cd /opt/algoedgefno/compose && docker compose --profile sync-prod run --rm sync-prod' && /opt/algoedgefno/scripts/monitoring/ping-sync-completion.sh HC_PING_SYNC_PROD >> /opt/algoedgefno/logs/sync-prod-cron.log 2>&1
+15 19 * * 1-5 ( flock -n /opt/algoedgefno/locks/sync-prod.lock -c 'cd /opt/algoedgefno/compose && docker compose --profile sync-prod run --rm sync-prod' && /opt/algoedgefno/scripts/monitoring/ping-sync-completion.sh HC_PING_SYNC_PROD ) >> /opt/algoedgefno/logs/sync-prod-cron.log 2>&1
 
-45 18 * * 1-5 flock -n /opt/algoedgefno/locks/sync-staging.lock -c 'cd /opt/algoedgefno/compose && docker compose --profile sync-staging run --rm sync-staging' && /opt/algoedgefno/scripts/monitoring/ping-sync-completion.sh HC_PING_SYNC_STAGING >> /opt/algoedgefno/logs/sync-staging-cron.log 2>&1
+45 18 * * 1-5 ( flock -n /opt/algoedgefno/locks/sync-staging.lock -c 'cd /opt/algoedgefno/compose && docker compose --profile sync-staging run --rm sync-staging' && /opt/algoedgefno/scripts/monitoring/ping-sync-completion.sh HC_PING_SYNC_STAGING ) >> /opt/algoedgefno/logs/sync-staging-cron.log 2>&1
 ```
 
 The `&&` chain ensures the HC ping only fires on successful sync. A failed sync leaves the heartbeat absent and HC alerts after the grace window.
+
+**Why the `( ... ) >> log 2>&1` subshell grouping is required:** in POSIX shell (`/bin/sh` used by cron), `>> log 2>&1` binds to the immediately preceding command, not to the whole `&&` chain. Without the parens, `flock ... && ping-sync ... >> log 2>&1` only logs the ping wrapper's output (which is empty on success) — the sync's own output (flock messages, docker compose logs, failure diagnostics) ends up in cron's mail spool and is silently dropped when `MAILTO=""` or no mailer is installed. The subshell wraps both commands so the redirect applies to the group.
 
 ### Alert cron lines (checks 8 and 9 — already in crontab from sync setup)
 
