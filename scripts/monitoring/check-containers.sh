@@ -7,10 +7,17 @@ set -euo pipefail
 
 readonly STATE_DIR="/var/lib/algoedge-monitoring"
 
+readonly CONTAINER_CADDY="algoedgefno-caddy"
+readonly CONTAINER_POSTGRES="algoedgefno-postgres"
 readonly CONTAINER_PROD="algoedgefno-backend-prod"
 readonly CONTAINER_STAGING="algoedgefno-backend-staging"
 
-readonly CONTAINERS=("${CONTAINER_PROD}" "${CONTAINER_STAGING}")
+readonly CONTAINERS=(
+    "${CONTAINER_CADDY}"
+    "${CONTAINER_POSTGRES}"
+    "${CONTAINER_PROD}"
+    "${CONTAINER_STAGING}"
+)
 
 mkdir -p "${STATE_DIR}"
 

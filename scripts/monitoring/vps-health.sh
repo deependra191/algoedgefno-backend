@@ -51,7 +51,12 @@ run_check "${SUBSYS_BACKUP}"       "${SCRIPT_DIR}/check-backup.sh"
 
 if [[ "${#failures[@]}" -gt 0 ]]; then
     body=$(printf '%s\n' "${failures[@]}")
+    # Echo to stderr so manual runs surface the diagnostic on the terminal
+    # and cron's stderr-redirect captures it in vps-health-cron.log.
+    printf '%s\n' "${body}" >&2
     hc_ping "${HC_PING_VPS_HEALTH}/fail" "${body}"
-else
-    hc_ping "${HC_PING_VPS_HEALTH}" ""
+    exit 1
 fi
+
+hc_ping "${HC_PING_VPS_HEALTH}" ""
+

@@ -49,8 +49,8 @@ Create each check below. For **Active uptime** checks, HC pings the URL you prov
 | 2 | staging-health-uptime | Active uptime | every 5 min | 2 min | HC pings `https://staging-api.algoedgefno.com/health` — no env var needed |
 | 3 | prod-ready-uptime | Active uptime | every 5 min | 2 min | HC pings `https://api.algoedgefno.com/ready` — no env var needed |
 | 4 | vps-health-meta | Cron heartbeat | `*/5 * * * *` | 2 min | Copy ping URL → `HC_PING_VPS_HEALTH` in `healthchecks.env` |
-| 5 | prod-sync | Cron heartbeat | `15 19 * * 1-5` | 6 h | Add ping URL to crontab line via curl suffix (see Phase 3) |
-| 6 | staging-sync | Cron heartbeat | `45 18 * * 1-5` | 6 h | Add ping URL to crontab line via curl suffix (see Phase 3) |
+| 5 | prod-sync | Cron heartbeat | `15 19 * * 1-5` | 6 h | Copy ping URL → `HC_PING_SYNC_PROD` in `healthchecks.env` |
+| 6 | staging-sync | Cron heartbeat | `45 18 * * 1-5` | 6 h | Copy ping URL → `HC_PING_SYNC_STAGING` in `healthchecks.env` |
 | — | backup-nudge | — | deferred | — | Do not create yet. Tracked in `docs/post-beta-checklist.md` item 1. The vps-health.sh backup-freshness check already fires a Telegram alert; this HC slot is reserved for when a scheduled backup cron exists. |
 | 8 | prod-alert-cron | Cron heartbeat | `30 0 * * 2-6` | 1 h | Copy ping URL → `HC_PING_NOTIFY_PROD` in `healthchecks.env` |
 | 9 | staging-alert-cron | Cron heartbeat | `30 0 * * 2-6` | 1 h | Copy ping URL → `HC_PING_NOTIFY_STAGING` in `healthchecks.env` |
@@ -87,9 +87,11 @@ Content template — fill in each value from the Healthchecks.io dashboard (Phas
 HC_PING_VPS_HEALTH=""
 HC_PING_NOTIFY_PROD=""
 HC_PING_NOTIFY_STAGING=""
+HC_PING_SYNC_PROD=""
+HC_PING_SYNC_STAGING=""
 ```
 
-Do not add `HC_PING_SYNC_*` entries here — the sync-cron heartbeats (checks 5 and 6) are handled at the crontab line level (see Phase 3).
+Any URL left empty causes the corresponding heartbeat ping to be skipped silently. Healthchecks.io will then alert "no ping received" for that check once its grace window elapses — useful as a smoke test before all five checks exist, but every URL must be set before the closed-beta gate.
 
 Verify permissions after writing:
 
@@ -110,38 +112,19 @@ Run `sudo crontab -e` (root crontab) and add or replace the entries below.
 */5 * * * * /opt/algoedgefno/scripts/monitoring/vps-health.sh >> /opt/algoedgefno/logs/vps-health-cron.log 2>&1
 ```
 
-The script sources `healthchecks.env` and handles the HC ping internally.
+The script sources `healthchecks.env` and handles the HC ping internally. On any subsystem failure it pings `…/fail` with the diagnostic body, writes the same body to stderr (captured by `2>&1` into the cron log), and exits non-zero — exit non-zero makes manual debugging straightforward (`./vps-health.sh && echo PASS || echo FAIL`).
+
+**MAILTO must be empty in the crontab** so cron does not email the operator on every non-zero exit. Healthchecks.io is the single alert source — a parallel cron email is duplicate noise. Confirm with:
+
+```bash
+sudo crontab -l | head -3
+```
+
+If a `MAILTO=...` line is present, replace it with `MAILTO=""` at the top of the crontab.
 
 ### Sync cron heartbeats (checks 5 and 6)
 
-The sync cron jobs do not run a script that knows its own HC ping URL — they are one-liner flock commands. Two options for the heartbeat ping:
-
-**Option A (recommended) — wrapper script:**
-
-Create `/opt/algoedgefno/scripts/monitoring/ping-sync-completion.sh` with this content:
-
-```bash
-#!/bin/bash
-set -euo pipefail
-# shellcheck source=/dev/null
-source /opt/algoedgefno/env/healthchecks.env
-# $1 is the env var name: HC_PING_SYNC_PROD or HC_PING_SYNC_STAGING.
-# This script is invoked from crontab after successful sync completion.
-url="${!1:-}"
-[[ -z "${url}" ]] && exit 0
-cfg=$(mktemp)
-chmod 600 "${cfg}"
-printf 'url = "%s"\n' "${url}" > "${cfg}"
-curl -fsS --max-time 10 --config "${cfg}" > /dev/null 2>&1 || true
-rm -f "${cfg}"
-```
-
-Add two new env vars to `healthchecks.env`:
-
-```bash
-HC_PING_SYNC_PROD=""
-HC_PING_SYNC_STAGING=""
-```
+The sync cron jobs are one-liner flock commands that do not know their own HC ping URL. The committed wrapper `scripts/monitoring/ping-sync-completion.sh` looks the URL up by env-var name so the URL itself never appears in the crontab line (and therefore never in `ps`).
 
 Crontab lines for the syncs become:
 
@@ -151,15 +134,7 @@ Crontab lines for the syncs become:
 45 18 * * 1-5 flock -n /opt/algoedgefno/locks/sync-staging.lock -c 'cd /opt/algoedgefno/compose && docker compose --profile sync-staging run --rm sync-staging' && /opt/algoedgefno/scripts/monitoring/ping-sync-completion.sh HC_PING_SYNC_STAGING >> /opt/algoedgefno/logs/sync-staging-cron.log 2>&1
 ```
 
-**Option B (quick) — inline curl with --config:**
-
-The ping URL is a credential and must not appear in argv. A one-liner approach that keeps it out of `ps`:
-
-```bash
-hc_cfg=$(mktemp); chmod 600 "$hc_cfg"; printf 'url = "%s"\n' "$(grep HC_PING_SYNC_PROD /opt/algoedgefno/env/healthchecks.env | cut -d= -f2- | tr -d '"')" > "$hc_cfg"; curl -fsS --max-time 10 --config "$hc_cfg" >/dev/null 2>&1; rm -f "$hc_cfg"
-```
-
-This is harder to read and harder to test. Option A is preferred.
+The `&&` chain ensures the HC ping only fires on successful sync. A failed sync leaves the heartbeat absent and HC alerts after the grace window.
 
 ### Alert cron lines (checks 8 and 9 — already in crontab from sync setup)
 

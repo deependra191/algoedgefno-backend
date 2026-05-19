@@ -9,8 +9,9 @@ readonly WARN_DAYS=14
 
 host="${1:?usage: check-cert.sh <hostname>}"
 
-end_date=$(timeout 8 bash -c "echo | openssl s_client -connect \"${host}:443\" -servername \"${host}\" 2>/dev/null \
-    | openssl x509 -noout -enddate" | cut -d= -f2) || {
+end_date=$(timeout 8 openssl s_client -connect "${host}:443" -servername "${host}" </dev/null 2>/dev/null \
+    | openssl x509 -noout -enddate \
+    | cut -d= -f2) || {
     printf 'TLS handshake failed for %s\n' "${host}" >&2
     exit 1
 }
