@@ -79,20 +79,21 @@ Run this twice — once for `APP_SECRET_TOKEN`, once for `JWT_SECRET`. Never reu
 
 ## 6. CI/CD — GitHub Actions (CRITICAL — must be in place before go-live)
 
-**Status: TODO — image publishing exists, but PR gate checks still need to be added.**
+**Status: ACCEPTED WITH MANUAL CONTROL — CI gate added; merge discipline is enforced locally until GitHub branch protection / rulesets become available for this private repo.**
 
-The following gate checks must run automatically on every PR before merge. Running them manually is not sufficient for a production codebase.
+The following gate checks now run automatically on every PR. Merge gating itself, however, is human discipline — see the pending item below for why.
 
-- [ ] **Create `.github/workflows/ci.yml`** covering:
-  - `go build ./...` — compile check
-  - `go vet ./...` — vet warnings
-  - `go test ./...` — full test suite
-  - `go-arch-lint` — import boundary enforcement (config already exists at `.go-arch-lint.yml`)
-- [ ] Workflow triggers on `pull_request` targeting `dev` and `main`
-- [ ] Branch protection on `dev` and `main` requires the CI workflow to pass before merge — enforced in GitHub repo settings, not just by convention
-- [ ] Secrets required by tests (if any) are added as GitHub Actions secrets, not committed
+- [x] CI workflow exists at `.github/workflows/ci.yml` and covers:
+  - `go build ./...`
+  - `go vet ./...`
+  - `go test ./...`
+  - `go-arch-lint check`
+- [x] Workflow triggers on `pull_request` targeting `dev` and `main`
+- [x] Local / manual branch rule is in place: do not merge PRs unless CI passes — documented in CLAUDE.md / AGENTS.md hard rule 24
+- [ ] GitHub-enforced branch protection / rulesets requiring CI to pass before merge — pending. GitHub Free does not enforce branch protection or rulesets on private repositories; the repo must move to GitHub Team or Enterprise before this can be turned on. Until then, item above is the only gate.
+- [ ] Secrets required by tests, if any, are added as GitHub Actions secrets, not committed
 
-**Why this is CRITICAL:** without branch protection + passing CI, the architectural rules in CLAUDE.md (layer boundaries, no `json:` tags on domain types, etc.) are enforced only by code review. One missed review means a rule violation ships to prod. CI makes this machine-enforced.
+**Why this matters:** CI is now machine-run on every PR — `go build`, `go vet`, `go test`, and `go-arch-lint` all execute automatically, so failures are visible before merge. Merge enforcement, however, is currently manual: the GitHub Free plan does not enforce branch protection or rulesets on private repos, so it is the human's responsibility (per CLAUDE.md / AGENTS.md rule 24) not to click Merge on a red PR. Upgrading to GitHub Team or Enterprise would convert this from convention to machine-enforced gating — until then, the architectural rules in CLAUDE.md (layer boundaries, no `json:` tags on domain types, etc.) are enforced by code review + a visible red X, not by a hard merge block.
 
 ---
 
