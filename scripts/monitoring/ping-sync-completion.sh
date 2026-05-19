@@ -14,7 +14,12 @@ source /opt/algoedgefno/env/healthchecks.env
 source "${SCRIPT_DIR}/_hc-ping.sh"
 
 _hc_cfg=""
-cleanup() { [[ -n "${_hc_cfg}" ]] && rm -f "${_hc_cfg}"; }
+# Always `return 0` — under `set -e`, an EXIT trap that returns non-zero
+# overrides the script's exit status, masking a successful run as exit 1.
+cleanup() {
+    [[ -n "${_hc_cfg}" ]] && rm -f "${_hc_cfg}"
+    return 0
+}
 trap cleanup EXIT
 
 var_name="${1:?usage: ping-sync-completion.sh <ENV_VAR_NAME>}"
