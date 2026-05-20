@@ -11,10 +11,12 @@ readonly EXIT_FAILURE=1
 
 usage() {
     cat >&2 <<'EOF'
-usage: scripts/security/check-log-redaction.sh --env staging|prod [--since <window>]
+usage: scripts/security/check-log-redaction.sh --env staging|prod [--since <window>] [--secret-file <path>]
 
 Checks recent backend logs for obvious credential leaks without printing matching
 log lines. Uses docker logs first, then journalctl if docker logs is unavailable.
+Optional secret-file lines use LABEL=VALUE format; values are checked literally
+and never printed.
 EOF
 }
 
@@ -46,6 +48,7 @@ docker_since_value() {
 
 env_name=""
 since="${DEFAULT_LOG_SINCE}"
+secret_file=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -57,6 +60,11 @@ while [[ $# -gt 0 ]]; do
         --since)
             [[ $# -ge 2 ]] || fail_usage "--since requires a value"
             since="$2"
+            shift 2
+            ;;
+        --secret-file)
+            [[ $# -ge 2 ]] || fail_usage "--secret-file requires a value"
+            secret_file="$2"
             shift 2
             ;;
         -h|--help)
@@ -100,10 +108,8 @@ else
     require_cmd journalctl
     if journalctl --since "${since}" CONTAINER_NAME="${container_name}" > "${logs_file}" 2>/dev/null; then
         log_source="journalctl:CONTAINER_NAME=${container_name}"
-    elif journalctl --since "${since}" -u docker > "${logs_file}" 2>/dev/null; then
-        log_source="journalctl:docker"
     else
-        fail "could not read docker logs or journalctl for ${container_name}"
+        fail "could not read backend container logs for ${container_name} via docker logs or container-scoped journalctl"
     fi
 fi
 
@@ -120,6 +126,18 @@ check_pattern() {
     fi
 }
 
+check_literal() {
+    local label="$1"
+    local value="$2"
+    local count
+    [[ -n "${value}" ]] || return
+    count="$(grep -Fic -- "${value}" "${logs_file}" || true)"
+    if [[ "${count}" != "0" ]]; then
+        printf 'FAIL log-redaction: %s matched %s line(s)\n' "${label}" "${count}" >&2
+        failures=$((failures + 1))
+    fi
+}
+
 check_pattern "authorization bearer marker" 'Bearer[[:space:]]+'
 check_pattern "JWT_SECRET marker" 'JWT_SECRET'
 check_pattern "APP_SECRET_TOKEN marker" 'APP_SECRET_TOKEN'
@@ -130,6 +148,14 @@ check_pattern "DB password marker" 'db_password|DB_PASSWORD'
 check_pattern "token assignment marker" 'token='
 check_pattern "secret assignment marker" 'secret='
 check_pattern "DSN assignment marker" 'dsn='
+
+if [[ -n "${secret_file}" ]]; then
+    [[ -r "${secret_file}" ]] || fail "secret file is not readable"
+    while IFS='=' read -r secret_label secret_value; do
+        [[ -n "${secret_label}" ]] || continue
+        check_literal "secret value: ${secret_label}" "${secret_value}"
+    done < "${secret_file}"
+fi
 
 if [[ "${failures}" -ne 0 ]]; then
     fail "log redaction found ${failures} secret-like pattern(s) in ${log_source}"

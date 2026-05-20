@@ -23,7 +23,6 @@ readonly LARGE_RANGE_FROM="2015-01-01"
 readonly LARGE_RANGE_TO="2026-01-01"
 
 readonly BURST_REQUESTS=50
-readonly BURST_WINDOW_LABEL="5s"
 readonly POLL_INTERVAL_SECONDS="0.1"
 readonly POLL_DURATION_SECONDS=30
 readonly POLL_REQUESTS=300
@@ -122,6 +121,10 @@ case "${env_name}" in
         ;;
 esac
 
+if [[ "${env_name}" == "${ENV_PROD}" && "${expect_backtests_disabled}" == "true" ]]; then
+    fail_usage "--expect-backtests-disabled is staging-only"
+fi
+
 if [[ -z "${app_token}" ]]; then
     fail_fast "${token_var_name} must be set in the shell"
 fi
@@ -131,11 +134,15 @@ require_cmd python3
 
 tmpdir="$(mktemp -d)"
 auth_configs=()
+secret_files=()
 report_lock=""
 
 cleanup() {
     local cfg
     for cfg in "${auth_configs[@]}"; do
+        [[ -n "${cfg}" ]] && rm -f "${cfg}"
+    done
+    for cfg in "${secret_files[@]}"; do
         [[ -n "${cfg}" ]] && rm -f "${cfg}"
     done
     [[ -n "${report_lock}" && -d "${report_lock}" ]] && rmdir "${report_lock}" 2>/dev/null || true
@@ -417,7 +424,7 @@ run_burst_check() {
     done
 
     if [[ "${bad_count}" -eq 0 ]]; then
-        record_result "PASS" "burst-backtest-submit" "${BURST_REQUESTS} requests over ${BURST_WINDOW_LABEL}; no 5xx or unexpected responses"
+        record_result "PASS" "burst-backtest-submit" "${BURST_REQUESTS} sequential submit attempts; no 5xx or unexpected responses"
     else
         record_result "FAIL" "burst-backtest-submit" "${bad_count} of ${BURST_REQUESTS} requests returned 5xx or unexpected responses"
     fi
@@ -467,7 +474,16 @@ run_poll_check() {
 
 run_log_redaction_check() {
     local output
-    if output="$("${script_dir}/check-log-redaction.sh" --env "${env_name}" --since "${run_started_at}" 2>&1)"; then
+    local secret_file="${tmpdir}/log-redaction-secrets.txt"
+    chmod 700 "${tmpdir}"
+    printf 'target app token=%s\n' "${app_token}" > "${secret_file}"
+    if [[ "${env_name}" == "${ENV_PROD}" && -n "${STAGING_APP_TOKEN:-}" ]]; then
+        printf 'staging app token=%s\n' "${STAGING_APP_TOKEN}" >> "${secret_file}"
+    fi
+    chmod 600 "${secret_file}"
+    secret_files+=("${secret_file}")
+
+    if output="$("${script_dir}/check-log-redaction.sh" --env "${env_name}" --since "${run_started_at}" --secret-file "${secret_file}" 2>&1)"; then
         record_result "PASS" "log-redaction" "${output}"
     else
         record_result "FAIL" "log-redaction" "${output}"

@@ -40,8 +40,10 @@ Run staging first and confirm zero failures:
 scripts/security/abuse-suite.sh --env staging
 ```
 
-Then run production. Production intentionally excludes load cases; it verifies
-auth, validation, and log redaction only.
+Then run production. Production intentionally skips load cases. It still calls
+`/api/v1/backtests` for the large-range validation case, but that is considered
+prod-safe because the request is expected to fail pre-execution with `422` and
+`date range exceeds maximum allowed`.
 
 ```bash
 scripts/security/abuse-suite.sh --env prod
@@ -87,8 +89,15 @@ scripts/security/check-log-redaction.sh --since '10 minutes ago' --env prod
 ```
 
 It reads Docker logs for the selected backend container first and falls back to
-`journalctl` if Docker logs are unavailable. It reports only pattern labels and
-counts, never matching log lines.
+container-scoped `journalctl` if Docker logs are unavailable. It reports only
+pattern labels and counts, never matching log lines or secret values.
+
+For standalone raw-secret checks, pass a chmod-600 file containing
+`LABEL=VALUE` lines:
+
+```bash
+scripts/security/check-log-redaction.sh --env staging --secret-file /path/to/secret-values.txt
+```
 
 ## Expected Coverage
 
@@ -99,6 +108,7 @@ counts, never matching log lines.
 - Large backtest date range returns `422`.
 - Staging kill-switch mode returns `503`.
 - Staging burst submit and aggressive result polling produce no `5xx`.
+- Production load tests are skipped.
 - Cross-tenant lookup remains visible as `[skip: single-user platform]` until
   multi-user auth lands.
 - Recent logs contain no bearer tokens, JWT markers, app secret markers, DB
