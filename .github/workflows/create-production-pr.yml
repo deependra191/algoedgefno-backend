@@ -1,0 +1,196 @@
+name: Create production PR
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: create-production-pr
+  cancel-in-progress: false
+
+env:
+  # This workflow is intentionally scoped to repo policy: dev to main production promotion.
+  BASE_BRANCH: main
+  HEAD_BRANCH: dev
+  BODY_FILE: production-pr-body.md
+  COMPARE_FILE: compare.json
+  COMMIT_PULLS_FILE: commit-pulls.jsonl
+  PRS_FILE: included-prs.json
+  DIRECT_COMMITS_FILE: direct-commits.json
+  GITHUB_API_ACCEPT: application/vnd.github+json
+  COMMIT_PULLS_ACCEPT: application/vnd.github.groot-preview+json
+  GITHUB_API_VERSION: 2022-11-28
+  PR_DESCRIPTION_CHARACTER_LIMIT: "2000"
+
+jobs:
+  create-production-pr:
+    name: Create dev to main PR
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+
+    steps:
+      - name: Build production PR description
+        run: |
+          set -euo pipefail
+
+          compare_url="repos/${REPOSITORY}/compare/${BASE_BRANCH}...${HEAD_BRANCH}"
+          gh api \
+            -H "Accept: ${GITHUB_API_ACCEPT}" \
+            -H "X-GitHub-Api-Version: ${GITHUB_API_VERSION}" \
+            "${compare_url}" \
+            > "${COMPARE_FILE}"
+
+          ahead_by="$(jq -er '.ahead_by | numbers' "${COMPARE_FILE}")"
+          commit_count="$(jq -er '.commits | arrays | length' "${COMPARE_FILE}")"
+          if [[ "${commit_count}" != "${ahead_by}" ]]; then
+            echo "Compare API returned ${commit_count} commits but ahead_by is ${ahead_by}; refusing to generate incomplete production PR body."
+            exit 1
+          fi
+          if [[ "${ahead_by}" == "0" ]]; then
+            echo "No commits found in ${HEAD_BRANCH} that are missing from ${BASE_BRANCH}."
+            exit 0
+          fi
+
+          jq -r '.commits[].sha' "${COMPARE_FILE}" | while IFS= read -r commit_sha; do
+            gh api \
+              -H "Accept: ${COMMIT_PULLS_ACCEPT}" \
+              -H "X-GitHub-Api-Version: ${GITHUB_API_VERSION}" \
+              "repos/${REPOSITORY}/commits/${commit_sha}/pulls" \
+              | jq -c --arg sha "${commit_sha}" --arg headBranch "${HEAD_BRANCH}" \
+                  '{sha: $sha, pulls: [.[] | select(.merged_at != null and .base.ref == $headBranch)]}'
+          done \
+            > "${COMMIT_PULLS_FILE}"
+
+          jq -s '[.[].pulls[]] | unique_by(.number) | sort_by(.merged_at // .created_at)' \
+            "${COMMIT_PULLS_FILE}" \
+            > "${PRS_FILE}"
+
+          jq -s --slurpfile compare "${COMPARE_FILE}" '
+            map(select(.pulls | length == 0) | .sha) as $directShas
+            | $compare[0].commits
+            | map(
+                . as $commit
+                | select($directShas | index($commit.sha))
+                | {
+                    sha: $commit.sha,
+                    shortSha: ($commit.sha[0:7]),
+                    message: ($commit.commit.message | split("\n")[0]),
+                    author: ($commit.commit.author.name // "unknown"),
+                    authoredAt: $commit.commit.author.date,
+                    url: $commit.html_url
+                  }
+              )
+          ' "${COMMIT_PULLS_FILE}" \
+            > "${DIRECT_COMMITS_FILE}"
+
+          release_date="$(date -u +%Y-%m-%d)"
+          compare_link="https://github.com/${REPOSITORY}/compare/${BASE_BRANCH}...${HEAD_BRANCH}"
+          pr_count="$(jq 'length' "${PRS_FILE}")"
+          direct_commit_count="$(jq 'length' "${DIRECT_COMMITS_FILE}")"
+
+          {
+            echo "## Production promotion summary"
+            echo ""
+            echo "Promotes \`${HEAD_BRANCH}\` to \`${BASE_BRANCH}\` for the ${release_date} production deploy."
+            echo ""
+            echo "- Compare: ${compare_link}"
+            echo "- Commits ahead: ${ahead_by}"
+            echo "- Included feature PRs: ${pr_count}"
+            echo "- Direct commits without a merged \`${HEAD_BRANCH}\` PR: ${direct_commit_count}"
+            echo ""
+          } > "${BODY_FILE}"
+
+          if [[ "${pr_count}" != "0" ]]; then
+            {
+              echo "## Included feature PRs"
+              echo ""
+            } >> "${BODY_FILE}"
+
+            jq -r --arg descriptionLimit "${PR_DESCRIPTION_CHARACTER_LIMIT}" '
+              .[] |
+              (.body // "" | gsub("\r"; "")) as $description |
+              ($descriptionLimit | tonumber) as $limit |
+              "### #" + (.number | tostring) + " " + .title + "\n" +
+              "\n" +
+              "- Author: @" + .user.login + "\n" +
+              "- Merged: `" + .merged_at + "`\n" +
+              "- URL: " + .html_url + "\n" +
+              "\n" +
+              (
+                if ($description | length) > 0 then
+                  "#### Description\n\n" +
+                  (
+                    if ($description | length) > $limit then
+                      $description[0:$limit] + "\n\n... [truncated]\n"
+                    else
+                      $description + "\n"
+                    end
+                  )
+                else
+                  "_No PR description provided._\n"
+                end
+              )
+            ' "${PRS_FILE}" >> "${BODY_FILE}"
+          fi
+
+          if [[ "${direct_commit_count}" != "0" ]]; then
+            {
+              echo "## Direct commits"
+              echo ""
+              jq -r '.[] | "- [`" + .shortSha + "`](" + .url + ") " + .message + " - " + .author' "${DIRECT_COMMITS_FILE}"
+              echo ""
+            } >> "${BODY_FILE}"
+          fi
+
+          {
+            echo "## Deployment notes"
+            echo ""
+            echo "- Merging this PR updates \`${BASE_BRANCH}\`."
+            echo "- The existing publish workflow builds the backend image from \`${BASE_BRANCH}\` after merge."
+            echo "- The existing production deploy workflow remains a manual promotion step on \`${BASE_BRANCH}\`."
+          } >> "${BODY_FILE}"
+
+          {
+            echo "## Generated production PR body"
+            echo ""
+            cat "${BODY_FILE}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Create or update PR
+        run: |
+          set -euo pipefail
+
+          if [[ ! -s "${BODY_FILE}" ]]; then
+            echo "No PR body was generated because ${HEAD_BRANCH} has no changes over ${BASE_BRANCH}."
+            exit 0
+          fi
+
+          release_date="$(date -u +%Y-%m-%d)"
+          title="Promote ${HEAD_BRANCH} to ${BASE_BRANCH} - ${release_date}"
+          existing_pr="$(
+            gh pr list \
+              --repo "${REPOSITORY}" \
+              --base "${BASE_BRANCH}" \
+              --head "${HEAD_BRANCH}" \
+              --state open \
+              --json number \
+              --jq '.[0].number // empty'
+          )"
+
+          if [[ -n "${existing_pr}" ]]; then
+            gh pr edit "${existing_pr}" --repo "${REPOSITORY}" --title "${title}" --body-file "${BODY_FILE}"
+            echo "Updated existing production PR #${existing_pr}."
+            exit 0
+          fi
+
+          gh pr create \
+            --repo "${REPOSITORY}" \
+            --base "${BASE_BRANCH}" \
+            --head "${HEAD_BRANCH}" \
+            --title "${title}" \
+            --body-file "${BODY_FILE}"
