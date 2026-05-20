@@ -8,12 +8,12 @@ source /opt/algoedgefno/env/telegram.env
 : "${TELEGRAM_BOT_TOKEN:?telegram.env must set TELEGRAM_BOT_TOKEN}"
 : "${TELEGRAM_CHAT_ID:?telegram.env must set TELEGRAM_CHAT_ID}"
 
-# HC_PING_NOTIFY_STAGING is optional — omitting it skips the HC ping.
-# Omitting it in production means the staging-alert-cron HC check will alert
+# HC_PING_NOTIFY_PROD is optional — omitting it skips the HC ping.
+# Omitting it in production means the prod-alert-cron HC check will alert
 # "no ping received" on schedule. See docs/monitoring-setup.md Phase 2.
 # shellcheck source=/dev/null
 source /opt/algoedgefno/env/healthchecks.env 2>/dev/null || true
-HC_PING_NOTIFY_STAGING="${HC_PING_NOTIFY_STAGING:-}"
+HC_PING_NOTIFY_PROD="${HC_PING_NOTIFY_PROD:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -61,20 +61,20 @@ send_telegram() {
 sep=$'\x1f'
 
 if ! result=$(docker compose -f "${COMPOSE_FILE}" exec -T postgres \
-    psql -U algoedgefno_staging_app -d algoedgefno_staging -tA -F "${sep}" -c \
+    psql -U algoedgefno_prod_app -d algoedgefno_prod -tA -F "${sep}" -c \
     "SELECT status, records_processed, started_at,
             COALESCE(completed_at::text, ''), COALESCE(error_message, '')
      FROM sync_runs
      WHERE started_at > NOW() - INTERVAL '12 hours'
      ORDER BY started_at DESC
      LIMIT 1;" 2>&1); then
-    send_telegram "$(printf '<b>⚠️ AlgoEdge Staging Sync — CHECK FAILED</b>\nCould not query sync_runs.\n<code>%s</code>' \
+    send_telegram "$(printf '<b>⚠️ AlgoEdge Prod Sync — CHECK FAILED</b>\nCould not query sync_runs.\n<code>%s</code>' \
         "$(html_escape "${result}")")"
     exit 1
 fi
 
 if [[ -z "${result}" ]]; then
-    send_telegram "$(printf '<b>⚠️ AlgoEdge Staging Sync — NO RUN</b>\nNo sync_runs row found in the last 12 hours.\nExpected window: 00:15 IST daily.')"
+    send_telegram "$(printf '<b>⚠️ AlgoEdge Prod Sync — NO RUN</b>\nNo sync_runs row found in the last 12 hours.\nExpected window: 00:45 IST daily.')"
     exit 0
 fi
 
@@ -84,15 +84,15 @@ started_fmt=$(TZ="Asia/Kolkata" date -d "${started}" +"%Y-%m-%d %H:%M IST" 2>/de
 completed_fmt=$(TZ="Asia/Kolkata" date -d "${completed}" +"%Y-%m-%d %H:%M IST" 2>/dev/null || printf '%s' "${completed}")
 
 if [[ "${status}" == "COMPLETED" ]]; then
-    send_telegram "$(printf '<b>✅ AlgoEdge Staging Sync — SUCCESS</b>\nRecords: %s\nStarted: %s\nCompleted: %s' \
+    send_telegram "$(printf '<b>✅ AlgoEdge Prod Sync — SUCCESS</b>\nRecords: %s\nStarted: %s\nCompleted: %s' \
         "$(html_escape "${records}")" \
         "$(html_escape "${started_fmt}")" \
         "$(html_escape "${completed_fmt}")")"
     # HC ping on success only — the Telegram alert above is already the failure
     # path; pinging /fail here too would produce duplicate operator alerts.
-    hc_ping "${HC_PING_NOTIFY_STAGING}" ""
+    hc_ping "${HC_PING_NOTIFY_PROD}" ""
 else
-    send_telegram "$(printf '<b>❌ AlgoEdge Staging Sync — %s</b>\nRecords: %s\nStarted: %s\nError: %s' \
+    send_telegram "$(printf '<b>❌ AlgoEdge Prod Sync — %s</b>\nRecords: %s\nStarted: %s\nError: %s' \
         "$(html_escape "${status}")" \
         "$(html_escape "${records}")" \
         "$(html_escape "${started_fmt}")" \

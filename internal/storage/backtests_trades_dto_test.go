@@ -62,7 +62,7 @@ func TestTradePersistUnmarshalNewFormat(t *testing.T) {
 		"SEBIFees":       0.011,
 		"GST":            7.91,
 		"StampDuty":      0.15,
-		"TotalCharges":   72,
+		"TotalCharges":   61,
 		"NetPnL":         928,
 		"Reason":         "MA bullish",
 		"ExitReason":     "target"
@@ -72,7 +72,7 @@ func TestTradePersistUnmarshalNewFormat(t *testing.T) {
 	if err := json.Unmarshal(raw, &tp); err != nil {
 		t.Fatalf("unexpected unmarshal error: %v", err)
 	}
-	if tp.GrossPnL != 1000 || tp.NetPnL != 928 || tp.TotalCharges != 72 {
+	if tp.GrossPnL != 1000 || tp.NetPnL != 928 || tp.TotalCharges != 61 {
 		t.Errorf("new-format fields not preserved: gross=%v net=%v charges=%v",
 			tp.GrossPnL, tp.NetPnL, tp.TotalCharges)
 	}
@@ -186,7 +186,7 @@ func TestEncodeTradesJSONKeyShape(t *testing.T) {
 		Side:         models.OrderSideBuy,
 		GrossPnL:     1000,
 		NetPnL:       928,
-		TotalCharges: 72,
+		TotalCharges: 61,
 		Slippage:     11,
 		Brokerage:    40,
 		STT:          9,
@@ -237,7 +237,7 @@ func TestTradePersistRoundTrip(t *testing.T) {
 		GST:            16.2,
 		StampDuty:      0.3,
 		TotalCharges:   173.55,
-		NetPnL:         11057.70,
+		NetPnL:         11012.70,
 		Reason:         "MA crossover",
 		ExitReason:     "target",
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"slices"
 	"time"
 
@@ -19,7 +20,8 @@ const (
 	NoDayLimit    = 0
 	NoCandleLimit = 0
 
-	oneDay = 24 * time.Hour
+	oneDay                       = 24 * time.Hour
+	backtestPnlIdentityTolerance = 1.0
 )
 
 var (
@@ -31,6 +33,7 @@ var (
 	ErrBacktestDisabled            = errors.New("backtests are disabled")
 	ErrBacktestDateRangeExceeded   = errors.New("backtest date range exceeds maximum allowed days")
 	ErrBacktestCandleCountExceeded = errors.New("backtest candle count exceeds maximum")
+	ErrBacktestPnlIdentityMismatch = errors.New("backtest pnl identity mismatch")
 )
 
 // BacktestLimits defines the operational constraints for backtest submission.
@@ -234,6 +237,10 @@ func (s *BacktestService) executeRun(run *models.BacktestRun, strategy *models.S
 		s.failRun(ctx, run, fmt.Errorf("engine error: %w", err))
 		return
 	}
+	if err := validateBacktestPnlIdentity(result); err != nil {
+		s.failRun(ctx, run, err)
+		return
+	}
 	if err := s.applyResult(ctx, run, result, capital); err != nil {
 		log.Printf("backtest %s: failed to persist result: %v", run.ID, err)
 	}
@@ -377,6 +384,7 @@ func (s *BacktestService) applyResult(ctx context.Context, run *models.BacktestR
 	run.NetPnl = &result.NetPnL
 	run.GrossPnl = &result.GrossPnL
 	run.TotalCharges = &result.TotalCharges
+	run.Slippage = &result.Slippage
 	run.TotalTrades = &result.TotalTrades
 	run.WinCount = &result.WinCount
 	run.LossCount = &result.LossCount
@@ -386,6 +394,18 @@ func (s *BacktestService) applyResult(ctx context.Context, run *models.BacktestR
 	run.ChartData = s.engine.BuildChartData(result.Trades, capital, run.FromTs, run.ToTs)
 	if err := s.backtestStore.UpdateResult(ctx, run); err != nil {
 		return fmt.Errorf("failed to save backtest results: %w", err)
+	}
+	return nil
+}
+
+func validateBacktestPnlIdentity(result *models.BacktestResult) error {
+	if result == nil {
+		return ErrBacktestPnlIdentityMismatch
+	}
+	expectedNetPnl := result.GrossPnL - result.TotalCharges - result.Slippage
+	if math.Abs(expectedNetPnl-result.NetPnL) > backtestPnlIdentityTolerance {
+		return fmt.Errorf("%w: grossPnl=%.4f totalCharges=%.4f slippage=%.4f netPnl=%.4f",
+			ErrBacktestPnlIdentityMismatch, result.GrossPnL, result.TotalCharges, result.Slippage, result.NetPnL)
 	}
 	return nil
 }

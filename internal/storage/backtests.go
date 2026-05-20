@@ -79,12 +79,13 @@ func (s *BacktestStore) UpdateResult(ctx context.Context, run *models.BacktestRu
 			chart_data    = $11::jsonb,
 			gross_pnl     = $12,
 			total_charges = $13,
+			slippage      = $14,
 			completed_at  = NOW()
 		WHERE id = $1`,
 		ent.ID, ent.Status, ent.NetPnl, ent.TotalTrades, ent.WinCount,
 		ent.LossCount, ent.MaxDrawdown, tradesJSON, ent.ErrorMessage,
 		resultStatsJSON, chartDataJSON,
-		ent.GrossPnl, ent.TotalCharges,
+		ent.GrossPnl, ent.TotalCharges, ent.Slippage,
 	)
 	return err
 }
@@ -96,7 +97,7 @@ func (s *BacktestStore) GetByID(ctx context.Context, id uuid.UUID) (*models.Back
 		       error_message, created_at, completed_at,
 		       strategy_slug, capital, lots, underlying,
 		       result_stats, chart_data,
-		       gross_pnl, total_charges
+		       gross_pnl, total_charges, slippage
 		FROM backtest_runs WHERE id = $1`, id)
 	ent, err := scanBacktestRun(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -115,7 +116,7 @@ func (s *BacktestStore) GetByIDWithTrades(ctx context.Context, id uuid.UUID) (*m
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
 		       trades_json, error_message, created_at, completed_at,
 		       strategy_slug, capital, lots, underlying,
-		       gross_pnl, total_charges
+		       gross_pnl, total_charges, slippage
 		FROM backtest_runs WHERE id = $1`, id)
 	ent, err := scanBacktestRunWithTrades(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -152,7 +153,7 @@ func (s *BacktestStore) ListCompleted(ctx context.Context, page, limit int) ([]m
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
 		       error_message, created_at, completed_at,
 		       strategy_slug, capital, lots, underlying,
-		       gross_pnl, total_charges
+		       gross_pnl, total_charges, slippage
 		FROM backtest_runs
 		WHERE status = $1 AND completed_at IS NOT NULL AND total_trades > 0
 		ORDER BY completed_at DESC, created_at DESC
@@ -181,7 +182,7 @@ func (s *BacktestStore) LatestCompletedBySlug(ctx context.Context, slug string) 
 		       error_message, created_at, completed_at,
 		       strategy_slug, capital, lots, underlying,
 		       result_stats, chart_data,
-		       gross_pnl, total_charges
+		       gross_pnl, total_charges, slippage
 		FROM backtest_runs
 		WHERE strategy_slug = $1 AND status = $2
 		ORDER BY created_at DESC LIMIT 1`, slug, models.BacktestCompleted)
