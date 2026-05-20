@@ -79,6 +79,25 @@ env_file_value() {
     printf '%s' "${value}"
 }
 
+image_migration_version() {
+    local image="$1"
+
+    docker run --rm --entrypoint /bin/sh "${image}" -c '
+set -eu
+max=0
+for file in /app/migrations/*.up.sql; do
+    name="${file##*/}"
+    version="${name%%_*}"
+    version="${version#"${version%%[!0]*}"}"
+    version="${version:-0}"
+    if [ "${version}" -gt "${max}" ]; then
+        max="${version}"
+    fi
+done
+printf "%s\n" "${max}"
+'
+}
+
 if [[ ! "${PROD_BASE_URL}" =~ ${HTTPS_HOST_PATTERN} ]]; then
     fail "prod base URL must be an https host without a path"
 fi
@@ -167,6 +186,13 @@ if [[ "${actual_staging_image}" != "${deploy_image}" ]]; then
 fi
 pass "staging container image: ${deploy_image}"
 
+docker pull "${deploy_image}"
+expected_image_migration="$(image_migration_version "${deploy_image}")"
+if [[ ! "${expected_image_migration}" =~ ${MIGRATION_VERSION_PATTERN} ]]; then
+    fail "image migration version must be a non-negative integer, got ${expected_image_migration}"
+fi
+pass "image migration version: ${expected_image_migration}"
+
 status_code staging-health 200 "${STAGING_BASE_URL}/health"
 status_code staging-ready 200 "${STAGING_BASE_URL}/ready"
 
@@ -177,7 +203,7 @@ fi
 
 expected_commit="$(json_field "${version_body}" commit_sha)"
 expected_environment="$(json_field "${version_body}" environment)"
-expected_migration="$(json_field "${version_body}" migration_version)"
+staging_migration="$(json_field "${version_body}" migration_version)"
 
 if [[ "${expected_environment}" != "staging" ]]; then
     fail "staging version environment: got ${expected_environment}, want staging"
@@ -188,15 +214,17 @@ fi
 if [[ ! "${expected_commit}" =~ ${COMMIT_SHA_PATTERN} ]]; then
     fail "staging version commit_sha must be 7-64 lowercase hex chars"
 fi
-if [[ -z "${expected_migration}" ]]; then
+if [[ -z "${staging_migration}" ]]; then
     fail "staging version must report migration_version"
 fi
-if [[ ! "${expected_migration}" =~ ${MIGRATION_VERSION_PATTERN} ]]; then
+if [[ ! "${staging_migration}" =~ ${MIGRATION_VERSION_PATTERN} ]]; then
     fail "staging version migration_version must be a non-negative integer"
 fi
+if [[ "${staging_migration}" != "${expected_image_migration}" ]]; then
+    fail "staging version migration_version ${staging_migration} does not match image migration ${expected_image_migration}"
+fi
+expected_migration="${expected_image_migration}"
 pass "staging version: commit ${expected_commit}, migration ${expected_migration}"
-
-docker pull "${deploy_image}"
 
 env_backup="$(mktemp "${ENV_BACKUP_PREFIX}XXXXXX")"
 cp "${ENV_FILE}" "${env_backup}"
@@ -217,6 +245,10 @@ awk -v image="${deploy_image}" '
 install -o root -g root -m 600 "${tmp_env}" "${ENV_FILE}"
 
 cd "${COMPOSE_DIR}"
+if ! docker compose --profile migrate-prod run --rm migrate-prod; then
+    rollback_and_fail "failed to run production migrations"
+fi
+
 if ! docker compose up -d backend-prod; then
     rollback_and_fail "failed to restart backend-prod"
 fi

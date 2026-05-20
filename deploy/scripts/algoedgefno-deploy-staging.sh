@@ -11,10 +11,12 @@ fi
 DEPLOY_IMAGE="$1"
 STAGING_BASE_URL="${2%/}"
 IMAGE_PATTERN='^ghcr\.io/deependra191/algoedgefno-backend@sha256:[0-9a-f]{64}$'
+COMMIT_SHA_PATTERN='^[0-9a-f]{7,64}$'
+MIGRATION_VERSION_PATTERN='^[0-9]+$'
 COMPOSE_DIR="/opt/algoedgefno/compose"
 ENV_FILE="${COMPOSE_DIR}/.env"
 ENV_BACKUP_PREFIX="${ENV_FILE}.bak.preflight."
-STAGING_CONTAINER="algoedgefno-backend-staging"
+SMOKE_SCRIPT="/opt/algoedgefno/scripts/smoke-staging.sh"
 
 fail() {
     printf 'FAIL %s\n' "$1" >&2
@@ -76,6 +78,25 @@ env_file_value() {
     printf '%s' "${value}"
 }
 
+image_migration_version() {
+    local image="$1"
+
+    docker run --rm --entrypoint /bin/sh "${image}" -c '
+set -eu
+max=0
+for file in /app/migrations/*.up.sql; do
+    name="${file##*/}"
+    version="${name%%_*}"
+    version="${version#"${version%%[!0]*}"}"
+    version="${version:-0}"
+    if [ "${version}" -gt "${max}" ]; then
+        max="${version}"
+    fi
+done
+printf "%s\n" "${max}"
+'
+}
+
 if [[ ! "${DEPLOY_IMAGE}" =~ ${IMAGE_PATTERN} ]]; then
     fail "image must be ghcr.io/deependra191/algoedgefno-backend@sha256:<64 lowercase hex chars>"
 fi
@@ -94,6 +115,7 @@ require_cmd mktemp
 require_cmd python3
 
 [[ -f "${ENV_FILE}" ]] || fail "${ENV_FILE} is missing"
+[[ -x "${SMOKE_SCRIPT}" ]] || fail "${SMOKE_SCRIPT} must exist and be executable"
 grep -q '^BACKEND_PROD_IMAGE=' "${ENV_FILE}" || fail "BACKEND_PROD_IMAGE must already be set; production image was not modified"
 
 configured_staging_host="$(env_file_value STAGING_API_HOST || true)"
@@ -134,6 +156,11 @@ rollback_and_fail() {
 }
 
 docker pull "${DEPLOY_IMAGE}"
+expected_migration="$(image_migration_version "${DEPLOY_IMAGE}")"
+if [[ ! "${expected_migration}" =~ ${MIGRATION_VERSION_PATTERN} ]]; then
+    fail "image migration version must be a non-negative integer, got ${expected_migration}"
+fi
+pass "image migration version: ${expected_migration}"
 
 env_backup="$(mktemp "${ENV_BACKUP_PREFIX}XXXXXX")"
 cp "${ENV_FILE}" "${env_backup}"
@@ -154,6 +181,10 @@ awk -v image="${DEPLOY_IMAGE}" '
 install -o root -g root -m 600 "${tmp_env}" "${ENV_FILE}"
 
 cd "${COMPOSE_DIR}"
+if ! docker compose --profile migrate-staging run --rm migrate-staging; then
+    rollback_and_fail "failed to run staging migrations"
+fi
+
 if ! docker compose --profile staging up -d backend-staging; then
     rollback_and_fail "failed to restart backend-staging"
 fi
@@ -171,19 +202,26 @@ if [[ "${version_code}" != "200" ]]; then
 fi
 
 environment="$(json_field "${version_body}" environment)"
+expected_commit="$(json_field "${version_body}" commit_sha)"
+actual_migration="$(json_field "${version_body}" migration_version)"
 if [[ "${environment}" != "staging" ]]; then
     rollback_and_fail "staging version environment was ${environment}, want staging"
 fi
-pass "version: environment staging"
+if [[ -z "${expected_commit}" ]]; then
+    rollback_and_fail "staging version must report commit_sha"
+fi
+if [[ ! "${expected_commit}" =~ ${COMMIT_SHA_PATTERN} ]]; then
+    rollback_and_fail "staging version commit_sha must be 7-64 lowercase hex chars"
+fi
+if [[ "${actual_migration}" != "${expected_migration}" ]]; then
+    rollback_and_fail "staging version migration_version was ${actual_migration}, want ${expected_migration}"
+fi
+pass "version: commit ${expected_commit}, migration ${expected_migration}"
 
-if ! status_code protected-no-token 401 "${STAGING_BASE_URL}/api/v1/config/app"; then
-    rollback_and_fail "staging protected-no-token check failed"
+if ! EXPECTED_IMAGE="${DEPLOY_IMAGE}" \
+    SMOKE_BASE_URL="${STAGING_BASE_URL}" \
+        "${SMOKE_SCRIPT}" "${expected_commit}" "${expected_migration}"; then
+    rollback_and_fail "staging smoke failed"
 fi
 
-actual_image="$(docker inspect "${STAGING_CONTAINER}" --format '{{.Config.Image}}')"
-if [[ "${actual_image}" != "${DEPLOY_IMAGE}" ]]; then
-    rollback_and_fail "staging container image mismatch (got ${actual_image}, want ${DEPLOY_IMAGE})"
-fi
-pass "container image: ${DEPLOY_IMAGE}"
-
-printf 'staging deploy passed for %s\n' "${DEPLOY_IMAGE}"
+printf 'staging deploy passed for %s at migration %s\n' "${DEPLOY_IMAGE}" "${expected_migration}"
