@@ -156,6 +156,7 @@ fi
 tmp_env="$(mktemp)"
 version_body="$(mktemp)"
 env_backup=""
+migration_applied=false
 cleanup() {
     rm -f "${tmp_env}" "${version_body}"
 }
@@ -171,10 +172,14 @@ restore_previous_prod_image() {
 
 rollback_and_fail() {
     local reason="$1"
-    if ! restore_previous_prod_image; then
-        fail "ROLLBACK FAILED after ${reason} on ${deploy_image}; manual recovery required (env backup at ${env_backup})"
+    local migration_note=""
+    if [[ "${migration_applied}" == "true" ]]; then
+        migration_note="; database migrations were applied and are not rolled back automatically"
     fi
-    fail "${reason} on ${deploy_image}; restored previous BACKEND_PROD_IMAGE ${previous_prod_image}"
+    if ! restore_previous_prod_image; then
+        fail "ROLLBACK FAILED after ${reason} on ${deploy_image}${migration_note}; manual recovery required (env backup at ${env_backup})"
+    fi
+    fail "${reason} on ${deploy_image}${migration_note}; restored previous BACKEND_PROD_IMAGE ${previous_prod_image}"
 }
 
 actual_staging_image="$(docker inspect "${STAGING_CONTAINER}" --format '{{.Config.Image}}' 2>/dev/null || true)"
@@ -248,6 +253,7 @@ cd "${COMPOSE_DIR}"
 if ! docker compose --profile migrate-prod run --rm migrate-prod; then
     rollback_and_fail "failed to run production migrations"
 fi
+migration_applied=true
 
 if ! docker compose up -d backend-prod; then
     rollback_and_fail "failed to restart backend-prod"

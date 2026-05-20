@@ -131,6 +131,7 @@ previous_staging_image="$(env_file_value BACKEND_STAGING_IMAGE || true)"
 tmp_env="$(mktemp)"
 version_body="$(mktemp)"
 env_backup=""
+migration_applied=false
 cleanup() {
     rm -f "${tmp_env}" "${version_body}"
 }
@@ -146,13 +147,17 @@ restore_previous_staging_image() {
 
 rollback_and_fail() {
     local reason="$1"
+    local migration_note=""
+    if [[ "${migration_applied}" == "true" ]]; then
+        migration_note="; database migrations were applied and are not rolled back automatically"
+    fi
     if [[ -z "${previous_staging_image}" ]]; then
-        fail "${reason} on ${DEPLOY_IMAGE}; no previous BACKEND_STAGING_IMAGE to restore"
+        fail "${reason} on ${DEPLOY_IMAGE}${migration_note}; no previous BACKEND_STAGING_IMAGE to restore"
     fi
     if ! restore_previous_staging_image; then
-        fail "ROLLBACK FAILED after ${reason} on ${DEPLOY_IMAGE}; manual recovery required (env backup at ${env_backup})"
+        fail "ROLLBACK FAILED after ${reason} on ${DEPLOY_IMAGE}${migration_note}; manual recovery required (env backup at ${env_backup})"
     fi
-    fail "${reason} on ${DEPLOY_IMAGE}; restored previous BACKEND_STAGING_IMAGE ${previous_staging_image}"
+    fail "${reason} on ${DEPLOY_IMAGE}${migration_note}; restored previous BACKEND_STAGING_IMAGE ${previous_staging_image}"
 }
 
 docker pull "${DEPLOY_IMAGE}"
@@ -184,6 +189,7 @@ cd "${COMPOSE_DIR}"
 if ! docker compose --profile migrate-staging run --rm migrate-staging; then
     rollback_and_fail "failed to run staging migrations"
 fi
+migration_applied=true
 
 if ! docker compose --profile staging up -d backend-staging; then
     rollback_and_fail "failed to restart backend-staging"
