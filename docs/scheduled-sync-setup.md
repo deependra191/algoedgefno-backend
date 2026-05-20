@@ -76,7 +76,9 @@ sudo chown -R $(whoami):$(whoami) /opt/algoedgefno/locks /opt/algoedgefno/logs
 File: `/etc/logrotate.d/algoedgefno-sync`
 
 ```text
-/opt/algoedgefno/logs/*-cron.log {
+/opt/algoedgefno/logs/*-cron.log
+/opt/algoedgefno/logs/*-backfill-*.log
+{
     daily
     rotate 30
     compress
@@ -84,10 +86,13 @@ File: `/etc/logrotate.d/algoedgefno-sync`
     missingok
     notifempty
     copytruncate
+    maxage 60
 }
 ```
 
-> The glob is `*-cron.log` (not `sync-*-cron.log`) so it also covers `notify-staging-cron.log` and any future `notify-prod-cron.log` without further edits.
+> The first glob, `*-cron.log` (not `sync-*-cron.log`), covers `notify-staging-cron.log` and any future `notify-prod-cron.log` without further edits.
+>
+> The second glob, `*-backfill-*.log`, covers one-shot backfill logs (e.g. `staging-backfill-2024-01-15-to-2026-05-13.log`) that would otherwise sit unrotated and accumulate forever. Backfills are typically not re-appended after the run completes, so without `maxage` they would never age out of the `rotate 30` chain — `maxage 60` ensures any rotated file older than 60 days is deleted regardless of how many rotations have happened since.
 
 Validate: `sudo logrotate -d /etc/logrotate.d/algoedgefno-sync` (dry run, no errors).
 
