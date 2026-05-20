@@ -64,7 +64,7 @@ func TestBacktestResultPayloadJSONShape(t *testing.T) {
 		"bestTrade", "capEnd", "capStart", "chart",
 		"from", "grossPnl", "interval", "longestLossStreak", "longestWinStreak",
 		"lots", "maxDrawdownPct", "netPnl", "profitFactor", "returnPct",
-		"rewardRisk", "strategy", "to",
+		"rewardRisk", "slippage", "strategy", "to",
 		"totalCharges", "tradeCount", "tradesPerWeek", "underlying", "winRate", "worstTrade",
 	}
 	assertKeysEqual(t, keys, want)
@@ -122,7 +122,7 @@ func TestBacktestSummaryResponseJSONShape(t *testing.T) {
 	resultKeys := jsonKeys(t, resp.Result)
 	resultWant := []string{
 		"capEnd", "capStart", "from", "grossPnl", "interval", "maxDrawdownPct", "netPnl",
-		"returnPct", "strategy", "to", "totalCharges", "tradeCount", "underlying", "winRate",
+		"returnPct", "slippage", "strategy", "to", "totalCharges", "tradeCount", "underlying", "winRate",
 	}
 	assertKeysEqual(t, resultKeys, resultWant)
 }
@@ -406,6 +406,7 @@ func TestToBacktestSummaryResponse_PreB14NilCharges(t *testing.T) {
 	run := validBacktestSummaryRun()
 	run.GrossPnl = nil
 	run.TotalCharges = nil
+	run.Slippage = nil
 
 	resp, err := toBacktestSummaryResponse(&run)
 	if err != nil {
@@ -416,6 +417,9 @@ func TestToBacktestSummaryResponse_PreB14NilCharges(t *testing.T) {
 	}
 	if resp.Result.TotalCharges != 0 {
 		t.Errorf("expected totalCharges 0 for pre-B14 run, got %v", resp.Result.TotalCharges)
+	}
+	if resp.Result.Slippage != 0 {
+		t.Errorf("expected slippage 0 for pre-B14 run, got %v", resp.Result.Slippage)
 	}
 }
 

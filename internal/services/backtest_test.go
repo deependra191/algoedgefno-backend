@@ -232,11 +232,14 @@ func defaultCandles() []models.Candle {
 
 func defaultEngineResult() *models.BacktestResult {
 	return &models.BacktestResult{
-		NetPnL:      150.0,
-		TotalTrades: 3,
-		WinCount:    2,
-		LossCount:   1,
-		MaxDrawdown: 0.05,
+		GrossPnL:     180.0,
+		TotalCharges: 20.0,
+		Slippage:     10.0,
+		NetPnL:       150.0,
+		TotalTrades:  3,
+		WinCount:     2,
+		LossCount:    1,
+		MaxDrawdown:  0.05,
 	}
 }
 
@@ -383,6 +386,41 @@ func TestSubmit_EngineError(t *testing.T) {
 	}
 }
 
+func TestSubmit_EnginePnlIdentityMismatchFailsRun(t *testing.T) {
+	br := &mockBacktestRepo{}
+	badResult := &models.BacktestResult{
+		GrossPnL:     100,
+		TotalCharges: 10,
+		Slippage:     5,
+		NetPnL:       50,
+	}
+	svc := newService(
+		br,
+		defaultLookup(),
+		&mockCandleRepo{result: defaultCandles()},
+		&mockInstrumentRepo{listResult: defaultInstruments()},
+		&mockEngine{result: badResult},
+	)
+
+	run, err := svc.Submit(context.Background(), defaultRequest())
+	if err != nil {
+		t.Fatalf("unexpected error from Submit: %v", err)
+	}
+	if run.Status != models.BacktestRunning {
+		t.Errorf("expected returned run to be RUNNING, got %s", run.Status)
+	}
+	if len(br.capturedUpdateResult) == 0 {
+		t.Fatal("expected UpdateResult to be called on identity mismatch")
+	}
+	persisted := br.capturedUpdateResult[0]
+	if persisted.Status != models.BacktestFailed {
+		t.Fatalf("expected FAILED status stored, got %s", persisted.Status)
+	}
+	if persisted.ErrorMessage == nil || *persisted.ErrorMessage != errMsgInternalError {
+		t.Fatalf("expected safe internal error message, got %v", persisted.ErrorMessage)
+	}
+}
+
 func TestSubmit_StatusTransitions(t *testing.T) {
 	br := &mockBacktestRepo{}
 	svc := newService(
@@ -449,6 +487,15 @@ func TestSubmit_Success_MetricsPopulated(t *testing.T) {
 	persisted := br.capturedUpdateResult[0]
 	if persisted.NetPnl == nil || *persisted.NetPnl != engineResult.NetPnL {
 		t.Errorf("expected persisted NetPnl %f, got %v", engineResult.NetPnL, persisted.NetPnl)
+	}
+	if persisted.GrossPnl == nil || *persisted.GrossPnl != engineResult.GrossPnL {
+		t.Errorf("expected persisted GrossPnl %f, got %v", engineResult.GrossPnL, persisted.GrossPnl)
+	}
+	if persisted.TotalCharges == nil || *persisted.TotalCharges != engineResult.TotalCharges {
+		t.Errorf("expected persisted TotalCharges %f, got %v", engineResult.TotalCharges, persisted.TotalCharges)
+	}
+	if persisted.Slippage == nil || *persisted.Slippage != engineResult.Slippage {
+		t.Errorf("expected persisted Slippage %f, got %v", engineResult.Slippage, persisted.Slippage)
 	}
 	if persisted.TotalTrades == nil || *persisted.TotalTrades != engineResult.TotalTrades {
 		t.Errorf("expected persisted TotalTrades %d, got %v", engineResult.TotalTrades, persisted.TotalTrades)

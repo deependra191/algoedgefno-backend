@@ -78,13 +78,15 @@ type ChartData struct {
 }
 
 // BacktestResult aggregates the outcome of a full backtest run.
-// GrossPnL is the sum of trade-level GrossPnL; TotalCharges is the sum of trade-level
-// TotalCharges; NetPnL is the sum of trade-level NetPnL (== GrossPnL − TotalCharges
-// within float-rounding tolerance). WinCount/LossCount are bucketed on NetPnL.
+// GrossPnL is the sum of trade-level GrossPnL; Slippage is the sum of trade-level
+// Slippage; TotalCharges is the sum of non-slippage charge components. NetPnL
+// is GrossPnL − TotalCharges − Slippage within float-rounding tolerance.
+// WinCount/LossCount are bucketed on trade-level NetPnL.
 type BacktestResult struct {
 	Trades       []Trade
 	GrossPnL     float64
 	TotalCharges float64
+	Slippage     float64
 	NetPnL       float64
 	TotalTrades  int
 	WinCount     int
@@ -120,9 +122,10 @@ type BacktestEngine interface {
 	//
 	// Each returned Trade carries a full charge breakdown (Slippage, Brokerage, STT,
 	// ExchangeFees, SEBIFees, GST, StampDuty, TotalCharges) and both GrossPnL and
-	// NetPnL = GrossPnL − TotalCharges. The aggregate BacktestResult mirrors this:
-	// GrossPnL, TotalCharges, and NetPnL are summed from trade-level values, and the
-	// equity curve and drawdown are driven by NetPnL (the post-charges series).
+	// NetPnL = GrossPnL − TotalCharges. At the aggregate BacktestResult level,
+	// TotalCharges excludes Slippage so Android can render grossPnl, totalCharges,
+	// and slippage independently; NetPnL = GrossPnL − TotalCharges − Slippage.
+	// The equity curve and drawdown are driven by NetPnL (the post-cost series).
 	RunBacktest(strategy *Strategy, inputs EngineInputs, capital float64) (*BacktestResult, error)
 	// ComputeTradeStats derives performance statistics from a completed trade list.
 	// from and to are the backtest date range used to compute tradesPerWeek.
@@ -178,6 +181,7 @@ type BacktestRun struct {
 	NetPnl                *float64
 	GrossPnl              *float64
 	TotalCharges          *float64
+	Slippage              *float64
 	TotalTrades           *int
 	WinCount              *int
 	LossCount             *int

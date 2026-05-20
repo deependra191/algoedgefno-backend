@@ -45,6 +45,7 @@ type backtestStrategyResponse struct {
 }
 
 // backtestResultPayload carries the full backtest result, present only on COMPLETED runs.
+// Result-level TotalCharges excludes Slippage; trade-level TotalCharges still includes it.
 type backtestResultPayload struct {
 	Strategy          backtestStrategyResponse `json:"strategy"`
 	Underlying        string                   `json:"underlying"`
@@ -57,6 +58,7 @@ type backtestResultPayload struct {
 	NetPnl            float64                  `json:"netPnl"`
 	GrossPnl          float64                  `json:"grossPnl"`
 	TotalCharges      float64                  `json:"totalCharges"`
+	Slippage          float64                  `json:"slippage"`
 	ReturnPct         float64                  `json:"returnPct"`
 	TradeCount        int                      `json:"tradeCount"`
 	WinRate           int                      `json:"winRate"`
@@ -138,6 +140,7 @@ type backtestSummaryResultResponse struct {
 	NetPnl         float64                  `json:"netPnl"`
 	GrossPnl       float64                  `json:"grossPnl"`
 	TotalCharges   float64                  `json:"totalCharges"`
+	Slippage       float64                  `json:"slippage"`
 	ReturnPct      float64                  `json:"returnPct"`
 	TradeCount     int                      `json:"tradeCount"`
 	WinRate        *int                     `json:"winRate"`
@@ -200,6 +203,7 @@ func toBacktestResultPayload(run *models.BacktestRun) *backtestResultPayload {
 		NetPnl:         round2(netPnl),
 		GrossPnl:       round2(derefFloat(run.GrossPnl)),
 		TotalCharges:   round2(derefFloat(run.TotalCharges)),
+		Slippage:       round2(derefFloat(run.Slippage)),
 		ReturnPct:      computeReturnPct(run),
 		TradeCount:     derefInt(run.TotalTrades),
 		WinRate:        computeWinRate(run),
@@ -327,6 +331,7 @@ func toBacktestSummaryResponse(run *models.BacktestRun) (backtestSummaryResponse
 			NetPnl:         round2(*run.NetPnl),
 			GrossPnl:       round2(derefFloat(run.GrossPnl)),
 			TotalCharges:   round2(derefFloat(run.TotalCharges)),
+			Slippage:       round2(derefFloat(run.Slippage)),
 			ReturnPct:      computeReturnPct(run),
 			TradeCount:     *run.TotalTrades,
 			WinRate:        computeWinRatePtr(run),

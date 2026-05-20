@@ -118,14 +118,15 @@ func (b *Backtester) RunBacktest(strategy *models.Strategy, inputs models.Engine
 	result.TotalTrades = len(result.Trades)
 	for _, tr := range result.Trades {
 		result.GrossPnL += tr.GrossPnL
-		result.TotalCharges += tr.TotalCharges
+		result.TotalCharges += tr.TotalCharges - tr.Slippage
+		result.Slippage += tr.Slippage
 		if tr.NetPnL > 0 {
 			result.WinCount++
 		} else if tr.NetPnL < 0 {
 			result.LossCount++
 		}
 	}
-	result.NetPnL = result.GrossPnL - result.TotalCharges
+	result.NetPnL = result.GrossPnL - result.TotalCharges - result.Slippage
 	result.MaxDrawdown = math.Round(maxDrawdown*10000) / 10000
 
 	return result, nil
