@@ -64,7 +64,7 @@ func TestBacktestResultPayloadJSONShape(t *testing.T) {
 		"bestTrade", "capEnd", "capStart", "chart",
 		"from", "grossPnl", "interval", "longestLossStreak", "longestWinStreak",
 		"lots", "maxDrawdownPct", "netPnl", "profitFactor", "returnPct",
-		"rewardRisk", "strategy", "to",
+		"rewardRisk", "slippage", "strategy", "to",
 		"totalCharges", "tradeCount", "tradesPerWeek", "underlying", "winRate", "worstTrade",
 	}
 	assertKeysEqual(t, keys, want)
@@ -122,7 +122,7 @@ func TestBacktestSummaryResponseJSONShape(t *testing.T) {
 	resultKeys := jsonKeys(t, resp.Result)
 	resultWant := []string{
 		"capEnd", "capStart", "from", "grossPnl", "interval", "maxDrawdownPct", "netPnl",
-		"returnPct", "strategy", "to", "totalCharges", "tradeCount", "underlying", "winRate",
+		"returnPct", "slippage", "strategy", "to", "totalCharges", "tradeCount", "underlying", "winRate",
 	}
 	assertKeysEqual(t, resultKeys, resultWant)
 }
@@ -360,7 +360,7 @@ func TestToBacktestTradesPageResponse_Pagination(t *testing.T) {
 }
 
 // TestToBacktestTradesPageResponse_ChargeInvariant guarantees each emitted trade
-// satisfies pnl == grossPnl − totalCharges within float-rounding tolerance.
+// satisfies pnl == grossPnl − totalCharges − slippage within float-rounding tolerance.
 // Catches reordering of mapper fields and accidental Pnl ← GrossPnL wiring.
 func TestToBacktestTradesPageResponse_ChargeInvariant(t *testing.T) {
 	tr := models.Trade{
@@ -378,7 +378,7 @@ func TestToBacktestTradesPageResponse_ChargeInvariant(t *testing.T) {
 		SEBIFees:       0.011,
 		GST:            7.91,
 		StampDuty:      0.15,
-		TotalCharges:   72,
+		TotalCharges:   61,
 		NetPnL:         928,
 	}
 
@@ -390,9 +390,9 @@ func TestToBacktestTradesPageResponse_ChargeInvariant(t *testing.T) {
 		t.Fatalf("expected 1 trade, got %d", len(resp.Trades))
 	}
 	got := resp.Trades[0]
-	if math.Abs(got.Pnl-(got.GrossPnl-got.TotalCharges)) > 0.01 {
-		t.Errorf("invariant violated: pnl=%.4f grossPnl=%.4f totalCharges=%.4f",
-			got.Pnl, got.GrossPnl, got.TotalCharges)
+	if math.Abs(got.Pnl-(got.GrossPnl-got.TotalCharges-got.Slippage)) > 0.01 {
+		t.Errorf("invariant violated: pnl=%.4f grossPnl=%.4f totalCharges=%.4f slippage=%.4f",
+			got.Pnl, got.GrossPnl, got.TotalCharges, got.Slippage)
 	}
 	if got.Pnl != tr.NetPnL {
 		t.Errorf("pnl JSON field must be sourced from NetPnL: got=%.4f want=%.4f", got.Pnl, tr.NetPnL)
@@ -406,6 +406,7 @@ func TestToBacktestSummaryResponse_PreB14NilCharges(t *testing.T) {
 	run := validBacktestSummaryRun()
 	run.GrossPnl = nil
 	run.TotalCharges = nil
+	run.Slippage = nil
 
 	resp, err := toBacktestSummaryResponse(&run)
 	if err != nil {
@@ -416,6 +417,9 @@ func TestToBacktestSummaryResponse_PreB14NilCharges(t *testing.T) {
 	}
 	if resp.Result.TotalCharges != 0 {
 		t.Errorf("expected totalCharges 0 for pre-B14 run, got %v", resp.Result.TotalCharges)
+	}
+	if resp.Result.Slippage != 0 {
+		t.Errorf("expected slippage 0 for pre-B14 run, got %v", resp.Result.Slippage)
 	}
 }
 

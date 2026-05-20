@@ -16,9 +16,11 @@ const (
 )
 
 // Trade is a single completed round-trip entry+exit produced by the backtest engine.
-// GrossPnL is the frictionless price-move profit; NetPnL is GrossPnL − TotalCharges and
-// is the value Android renders as "pnl". The individual charge fields are populated by
-// the engine via the ChargeCalculator so the UI can show the full cost stack per trade.
+// GrossPnL is the frictionless price-move profit; Slippage is reported separately;
+// TotalCharges is the non-slippage charge stack; NetPnL is GrossPnL − TotalCharges −
+// Slippage and is the value Android renders as "pnl". The individual charge fields
+// are populated by the engine via the ChargeCalculator so the UI can show the full
+// cost stack per trade.
 type Trade struct {
 	EntryTimestamp time.Time
 	ExitTimestamp  time.Time
@@ -78,13 +80,15 @@ type ChartData struct {
 }
 
 // BacktestResult aggregates the outcome of a full backtest run.
-// GrossPnL is the sum of trade-level GrossPnL; TotalCharges is the sum of trade-level
-// TotalCharges; NetPnL is the sum of trade-level NetPnL (== GrossPnL − TotalCharges
-// within float-rounding tolerance). WinCount/LossCount are bucketed on NetPnL.
+// GrossPnL is the sum of trade-level GrossPnL; Slippage is the sum of trade-level
+// Slippage; TotalCharges is the sum of non-slippage charge components. NetPnL
+// is GrossPnL − TotalCharges − Slippage within float-rounding tolerance.
+// WinCount/LossCount are bucketed on trade-level NetPnL.
 type BacktestResult struct {
 	Trades       []Trade
 	GrossPnL     float64
 	TotalCharges float64
+	Slippage     float64
 	NetPnL       float64
 	TotalTrades  int
 	WinCount     int
@@ -120,9 +124,9 @@ type BacktestEngine interface {
 	//
 	// Each returned Trade carries a full charge breakdown (Slippage, Brokerage, STT,
 	// ExchangeFees, SEBIFees, GST, StampDuty, TotalCharges) and both GrossPnL and
-	// NetPnL = GrossPnL − TotalCharges. The aggregate BacktestResult mirrors this:
-	// GrossPnL, TotalCharges, and NetPnL are summed from trade-level values, and the
-	// equity curve and drawdown are driven by NetPnL (the post-charges series).
+	// NetPnL. At both trade and aggregate BacktestResult levels, TotalCharges excludes
+	// Slippage; NetPnL = GrossPnL − TotalCharges − Slippage. The equity curve and
+	// drawdown are driven by NetPnL (the post-cost series).
 	RunBacktest(strategy *Strategy, inputs EngineInputs, capital float64) (*BacktestResult, error)
 	// ComputeTradeStats derives performance statistics from a completed trade list.
 	// from and to are the backtest date range used to compute tradesPerWeek.
@@ -178,6 +182,7 @@ type BacktestRun struct {
 	NetPnl                *float64
 	GrossPnl              *float64
 	TotalCharges          *float64
+	Slippage              *float64
 	TotalTrades           *int
 	WinCount              *int
 	LossCount             *int
