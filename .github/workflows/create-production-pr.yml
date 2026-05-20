@@ -12,13 +12,16 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  # This workflow is intentionally scoped to repo policy: dev to main production promotion.
   BASE_BRANCH: main
   HEAD_BRANCH: dev
   BODY_FILE: production-pr-body.md
   COMPARE_FILE: compare.json
+  COMMIT_PULLS_FILE: commit-pulls.jsonl
   PRS_FILE: included-prs.json
   DIRECT_COMMITS_FILE: direct-commits.json
   GITHUB_API_ACCEPT: application/vnd.github+json
+  COMMIT_PULLS_ACCEPT: application/vnd.github.groot-preview+json
   GITHUB_API_VERSION: 2022-11-28
   PR_DESCRIPTION_CHARACTER_LIMIT: "2000"
 
@@ -42,7 +45,12 @@ jobs:
             "${compare_url}" \
             > "${COMPARE_FILE}"
 
-          ahead_by="$(jq -r '.ahead_by' "${COMPARE_FILE}")"
+          ahead_by="$(jq -er '.ahead_by | numbers' "${COMPARE_FILE}")"
+          commit_count="$(jq -er '.commits | arrays | length' "${COMPARE_FILE}")"
+          if [[ "${commit_count}" != "${ahead_by}" ]]; then
+            echo "Compare API returned ${commit_count} commits but ahead_by is ${ahead_by}; refusing to generate incomplete production PR body."
+            exit 1
+          fi
           if [[ "${ahead_by}" == "0" ]]; then
             echo "No commits found in ${HEAD_BRANCH} that are missing from ${BASE_BRANCH}."
             exit 0
@@ -50,39 +58,34 @@ jobs:
 
           jq -r '.commits[].sha' "${COMPARE_FILE}" | while IFS= read -r commit_sha; do
             gh api \
-              -H "Accept: ${GITHUB_API_ACCEPT}" \
+              -H "Accept: ${COMMIT_PULLS_ACCEPT}" \
               -H "X-GitHub-Api-Version: ${GITHUB_API_VERSION}" \
               "repos/${REPOSITORY}/commits/${commit_sha}/pulls" \
-              | jq --arg headBranch "${HEAD_BRANCH}" \
-                  '[.[] | select(.merged_at != null and .base.ref == $headBranch)][]'
+              | jq -c --arg sha "${commit_sha}" --arg headBranch "${HEAD_BRANCH}" \
+                  '{sha: $sha, pulls: [.[] | select(.merged_at != null and .base.ref == $headBranch)]}'
           done \
-            | jq -s 'unique_by(.number) | sort_by(.merged_at // .created_at)' \
+            > "${COMMIT_PULLS_FILE}"
+
+          jq -s '[.[].pulls[]] | unique_by(.number) | sort_by(.merged_at // .created_at)' \
+            "${COMMIT_PULLS_FILE}" \
             > "${PRS_FILE}"
 
-          jq -r '.commits[].sha' "${COMPARE_FILE}" | while IFS= read -r commit_sha; do
-            pull_count="$(
-              gh api \
-                -H "Accept: ${GITHUB_API_ACCEPT}" \
-                -H "X-GitHub-Api-Version: ${GITHUB_API_VERSION}" \
-                "repos/${REPOSITORY}/commits/${commit_sha}/pulls" \
-                | jq --arg headBranch "${HEAD_BRANCH}" \
-                    '[.[] | select(.merged_at != null and .base.ref == $headBranch)] | length'
-            )"
-
-            if [[ "${pull_count}" == "0" ]]; then
-              jq --arg sha "${commit_sha}" \
-                '.commits[] | select(.sha == $sha) | {
-                  sha: .sha,
-                  shortSha: (.sha[0:7]),
-                  message: (.commit.message | split("\n")[0]),
-                  author: (.commit.author.name // "unknown"),
-                  authoredAt: .commit.author.date,
-                  url: .html_url
-                }' \
-                "${COMPARE_FILE}"
-            fi
-          done \
-            | jq -s '.' \
+          jq -s --slurpfile compare "${COMPARE_FILE}" '
+            map(select(.pulls | length == 0) | .sha) as $directShas
+            | $compare[0].commits
+            | map(
+                . as $commit
+                | select($directShas | index($commit.sha))
+                | {
+                    sha: $commit.sha,
+                    shortSha: ($commit.sha[0:7]),
+                    message: ($commit.commit.message | split("\n")[0]),
+                    author: ($commit.commit.author.name // "unknown"),
+                    authoredAt: $commit.commit.author.date,
+                    url: $commit.html_url
+                  }
+              )
+          ' "${COMMIT_PULLS_FILE}" \
             > "${DIRECT_COMMITS_FILE}"
 
           release_date="$(date -u +%Y-%m-%d)"
@@ -110,6 +113,8 @@ jobs:
 
             jq -r --arg descriptionLimit "${PR_DESCRIPTION_CHARACTER_LIMIT}" '
               .[] |
+              (.body // "" | gsub("\r"; "")) as $description |
+              ($descriptionLimit | tonumber) as $limit |
               "### #" + (.number | tostring) + " " + .title + "\n" +
               "\n" +
               "- Author: @" + .user.login + "\n" +
@@ -117,9 +122,15 @@ jobs:
               "- URL: " + .html_url + "\n" +
               "\n" +
               (
-                if ((.body // "") | length) > 0 then
+                if ($description | length) > 0 then
                   "#### Description\n\n" +
-                  ((.body // "") | gsub("\r"; "") | .[0:($descriptionLimit | tonumber)]) + "\n"
+                  (
+                    if ($description | length) > $limit then
+                      $description[0:$limit] + "\n\n... [truncated]\n"
+                    else
+                      $description + "\n"
+                    end
+                  )
                 else
                   "_No PR description provided._\n"
                 end
