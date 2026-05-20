@@ -85,6 +85,7 @@ File: `/etc/logrotate.d/algoedgefno-sync`
     missingok
     notifempty
     copytruncate
+    maxage 60
 }
 ```
 
@@ -92,7 +93,7 @@ File: `/etc/logrotate.d/algoedgefno-sync`
 >
 > The second glob, `*-backfill-*.log`, covers one-shot backfill logs (e.g. `staging-backfill-2024-01-15-to-2026-05-13.log`) that would otherwise sit unrotated outside the `*-cron.log` glob and accumulate forever.
 >
-> Note: because backfill logs are not re-appended after the run completes, `notifempty` prevents the `.1` file from aging through the rotation chain after the first rotation. The `.1` will sit in `/opt/algoedgefno/logs/` indefinitely. At current backfill cadence this is acceptable (each rotated file is a few hundred KB); if backfills ever run frequently, add `maxage 60` (or similar) to the rule block so any rotated file older than the chosen age is deleted regardless of rotation count.
+> `maxage 60` is required because backfill logs are not re-appended after the run completes: with `notifempty`, the first rotation moves the content into `.1` and truncates the original; subsequent rotations skip the now-empty file, so `.1` would never age through the `rotate 30` chain. `maxage 60` deletes any rotated file older than 60 days regardless of rotation count. Safe to apply to the cron logs too — they rotate daily and naturally cycle through the chain well before 60 days.
 
 Validate: `sudo logrotate -d /etc/logrotate.d/algoedgefno-sync` (dry run, no errors).
 
