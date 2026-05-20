@@ -45,7 +45,7 @@ type backtestStrategyResponse struct {
 }
 
 // backtestResultPayload carries the full backtest result, present only on COMPLETED runs.
-// Result-level TotalCharges excludes Slippage; trade-level TotalCharges still includes it.
+// TotalCharges excludes Slippage at both result and trade levels.
 type backtestResultPayload struct {
 	Strategy          backtestStrategyResponse `json:"strategy"`
 	Underlying        string                   `json:"underlying"`

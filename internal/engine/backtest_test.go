@@ -675,26 +675,26 @@ func TestRunBacktest_AppliesCharges(t *testing.T) {
 			result.GrossPnL-result.TotalCharges-result.Slippage, result.NetPnL)
 	}
 
-	tradeNonSlippageCharges := 0.0
+	tradeCharges := 0.0
 	tradeSlippage := 0.0
 	for _, tr := range result.Trades {
 		if tr.TotalCharges <= 0 {
 			t.Errorf("trade has non-positive TotalCharges: %+v", tr)
 		}
-		sum := tr.Slippage + tr.Brokerage + tr.STT + tr.ExchangeFees + tr.SEBIFees + tr.GST + tr.StampDuty
+		sum := tr.Brokerage + tr.STT + tr.ExchangeFees + tr.SEBIFees + tr.GST + tr.StampDuty
 		if math.Abs(sum-tr.TotalCharges) > tolerance {
 			t.Errorf("trade charges sum mismatch: components=%.6f totalCharges=%.6f", sum, tr.TotalCharges)
 		}
-		if math.Abs((tr.GrossPnL-tr.TotalCharges)-tr.NetPnL) > tolerance {
-			t.Errorf("trade pnl invariant violated: gross=%.4f charges=%.4f net=%.4f",
-				tr.GrossPnL, tr.TotalCharges, tr.NetPnL)
+		if math.Abs((tr.GrossPnL-tr.TotalCharges-tr.Slippage)-tr.NetPnL) > tolerance {
+			t.Errorf("trade pnl invariant violated: gross=%.4f charges=%.4f slippage=%.4f net=%.4f",
+				tr.GrossPnL, tr.TotalCharges, tr.Slippage, tr.NetPnL)
 		}
-		tradeNonSlippageCharges += tr.TotalCharges - tr.Slippage
+		tradeCharges += tr.TotalCharges
 		tradeSlippage += tr.Slippage
 	}
-	if math.Abs(tradeNonSlippageCharges-result.TotalCharges) > tolerance {
-		t.Errorf("aggregate TotalCharges should exclude slippage: trade non-slippage sum=%.6f result=%.6f",
-			tradeNonSlippageCharges, result.TotalCharges)
+	if math.Abs(tradeCharges-result.TotalCharges) > tolerance {
+		t.Errorf("aggregate TotalCharges mismatch: trade charges sum=%.6f result=%.6f",
+			tradeCharges, result.TotalCharges)
 	}
 	if math.Abs(tradeSlippage-result.Slippage) > tolerance {
 		t.Errorf("aggregate Slippage mismatch: trade slippage sum=%.6f result=%.6f",

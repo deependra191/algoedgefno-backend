@@ -118,7 +118,7 @@ func (b *Backtester) RunBacktest(strategy *models.Strategy, inputs models.Engine
 	result.TotalTrades = len(result.Trades)
 	for _, tr := range result.Trades {
 		result.GrossPnL += tr.GrossPnL
-		result.TotalCharges += tr.TotalCharges - tr.Slippage
+		result.TotalCharges += tr.TotalCharges
 		result.Slippage += tr.Slippage
 		if tr.NetPnL > 0 {
 			result.WinCount++
@@ -253,7 +253,7 @@ func checkExitConditions(trade *models.Trade, candle *models.Candle, strategy *m
 // the full charge breakdown from the injected ChargeCalculator, and the
 // post-charges NetPnL. GrossPnL is positive for a profitable long (exitPrice >
 // entryPrice) and for a profitable short (entryPrice > exitPrice); NetPnL =
-// GrossPnL − TotalCharges.
+// GrossPnL − TotalCharges − Slippage.
 func (b *Backtester) closeTrade(trade *models.Trade, exitPrice float64, exitTime time.Time, reason string, qty int, segment string) {
 	trade.ExitTimestamp = exitTime
 	trade.ExitPrice = exitPrice
@@ -272,6 +272,6 @@ func (b *Backtester) closeTrade(trade *models.Trade, exitPrice float64, exitTime
 	trade.SEBIFees = cb.SEBIFees
 	trade.GST = cb.GST
 	trade.StampDuty = cb.StampDuty
-	trade.TotalCharges = cb.Total
-	trade.NetPnL = trade.GrossPnL - cb.Total
+	trade.TotalCharges = cb.Total - cb.Slippage
+	trade.NetPnL = trade.GrossPnL - trade.TotalCharges - trade.Slippage
 }

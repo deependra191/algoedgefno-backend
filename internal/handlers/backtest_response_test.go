@@ -360,7 +360,7 @@ func TestToBacktestTradesPageResponse_Pagination(t *testing.T) {
 }
 
 // TestToBacktestTradesPageResponse_ChargeInvariant guarantees each emitted trade
-// satisfies pnl == grossPnl − totalCharges within float-rounding tolerance.
+// satisfies pnl == grossPnl − totalCharges − slippage within float-rounding tolerance.
 // Catches reordering of mapper fields and accidental Pnl ← GrossPnL wiring.
 func TestToBacktestTradesPageResponse_ChargeInvariant(t *testing.T) {
 	tr := models.Trade{
@@ -378,7 +378,7 @@ func TestToBacktestTradesPageResponse_ChargeInvariant(t *testing.T) {
 		SEBIFees:       0.011,
 		GST:            7.91,
 		StampDuty:      0.15,
-		TotalCharges:   72,
+		TotalCharges:   61,
 		NetPnL:         928,
 	}
 
@@ -390,9 +390,9 @@ func TestToBacktestTradesPageResponse_ChargeInvariant(t *testing.T) {
 		t.Fatalf("expected 1 trade, got %d", len(resp.Trades))
 	}
 	got := resp.Trades[0]
-	if math.Abs(got.Pnl-(got.GrossPnl-got.TotalCharges)) > 0.01 {
-		t.Errorf("invariant violated: pnl=%.4f grossPnl=%.4f totalCharges=%.4f",
-			got.Pnl, got.GrossPnl, got.TotalCharges)
+	if math.Abs(got.Pnl-(got.GrossPnl-got.TotalCharges-got.Slippage)) > 0.01 {
+		t.Errorf("invariant violated: pnl=%.4f grossPnl=%.4f totalCharges=%.4f slippage=%.4f",
+			got.Pnl, got.GrossPnl, got.TotalCharges, got.Slippage)
 	}
 	if got.Pnl != tr.NetPnL {
 		t.Errorf("pnl JSON field must be sourced from NetPnL: got=%.4f want=%.4f", got.Pnl, tr.NetPnL)

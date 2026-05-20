@@ -16,9 +16,11 @@ const (
 )
 
 // Trade is a single completed round-trip entry+exit produced by the backtest engine.
-// GrossPnL is the frictionless price-move profit; NetPnL is GrossPnL − TotalCharges and
-// is the value Android renders as "pnl". The individual charge fields are populated by
-// the engine via the ChargeCalculator so the UI can show the full cost stack per trade.
+// GrossPnL is the frictionless price-move profit; Slippage is reported separately;
+// TotalCharges is the non-slippage charge stack; NetPnL is GrossPnL − TotalCharges −
+// Slippage and is the value Android renders as "pnl". The individual charge fields
+// are populated by the engine via the ChargeCalculator so the UI can show the full
+// cost stack per trade.
 type Trade struct {
 	EntryTimestamp time.Time
 	ExitTimestamp  time.Time
@@ -122,10 +124,9 @@ type BacktestEngine interface {
 	//
 	// Each returned Trade carries a full charge breakdown (Slippage, Brokerage, STT,
 	// ExchangeFees, SEBIFees, GST, StampDuty, TotalCharges) and both GrossPnL and
-	// NetPnL = GrossPnL − TotalCharges. At the aggregate BacktestResult level,
-	// TotalCharges excludes Slippage so Android can render grossPnl, totalCharges,
-	// and slippage independently; NetPnL = GrossPnL − TotalCharges − Slippage.
-	// The equity curve and drawdown are driven by NetPnL (the post-cost series).
+	// NetPnL. At both trade and aggregate BacktestResult levels, TotalCharges excludes
+	// Slippage; NetPnL = GrossPnL − TotalCharges − Slippage. The equity curve and
+	// drawdown are driven by NetPnL (the post-cost series).
 	RunBacktest(strategy *Strategy, inputs EngineInputs, capital float64) (*BacktestResult, error)
 	// ComputeTradeStats derives performance statistics from a completed trade list.
 	// from and to are the backtest date range used to compute tradesPerWeek.
