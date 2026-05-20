@@ -73,7 +73,12 @@ Run this twice — once for `APP_SECRET_TOKEN`, once for `JWT_SECRET`. Never reu
 - [ ] Hit a protected endpoint without a token — confirm `401 Unauthorized`
 - [ ] Hit a protected endpoint with the correct `APP_SECRET_TOKEN` — confirm it works
 - [ ] Confirm logs contain request IDs and do not contain bearer tokens, JWTs, DB passwords, or full DSNs
+- [ ] Run `scripts/security/abuse-suite.sh --env staging` and confirm zero failures before merging closed-beta security changes
+- [ ] Run the production-safe subset with `scripts/security/abuse-suite.sh --env prod` before first external user access
+- [ ] If validating the staging kill switch, follow `docs/security-abuse-suite.md` and run `scripts/security/abuse-suite.sh --env staging --expect-backtests-disabled`
 - [ ] Create and review a screen-by-screen smoke-test sheet before live. For each Android screen/state, list the expected test cases, identify missing/unimplemented cases first, then run proper smoke testing against the implemented flows.
+
+Security abuse-suite operating details: **`docs/security-abuse-suite.md`**.
 
 ---
 
