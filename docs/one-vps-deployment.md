@@ -120,8 +120,8 @@ docker compose up -d postgres
 docker compose ps
 ```
 
-`deploy/env/postgres.env.example` sets `POSTGRES_USER=algoedgefno_postgres_admin`;
-that bootstrap role owns the databases and is also the migration role. Create
+Set `POSTGRES_USER` in `postgres.env` to the admin/owner role name. That
+bootstrap role owns the databases and is also the migration role. Create
 isolated app roles for runtime access. Run these interactively so the real
 passwords are not stored in shell history:
 
@@ -133,18 +133,18 @@ Inside `psql`, create the production and staging app roles/databases using the r
 
 ```sql
 CREATE ROLE algoedgefno_prod_app LOGIN PASSWORD 'replace-with-real-prod-password';
-CREATE DATABASE algoedgefno_prod OWNER algoedgefno_postgres_admin;
+CREATE DATABASE algoedgefno_prod OWNER <postgres-admin-role>;
 
 CREATE ROLE algoedgefno_staging_app LOGIN PASSWORD 'replace-with-real-staging-password';
-CREATE DATABASE algoedgefno_staging OWNER algoedgefno_postgres_admin;
+CREATE DATABASE algoedgefno_staging OWNER <postgres-admin-role>;
 ```
 
 Do not grant either app role access to the other database. The app roles are
-runtime-only roles; migrations run as `algoedgefno_postgres_admin` because
-DDL needs the object owner role.
+runtime-only roles; migrations run as the `POSTGRES_USER` admin/owner role
+because DDL needs the object owner role.
 
-The `migrate-*.env` files must use `DB_USER=algoedgefno_postgres_admin`.
-Set `DB_PASSWORD` in both files to the same admin password as `postgres.env`.
+The `migrate-*.env` files must use the same admin role as `postgres.env`.
+Set `DB_USER` and `DB_PASSWORD` in both files to the admin user and password.
 
 ## Migrations and identity rows
 
@@ -172,10 +172,10 @@ GRANT USAGE ON SCHEMA public TO algoedgefno_prod_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO algoedgefno_prod_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO algoedgefno_prod_app;
 
-ALTER DEFAULT PRIVILEGES FOR ROLE algoedgefno_postgres_admin IN SCHEMA public
+ALTER DEFAULT PRIVILEGES FOR ROLE <postgres-admin-role> IN SCHEMA public
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO algoedgefno_prod_app;
 
-ALTER DEFAULT PRIVILEGES FOR ROLE algoedgefno_postgres_admin IN SCHEMA public
+ALTER DEFAULT PRIVILEGES FOR ROLE <postgres-admin-role> IN SCHEMA public
 GRANT USAGE, SELECT ON SEQUENCES TO algoedgefno_prod_app;
 ```
 
@@ -201,10 +201,10 @@ GRANT USAGE ON SCHEMA public TO algoedgefno_staging_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO algoedgefno_staging_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO algoedgefno_staging_app;
 
-ALTER DEFAULT PRIVILEGES FOR ROLE algoedgefno_postgres_admin IN SCHEMA public
+ALTER DEFAULT PRIVILEGES FOR ROLE <postgres-admin-role> IN SCHEMA public
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO algoedgefno_staging_app;
 
-ALTER DEFAULT PRIVILEGES FOR ROLE algoedgefno_postgres_admin IN SCHEMA public
+ALTER DEFAULT PRIVILEGES FOR ROLE <postgres-admin-role> IN SCHEMA public
 GRANT USAGE, SELECT ON SEQUENCES TO algoedgefno_staging_app;
 ```
 
