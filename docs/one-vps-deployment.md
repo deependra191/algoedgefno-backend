@@ -63,6 +63,8 @@ Copy these repo files to the server:
 - `deploy/deploy.env.example` -> `/opt/algoedgefno/compose/.env`, then edit values.
 - `deploy/env/prod.env.example` -> `/opt/algoedgefno/env/prod.env`, then replace placeholders.
 - `deploy/env/staging.env.example` -> `/opt/algoedgefno/env/staging.env`, then replace placeholders.
+- `deploy/env/migrate-prod.env.example` -> `/opt/algoedgefno/env/migrate-prod.env`, then replace placeholders.
+- `deploy/env/migrate-staging.env.example` -> `/opt/algoedgefno/env/migrate-staging.env`, then replace placeholders.
 - `deploy/env/postgres.env.example` -> `/opt/algoedgefno/env/postgres.env`, then replace placeholders.
 
 Lock down env files:
@@ -118,31 +120,63 @@ docker compose up -d postgres
 docker compose ps
 ```
 
-Create isolated app users and databases. Run these interactively so the real passwords are not stored in shell history:
+`deploy/env/postgres.env.example` sets `POSTGRES_USER=algoedgefno_postgres_admin`;
+that bootstrap role owns the databases and is also the migration role. Create
+isolated app roles for runtime access. Run these interactively so the real
+passwords are not stored in shell history:
 
 ```bash
 docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d postgres'
 ```
 
-Inside `psql`, create the production and staging roles/databases using the real passwords from the server env files:
+Inside `psql`, create the production and staging app roles/databases using the real passwords from the server env files:
 
 ```sql
 CREATE ROLE algoedgefno_prod_app LOGIN PASSWORD 'replace-with-real-prod-password';
-CREATE DATABASE algoedgefno_prod OWNER algoedgefno_prod_app;
+CREATE DATABASE algoedgefno_prod OWNER algoedgefno_postgres_admin;
 
 CREATE ROLE algoedgefno_staging_app LOGIN PASSWORD 'replace-with-real-staging-password';
-CREATE DATABASE algoedgefno_staging OWNER algoedgefno_staging_app;
+CREATE DATABASE algoedgefno_staging OWNER algoedgefno_postgres_admin;
 ```
 
-Do not grant either app role access to the other database.
+Do not grant either app role access to the other database. The app roles are
+runtime-only roles; migrations run as `algoedgefno_postgres_admin` because
+DDL needs the object owner role.
+
+The `migrate-*.env` files must use `DB_USER=algoedgefno_postgres_admin`.
+Set `DB_PASSWORD` in both files to the same admin password as `postgres.env`.
 
 ## Migrations and identity rows
 
-Run production migrations explicitly:
+Run production migrations explicitly. The `migrate-prod` service uses
+`migrate-prod.env`, not the runtime `prod.env`, so DDL runs as the admin/owner
+role:
 
 ```bash
 cd /opt/algoedgefno/compose
 docker compose --profile migrate-prod run --rm migrate-prod
+```
+
+Grant the production runtime app role DML-only access to existing and future
+objects created by the admin role:
+
+```bash
+docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_prod'
+```
+
+Inside `psql`:
+
+```sql
+GRANT CONNECT ON DATABASE algoedgefno_prod TO algoedgefno_prod_app;
+GRANT USAGE ON SCHEMA public TO algoedgefno_prod_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO algoedgefno_prod_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO algoedgefno_prod_app;
+
+ALTER DEFAULT PRIVILEGES FOR ROLE algoedgefno_postgres_admin IN SCHEMA public
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO algoedgefno_prod_app;
+
+ALTER DEFAULT PRIVILEGES FOR ROLE algoedgefno_postgres_admin IN SCHEMA public
+GRANT USAGE, SELECT ON SEQUENCES TO algoedgefno_prod_app;
 ```
 
 Set the production identity row after the first migration creates `environment_identity`:
@@ -151,10 +185,32 @@ Set the production identity row after the first migration creates `environment_i
 docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_prod -c "INSERT INTO environment_identity (id, identity) VALUES (TRUE, '\''production'\'') ON CONFLICT (id) DO UPDATE SET identity = EXCLUDED.identity;"'
 ```
 
-Run staging migrations only when staging is needed:
+Run staging migrations only when staging is needed. The `migrate-staging`
+service uses `migrate-staging.env`, not the runtime `staging.env`:
 
 ```bash
 docker compose --profile migrate-staging run --rm migrate-staging
+docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_staging'
+```
+
+Inside `psql`:
+
+```sql
+GRANT CONNECT ON DATABASE algoedgefno_staging TO algoedgefno_staging_app;
+GRANT USAGE ON SCHEMA public TO algoedgefno_staging_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO algoedgefno_staging_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO algoedgefno_staging_app;
+
+ALTER DEFAULT PRIVILEGES FOR ROLE algoedgefno_postgres_admin IN SCHEMA public
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO algoedgefno_staging_app;
+
+ALTER DEFAULT PRIVILEGES FOR ROLE algoedgefno_postgres_admin IN SCHEMA public
+GRANT USAGE, SELECT ON SEQUENCES TO algoedgefno_staging_app;
+```
+
+Then set the staging identity row:
+
+```bash
 docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_staging -c "INSERT INTO environment_identity (id, identity) VALUES (TRUE, '\''staging'\'') ON CONFLICT (id) DO UPDATE SET identity = EXCLUDED.identity;"'
 ```
 
@@ -288,10 +344,11 @@ visible in the workflow summary; production remains untouched.
 
 The separate `Deploy staging` workflow is manual-only fallback for redeploying a
 specific digest. Both staging deploy paths run on the self-hosted runner and
-deploy staging only. They do not run migrations, do not restart production
-services, and do not read app, database, JWT, or bearer-token secret files from
-the VPS. They do not use `rsync`, `scp`, or inbound SSH from GitHub-hosted
-runners, and they do not overwrite server env files from the repository.
+deploy staging only. They run staging migrations through the root-owned wrapper
+before restarting staging, do not restart production services, and do not expose
+app, database, JWT, or bearer-token secret files to GitHub Actions. They do not
+use `rsync`, `scp`, or inbound SSH from GitHub-hosted runners, and they do not
+overwrite server env files from the repository.
 Do not configure `APP_SECRET_TOKEN`, database passwords, JWT secrets, GHCR tokens,
 VPS passwords, or SSH private keys in this workflow.
 
@@ -371,16 +428,19 @@ sudoers rules with that exact username. Do not grant the runner user direct
 `docker`, `docker compose`, shell, editor, or arbitrary file-copy sudo
 permissions. The root-owned wrapper validates the digest and staging URL, pulls
 the exact digest before changing config, updates only `BACKEND_STAGING_IMAGE`,
-restarts only `backend-staging`, confirms the staging URL host matches
-`STAGING_API_HOST` from `/opt/algoedgefno/compose/.env`, asserts `/version`
-reports `environment=staging`, checks the no-token protected endpoint, and
-confirms the running staging container image.
+runs `migrate-staging` with the migration env file, restarts only
+`backend-staging`, confirms the staging URL host matches `STAGING_API_HOST` from
+`/opt/algoedgefno/compose/.env`, asserts `/version` reports
+`environment=staging`, and runs the full staging smoke checks including commit,
+image, clean migration state, auth behavior, CORS, and log-shape checks.
 
 The production wrapper promotes the image already pinned in
 `BACKEND_STAGING_IMAGE`, confirms staging is healthy and actually running that
-digest, reads the expected commit and migration version from staging `/version`,
-updates only `BACKEND_PROD_IMAGE`, restarts only `backend-prod`, and then runs
-the production smoke checks before confirming the running prod container image.
+digest, derives the expected migration version from the image, requires staging
+to report that migration version, updates only `BACKEND_PROD_IMAGE`, runs
+`migrate-prod` with the migration env file, restarts only `backend-prod`, and
+then runs the production smoke checks before confirming the running prod
+container image.
 
 The wrappers run `docker pull` as root through the narrow sudo rules. For private
 GHCR packages, the VPS must already have root-owned Docker credentials that can
@@ -398,9 +458,10 @@ Normal operator flow:
 1. Merge `dev` to `main`.
 2. Confirm `Publish backend image` publishes a GHCR image and automatically
    starts the staging deploy job with the digest-qualified image it just built.
-3. Verify the workflow smoke checks for `/health`, `/ready`, `/version`, and the
-   no-token protected endpoint. The wrapper also fails if `/version` does not
-   report `environment=staging`.
+3. Verify the workflow smoke checks for `/health`, `/ready`, `/version`, auth
+   behavior, container image, and clean migration state. The wrapper also fails
+   if `/version` does not report `environment=staging` or the expected migration
+   version from the image.
 4. Later, promote the exact same digest to production through a separate future
    workflow or a manual production step. Do not rebuild or republish the backend
    image between staging verification and production promotion.
@@ -424,9 +485,13 @@ The workflow targets the `production` GitHub environment, runs on the same
 self-hosted runner label, and calls the root-owned
 `/usr/local/sbin/algoedgefno-deploy-prod` wrapper. The wrapper validates the
 configured staging and prod hosts, confirms staging is healthy and serving the
-pinned staging digest, updates only `BACKEND_PROD_IMAGE`, restarts only
-`backend-prod`, runs production smoke checks, and confirms the running prod
-container image.
+pinned staging digest, derives the expected migration version from that image,
+updates only `BACKEND_PROD_IMAGE`, runs `migrate-prod` with the migration env
+file, restarts only `backend-prod`, runs production smoke checks, and confirms
+the running prod container image. Deploy rollback restores the previous app
+image/env only; it does not run down migrations, so production migrations must
+remain backward-compatible with the previous deployed image or have a documented
+manual DB recovery path.
 
 Restrict the `production` GitHub environment to the protected `main` branch.
 
