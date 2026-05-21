@@ -23,7 +23,7 @@ func TestCharges_OPTIDX_Long_LegMapping(t *testing.T) {
 
 	assertInDelta(t, "STT", cb.STT, 0.0015*120*50, chargeTolerance)              // 9.0
 	assertInDelta(t, "StampDuty", cb.StampDuty, 0.00003*100*50, chargeTolerance) // 0.15
-	assertInDelta(t, "Slippage", cb.Slippage, 0.0010*(100+120)*50, chargeTolerance)
+	assertInDelta(t, "Slippage", cb.Slippage, 0, chargeTolerance)                // Stage 1: slippage disabled
 	assertInDelta(t, "ExchangeFees", cb.ExchangeFees, 0.0003553*(100*50+120*50), chargeTolerance)
 	assertInDelta(t, "SEBIFees", cb.SEBIFees, 0.000001*(100*50+120*50), chargeTolerance)
 
@@ -108,10 +108,22 @@ func TestCharges_UnknownSegment(t *testing.T) {
 	}
 }
 
-// Slippage follows the documented formula across segments.
-func TestCharges_SlippageFormula(t *testing.T) {
-	cb := NewCharges().Compute(models.InstrumentTypeOptionsStock, models.OrderSideBuy, 50, 60, 100)
-	assertInDelta(t, "Slippage OPTSTK", cb.Slippage, 0.0015*(50+60)*100, chargeTolerance)
+// Stage 1: slippage is disabled across every segment — Compute returns 0
+// regardless of price or quantity. When Stage 2 reintroduces user-provided
+// slippage this test must reflect the new contract (likely keyed on the
+// run-level input rather than a hard-coded formula).
+func TestCharges_SlippageDisabledStage1(t *testing.T) {
+	segments := []string{
+		models.InstrumentTypeEquity,
+		models.InstrumentTypeFuturesIndex,
+		models.InstrumentTypeFuturesStock,
+		models.InstrumentTypeOptionsIndex,
+		models.InstrumentTypeOptionsStock,
+	}
+	for _, segment := range segments {
+		cb := NewCharges().Compute(segment, models.OrderSideBuy, 100, 110, 50)
+		assertInDelta(t, "Slippage "+segment, cb.Slippage, 0, chargeTolerance)
+	}
 }
 
 // Total invariant: every individual component sums to Total within float-rounding tolerance.

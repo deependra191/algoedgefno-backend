@@ -663,8 +663,9 @@ func TestRunBacktest_AppliesCharges(t *testing.T) {
 	if result.TotalCharges <= 0 {
 		t.Fatalf("expected positive TotalCharges, got %.4f", result.TotalCharges)
 	}
-	if result.Slippage <= 0 {
-		t.Fatalf("expected positive Slippage, got %.4f", result.Slippage)
+	// Stage 1: slippage is disabled and must always report 0.
+	if result.Slippage != 0 {
+		t.Fatalf("expected zero Slippage in Stage 1, got %.4f", result.Slippage)
 	}
 	if result.GrossPnL <= result.NetPnL {
 		t.Fatalf("expected GrossPnL > NetPnL after costs; gross=%.4f net=%.4f charges=%.4f slippage=%.4f",

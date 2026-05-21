@@ -1,5 +1,5 @@
 // Package engine — charges.go contains the Indian retail F&O cost model used to
-// deduct slippage, brokerage, and statutory charges from every backtest trade.
+// deduct brokerage and statutory charges from every backtest trade.
 //
 // Rates as of 2026-05-11, verified against Zerodha's published charges schedule.
 // F&O STT reflects the Finance Act 2026 hike effective 2026-04-01
@@ -15,6 +15,22 @@
 // Zerodha actually charges flat ₹20 per options leg with no percentage step,
 // so this model under-charges brokerage on tiny option turnovers (< ₹66,667 per leg)
 // by up to ₹20 vs Zerodha's actual schedule. Acceptable simplification for B14.
+//
+// Slippage modelling — Stage 1 (current): slippage rates are 0, so backtests
+// report Slippage = 0 and NetPnL = GrossPnL − TotalCharges. The previous
+// %-of-turnover slippage model was structurally wrong — real fill slippage
+// scales with tick size × lot, not with notional, so a single per-segment %
+// systematically overstated slippage on index futures (~70× observed) while
+// understating it on low-price / high-lot stock futures by a similar factor.
+// Rather than ship a calibrated-but-still-wrong default, we zero it out and
+// will reintroduce slippage as a user-provided input (Stage 2, Android UI)
+// and eventually a provider-aware data-driven model (Stage 3, post vendor
+// migration). The slippage line is preserved in the formula so reintroducing
+// real rates is a one-line change.
+//
+// UI obligation: backtest result screens must surface a disclaimer that
+// slippage is not modelled in Stage 1 and actual fills may differ from
+// reported NetPnL.
 package engine
 
 import (
@@ -23,12 +39,23 @@ import (
 
 // Slippage percentages per side (one-way), keyed on Strategy.InstrumentType.
 // A round-trip pays slipPct × (entryPrice + exitPrice) × qty.
+//
+// Stage 1: all rates are 0. The previous %-of-turnover model was structurally
+// wrong across the instrument range (see the file-level doc header). Stage 2
+// will replace these with a user-provided per-run input; Stage 3 will derive
+// them from instrument-master + market-data metadata. The constants remain so
+// the slippage line in Compute() continues to exercise the same code path.
+//
+// TODO(stage-2): wire a user-provided slippage value through the backtest
+// request DTO and Android UI; expose disclaimer copy on the result screen.
+// TODO(stage-3): replace with a provider-aware model (tick size, spread,
+// liquidity, time-of-day) once richer instrument-master data lands.
 const (
-	slipPctEQ     = 0.0005 // 0.05%
-	slipPctFUTIDX = 0.0003 // 0.03%
-	slipPctFUTSTK = 0.0005 // 0.05%
-	slipPctOPTIDX = 0.0010 // 0.10%
-	slipPctOPTSTK = 0.0015 // 0.15%
+	slipPctEQ     = 0.0
+	slipPctFUTIDX = 0.0
+	slipPctFUTSTK = 0.0
+	slipPctOPTIDX = 0.0
+	slipPctOPTSTK = 0.0
 )
 
 // Securities Transaction Tax — applies to the SELL leg only.
