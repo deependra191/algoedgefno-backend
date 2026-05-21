@@ -146,6 +146,45 @@ because DDL needs the object owner role.
 The `migrate-*.env` files must use the same admin role as `postgres.env`.
 Set `DB_USER` and `DB_PASSWORD` in both files to the admin user and password.
 
+### Existing VPS ownership normalization
+
+Older setup notes created `algoedgefno_prod` with `algoedgefno_prod_app` as the
+database and table owner. That works only while migrations also run as the app
+role, and it prevents the runtime role from being limited to ordinary app
+queries. Normalize existing databases so the admin role owns database objects
+and app roles keep only runtime access.
+
+Take a fresh backup before changing ownership. Then, for production:
+
+```bash
+cd /opt/algoedgefno/compose
+
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_prod -v ON_ERROR_STOP=1 -c "REASSIGN OWNED BY algoedgefno_prod_app TO $POSTGRES_USER;"'
+
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_prod -v ON_ERROR_STOP=1 -c "GRANT CONNECT ON DATABASE algoedgefno_prod TO algoedgefno_prod_app; GRANT USAGE ON SCHEMA public TO algoedgefno_prod_app; GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO algoedgefno_prod_app; GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO algoedgefno_prod_app;"'
+```
+
+Repeat the same pattern for staging by replacing `prod` with `staging`.
+
+Verify ownership and runtime access after normalization:
+
+```bash
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_prod -c "SELECT tablename, tableowner FROM pg_tables WHERE schemaname = '\''public'\'' ORDER BY tablename;"'
+
+docker compose exec -T postgres psql \
+  -U algoedgefno_prod_app \
+  -d algoedgefno_prod \
+  -c "SELECT COUNT(*) FROM backtest_runs;"
+
+docker compose exec -T postgres psql \
+  -U algoedgefno_prod_app \
+  -d algoedgefno_prod \
+  -c "ALTER TABLE backtest_runs ADD COLUMN ddl_permission_test TEXT;"
+```
+
+The final command must fail with `must be owner of table backtest_runs`. If it
+succeeds, drop the test column immediately and fix ownership before deploying.
+
 ## Migrations and identity rows
 
 Run production migrations explicitly. The `migrate-prod` service uses

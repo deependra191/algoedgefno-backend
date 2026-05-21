@@ -123,7 +123,7 @@ Drop and recreate the staging database. This intentionally removes existing stag
 ```bash
 docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '\''algoedgefno_staging'\'' AND pid <> pg_backend_pid();"'
 docker compose exec postgres sh -c 'dropdb -U "$POSTGRES_USER" --if-exists algoedgefno_staging'
-docker compose exec postgres sh -c 'createdb -U "$POSTGRES_USER" -O algoedgefno_staging_app algoedgefno_staging'
+docker compose exec postgres sh -c 'createdb -U "$POSTGRES_USER" -O "$POSTGRES_USER" algoedgefno_staging'
 ```
 
 Prepare the staging database for a Timescale restore:
@@ -153,10 +153,12 @@ Rewrite the database identity row so the staging backend can start:
 docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_staging -c "INSERT INTO environment_identity (id, identity) VALUES (TRUE, '\''staging'\'') ON CONFLICT (id) DO UPDATE SET identity = EXCLUDED.identity;"'
 ```
 
-Re-grant the staging app role access to restored public objects:
+Re-grant the staging app role DML-only access to restored public objects. The
+admin role remains the object owner and migration role; the staging app role is
+only for runtime queries/writes.
 
 ```bash
-docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_staging -c "GRANT USAGE ON SCHEMA public TO algoedgefno_staging_app; GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO algoedgefno_staging_app; GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO algoedgefno_staging_app;"'
+docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_staging -c "GRANT CONNECT ON DATABASE algoedgefno_staging TO algoedgefno_staging_app; GRANT USAGE ON SCHEMA public TO algoedgefno_staging_app; GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO algoedgefno_staging_app; GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO algoedgefno_staging_app;"'
 ```
 
 Validate staging identity and migration version:
