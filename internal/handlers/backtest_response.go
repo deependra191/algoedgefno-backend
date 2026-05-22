@@ -59,6 +59,7 @@ type backtestResultPayload struct {
 	GrossPnl          float64                  `json:"grossPnl"`
 	TotalCharges      float64                  `json:"totalCharges"`
 	Slippage          float64                  `json:"slippage"`
+	SlippagePct       float64                  `json:"slippagePct"`
 	ReturnPct         float64                  `json:"returnPct"`
 	TradeCount        int                      `json:"tradeCount"`
 	WinRate           int                      `json:"winRate"`
@@ -153,10 +154,11 @@ type backtestSubmitRequest struct {
 }
 
 type backtestInputsRequest struct {
-	Underlying string            `json:"underlying" binding:"required"`
-	DateRange  backtestDateRange `json:"dateRange"  binding:"required"`
-	Lots       int               `json:"lots"       binding:"required,min=1,max=50"`
-	Capital    float64           `json:"capital"    binding:"required,gt=0,max=10000000"`
+	Underlying  string            `json:"underlying"  binding:"required"`
+	DateRange   backtestDateRange `json:"dateRange"   binding:"required"`
+	Lots        int               `json:"lots"        binding:"required,min=1,max=50"`
+	Capital     float64           `json:"capital"     binding:"required,gt=0,max=10000000"`
+	SlippagePct float64           `json:"slippagePct" binding:"min=0,max=1"`
 }
 
 type backtestDateRange struct {
@@ -204,6 +206,7 @@ func toBacktestResultPayload(run *models.BacktestRun) *backtestResultPayload {
 		GrossPnl:       round2(derefFloat(run.GrossPnl)),
 		TotalCharges:   round2(derefFloat(run.TotalCharges)),
 		Slippage:       round2(derefFloat(run.Slippage)),
+		SlippagePct:    round2(run.SlippagePct),
 		ReturnPct:      computeReturnPct(run),
 		TradeCount:     derefInt(run.TotalTrades),
 		WinRate:        computeWinRate(run),

@@ -1,11 +1,11 @@
 package models
 
-// ChargeBreakdown is the per–round-trip cost stack deducted from a backtest trade.
+// ChargeBreakdown is the per–round-trip statutory cost stack deducted from a backtest trade.
 // All values are absolute rupee amounts (always non-negative).
 // Total is the sum of every other field — implementations MUST maintain this invariant.
-// NetPnL is computed by the engine as GrossPnL − Total; Total itself never includes PnL.
+// Slippage is no longer part of this struct; it is a user-input run parameter computed
+// separately by the engine from slippagePct.
 type ChargeBreakdown struct {
-	Slippage     float64
 	Brokerage    float64
 	STT          float64
 	ExchangeFees float64

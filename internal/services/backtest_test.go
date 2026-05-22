@@ -137,7 +137,7 @@ type mockEngine struct {
 	capturedInputs models.EngineInputs
 }
 
-func (m *mockEngine) RunBacktest(_ *models.Strategy, inputs models.EngineInputs, _ float64) (*models.BacktestResult, error) {
+func (m *mockEngine) RunBacktest(_ *models.Strategy, inputs models.EngineInputs, _ float64, _ float64) (*models.BacktestResult, error) {
 	m.capturedInputs = inputs
 	return m.result, m.err
 }

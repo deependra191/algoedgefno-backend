@@ -64,7 +64,7 @@ func TestBacktestResultPayloadJSONShape(t *testing.T) {
 		"bestTrade", "capEnd", "capStart", "chart",
 		"from", "grossPnl", "interval", "longestLossStreak", "longestWinStreak",
 		"lots", "maxDrawdownPct", "netPnl", "profitFactor", "returnPct",
-		"rewardRisk", "slippage", "strategy", "to",
+		"rewardRisk", "slippage", "slippagePct", "strategy", "to",
 		"totalCharges", "tradeCount", "tradesPerWeek", "underlying", "winRate", "worstTrade",
 	}
 	assertKeysEqual(t, keys, want)

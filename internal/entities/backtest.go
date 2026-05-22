@@ -35,4 +35,5 @@ type BacktestRun struct {
 	Underlying      *string
 	ResultStatsJSON []byte
 	ChartDataJSON   []byte
+	SlippagePct     float64
 }

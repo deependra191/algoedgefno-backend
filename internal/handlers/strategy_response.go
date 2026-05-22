@@ -66,14 +66,18 @@ type lastBacktestDetailResponse struct {
 }
 
 type strategyInputResponse struct {
-	Key          string         `json:"key"`
-	Label        string         `json:"label"`
-	Type         string         `json:"type"`
-	Options      []string       `json:"options,omitempty"`
-	Constraints  map[string]any `json:"constraints,omitempty"`
-	DefaultValue any            `json:"defaultValue,omitempty"`
-	DefaultFrom  string         `json:"defaultFrom,omitempty"`
-	DefaultTo    string         `json:"defaultTo,omitempty"`
+	Key           string         `json:"key"`
+	Label         string         `json:"label"`
+	Type          string         `json:"type"`
+	Options       []string       `json:"options,omitempty"`
+	Constraints   map[string]any `json:"constraints,omitempty"`
+	DefaultValue  any            `json:"defaultValue,omitempty"`
+	DefaultFrom   string         `json:"defaultFrom,omitempty"`
+	DefaultTo     string         `json:"defaultTo,omitempty"`
+	Prefix        string         `json:"prefix,omitempty"`
+	Suffix        string         `json:"suffix,omitempty"`
+	Caption       string         `json:"caption,omitempty"`
+	CaptionAtZero string         `json:"captionAtZero,omitempty"`
 }
 
 func toStrategySectionsResponse(sections []services.StrategySection) strategySectionsResponse {
@@ -185,14 +189,18 @@ func toStrategyInputResponses(inputs []models.StrategyInput, maxDate time.Time) 
 			constraints[constraintMaxDate] = maxDate.Format(dateFormat)
 		}
 		result[i] = strategyInputResponse{
-			Key:          inp.Key,
-			Label:        inp.Label,
-			Type:         inp.Type,
-			Options:      inp.Options,
-			Constraints:  constraints,
-			DefaultValue: inp.DefaultValue,
-			DefaultFrom:  inp.DefaultFrom,
-			DefaultTo:    inp.DefaultTo,
+			Key:           inp.Key,
+			Label:         inp.Label,
+			Type:          inp.Type,
+			Options:       inp.Options,
+			Constraints:   constraints,
+			DefaultValue:  inp.DefaultValue,
+			DefaultFrom:   inp.DefaultFrom,
+			DefaultTo:     inp.DefaultTo,
+			Prefix:        inp.Prefix,
+			Suffix:        inp.Suffix,
+			Caption:       inp.Caption,
+			CaptionAtZero: inp.CaptionAtZero,
 		}
 	}
 	return result

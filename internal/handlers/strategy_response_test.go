@@ -136,7 +136,7 @@ func TestToStrategyInputResponses_InjectsMaxDate(t *testing.T) {
 		{
 			Key:   "lots",
 			Label: "Lots",
-			Type:  models.InputTypeNumber,
+			Type:  models.InputTypeStepper,
 		},
 	}
 	maxDate := time.Date(2025, 6, 15, 0, 0, 0, 0, time.UTC)
