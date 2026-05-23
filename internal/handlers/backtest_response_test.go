@@ -487,6 +487,29 @@ func TestParseTradesPagination(t *testing.T) {
 	}
 }
 
+// TestNormalizeSlippagePct verifies floor-to-2dp behaviour at the values that
+// motivated the contract (handoff §1.1): inputs with >2dp precision are
+// truncated, not rounded up.
+func TestNormalizeSlippagePct(t *testing.T) {
+	tests := []struct {
+		input float64
+		want  float64
+	}{
+		{input: 0.004, want: 0.00},
+		{input: 0.005, want: 0.00},
+		{input: 0.05, want: 0.05},
+		{input: 0.99, want: 0.99},
+		{input: 1.0, want: 1.0},
+		{input: 0.0, want: 0.0},
+	}
+	for _, tt := range tests {
+		got := normalizeSlippagePct(tt.input)
+		if math.Abs(got-tt.want) > 1e-9 {
+			t.Errorf("normalizeSlippagePct(%v) = %v, want %v", tt.input, got, tt.want)
+		}
+	}
+}
+
 func validBacktestSummaryRun() models.BacktestRun {
 	return models.BacktestRun{
 		ID:             uuid.New(),

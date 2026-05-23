@@ -206,7 +206,7 @@ func toBacktestResultPayload(run *models.BacktestRun) *backtestResultPayload {
 		GrossPnl:       round2(derefFloat(run.GrossPnl)),
 		TotalCharges:   round2(derefFloat(run.TotalCharges)),
 		Slippage:       round2(derefFloat(run.Slippage)),
-		SlippagePct:    round2(run.SlippagePct),
+		SlippagePct:    run.SlippagePct,
 		ReturnPct:      computeReturnPct(run),
 		TradeCount:     derefInt(run.TotalTrades),
 		WinRate:        computeWinRate(run),
@@ -384,6 +384,18 @@ func computeMaxDrawdownPctPtr(run *models.BacktestRun) *float64 {
 
 func round2(v float64) float64 {
 	return math.Round(v*100) / 100
+}
+
+const (
+	slippagePctPrecisionScale = 100.0
+	slippagePctFloorEpsilon   = 1e-9
+)
+
+// normalizeSlippagePct floors slippagePct to two decimal places.
+// Assumes the caller has already validated the value is in [0.0, 1.0]; this is
+// a precision normalizer, not a range check.
+func normalizeSlippagePct(v float64) float64 {
+	return math.Floor(v*slippagePctPrecisionScale+slippagePctFloorEpsilon) / slippagePctPrecisionScale
 }
 
 func derefFloat(p *float64) float64 {

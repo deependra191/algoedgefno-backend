@@ -48,6 +48,9 @@ func (h *BacktestHandler) Submit(c *gin.Context) {
 		return
 	}
 
+	// slippagePct precision: contract is 2 decimal places (handoff §1.1).
+	req.Inputs.SlippagePct = normalizeSlippagePct(req.Inputs.SlippagePct)
+
 	run, err := h.backtestSvc.Submit(c.Request.Context(), services.BacktestRequest{
 		StrategySlug: req.StrategyID,
 		Underlying:   req.Inputs.Underlying,
