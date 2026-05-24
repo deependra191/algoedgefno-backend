@@ -487,18 +487,21 @@ func TestParseTradesPagination(t *testing.T) {
 	}
 }
 
-// TestNormalizeSlippagePct verifies floor-to-2dp behaviour at the values that
-// motivated the contract (handoff §1.1): inputs with >2dp precision are
-// truncated, not rounded up.
+// TestNormalizeSlippagePct verifies floor-to-3dp behaviour: inputs with >3dp
+// precision are truncated, not rounded up. 3dp is needed because at high-turnover
+// F&O contracts 0.01% already translates to ~₹130 per leg — the smallest 2dp
+// non-zero step is too coarse for users to model realistic-ish fills.
 func TestNormalizeSlippagePct(t *testing.T) {
 	tests := []struct {
 		input float64
 		want  float64
 	}{
-		{input: 0.004, want: 0.00},
-		{input: 0.005, want: 0.00},
+		{input: 0.0004, want: 0.000},
+		{input: 0.0005, want: 0.000},
+		{input: 0.001, want: 0.001},
+		{input: 0.005, want: 0.005},
 		{input: 0.05, want: 0.05},
-		{input: 0.99, want: 0.99},
+		{input: 0.999, want: 0.999},
 		{input: 1.0, want: 1.0},
 		{input: 0.0, want: 0.0},
 	}

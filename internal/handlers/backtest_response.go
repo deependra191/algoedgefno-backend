@@ -387,11 +387,11 @@ func round2(v float64) float64 {
 }
 
 const (
-	slippagePctPrecisionScale = 100.0
+	slippagePctPrecisionScale = 1000.0
 	slippagePctFloorEpsilon   = 1e-9
 )
 
-// normalizeSlippagePct floors slippagePct to two decimal places.
+// normalizeSlippagePct floors slippagePct to three decimal places.
 // Assumes the caller has already validated the value is in [0.0, 1.0]; this is
 // a precision normalizer, not a range check.
 func normalizeSlippagePct(v float64) float64 {
