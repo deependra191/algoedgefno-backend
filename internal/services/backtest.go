@@ -92,15 +92,14 @@ func NewBacktestService(
 }
 
 // BacktestRequest carries the user-supplied inputs for a backtest submission.
+// Cfg carries per-run sizing (Lots, InitialCapital) and the SlippagePct
+// simulation assumption; see models.BacktestRunConfig.
 type BacktestRequest struct {
 	StrategySlug string
 	Underlying   string
 	From         time.Time
 	To           time.Time
-	Lots         int
-	Capital      float64
-	// SlippagePct is the per-leg slippage percent applied symmetrically. 0.05 means 0.05%.
-	SlippagePct float64
+	Cfg          models.BacktestRunConfig
 }
 
 // Submit validates the request and creates a RUNNING backtest run, then fires the
@@ -120,7 +119,7 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 		}
 	}
 
-	if req.SlippagePct < 0 || req.SlippagePct > 1 {
+	if req.Cfg.SlippagePct < 0 || req.Cfg.SlippagePct > 1 {
 		return nil, ErrInvalidSlippagePct
 	}
 
@@ -175,7 +174,6 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 		StopLossPct:        builtin.StopLossPct,
 		TimeExitMinutes:    builtin.TimeExitMinutes,
 		LotSize:            tradeInst.LotSize,
-		NumberOfLots:       req.Lots,
 	}
 
 	run, err := s.createAndStartRun(ctx, signalInst, tradeInst, builtin, req)
@@ -185,7 +183,7 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 
 	// Return a snapshot of the RUNNING run before the goroutine can mutate it.
 	snapshot := *run
-	s.launch(func() { s.executeRun(run, engineStrategy, inputs, req.Capital, req.SlippagePct) })
+	s.launch(func() { s.executeRun(run, engineStrategy, inputs, req.Cfg) })
 
 	return &snapshot, nil
 }
@@ -231,7 +229,7 @@ func (s *BacktestService) populateStrategyName(run *models.BacktestRun) {
 // executeRun runs the engine and persists the result. It is called in a goroutine
 // and uses context.Background() since the originating HTTP request context will
 // have been cancelled by the time this executes.
-func (s *BacktestService) executeRun(run *models.BacktestRun, strategy *models.Strategy, inputs models.EngineInputs, capital float64, slippagePct float64) {
+func (s *BacktestService) executeRun(run *models.BacktestRun, strategy *models.Strategy, inputs models.EngineInputs, cfg models.BacktestRunConfig) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("backtest %s: engine panic: %v", run.ID, r)
@@ -239,7 +237,7 @@ func (s *BacktestService) executeRun(run *models.BacktestRun, strategy *models.S
 		}
 	}()
 	ctx := context.Background()
-	result, err := s.engine.RunBacktest(strategy, inputs, capital, slippagePct)
+	result, err := s.engine.RunBacktest(strategy, inputs, cfg)
 	if err != nil {
 		s.failRun(ctx, run, fmt.Errorf("engine error: %w", err))
 		return
@@ -248,7 +246,7 @@ func (s *BacktestService) executeRun(run *models.BacktestRun, strategy *models.S
 		s.failRun(ctx, run, err)
 		return
 	}
-	if err := s.applyResult(ctx, run, result, capital); err != nil {
+	if err := s.applyResult(ctx, run, result, cfg.InitialCapital); err != nil {
 		log.Printf("backtest %s: failed to persist result: %v", run.ID, err)
 	}
 }
@@ -370,10 +368,10 @@ func (s *BacktestService) createAndStartRun(
 		ToTs:                  req.To,
 		CandleInterval:        builtin.CandleInterval,
 		Status:                models.BacktestPending,
-		Capital:               &req.Capital,
-		Lots:                  &req.Lots,
+		Capital:               &req.Cfg.InitialCapital,
+		Lots:                  &req.Cfg.Lots,
 		Underlying:            &req.Underlying,
-		SlippagePct:           req.SlippagePct,
+		SlippagePct:           req.Cfg.SlippagePct,
 	}
 	if err := s.backtestStore.Create(ctx, run); err != nil {
 		return nil, fmt.Errorf("failed to create backtest run: %w", err)

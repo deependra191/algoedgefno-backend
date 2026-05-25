@@ -198,7 +198,7 @@ func TestRunBacktest_MACrossover(t *testing.T) {
 		LotSize:            1,
 	}
 
-	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, sameStreamInputs(candles), 0, 0)
+	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, sameStreamInputs(candles), models.BacktestRunConfig{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -250,11 +250,10 @@ func TestRunBacktest_TargetHit(t *testing.T) {
 	s := &models.Strategy{
 		EntryConditionType: models.EntryConditionMACrossover,
 		LotSize:            2,
-		NumberOfLots:       1,
 		TargetPct:          ptrFloat(5.0),
 	}
 
-	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, sameStreamInputs(candles), 0, 0)
+	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, sameStreamInputs(candles), models.BacktestRunConfig{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -296,7 +295,7 @@ func TestRunBacktest_StopLossHit(t *testing.T) {
 		StopLossPct:        ptrFloat(3.0),
 	}
 
-	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, sameStreamInputs(candles), 0, 0)
+	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, sameStreamInputs(candles), models.BacktestRunConfig{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -332,7 +331,7 @@ func TestRunBacktest_TimeExit(t *testing.T) {
 		TimeExitMinutes:    ptrInt(20),
 	}
 
-	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, sameStreamInputs(candles), 0, 0)
+	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, sameStreamInputs(candles), models.BacktestRunConfig{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -359,7 +358,7 @@ func TestRunBacktest_MaxDrawdown(t *testing.T) {
 		LotSize:            1,
 	}
 
-	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, sameStreamInputs(candles), 100000, 0)
+	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, sameStreamInputs(candles), models.BacktestRunConfig{InitialCapital: 100000})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -403,7 +402,7 @@ func TestRunBacktest_NoSignals(t *testing.T) {
 		LotSize:            1,
 	}
 
-	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, sameStreamInputs(candles), 0, 0)
+	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, sameStreamInputs(candles), models.BacktestRunConfig{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -416,15 +415,14 @@ func TestRunBacktest_NoSignals(t *testing.T) {
 	}
 }
 
-func TestRunBacktest_QuantityIsLotSizeTimesNumberOfLots(t *testing.T) {
+func TestRunBacktest_QuantityIsLotSizeTimesCfgLots(t *testing.T) {
 	candles := makeUpDownCandles(30, 30)
 	s := &models.Strategy{
 		EntryConditionType: models.EntryConditionMACrossover,
 		LotSize:            50,
-		NumberOfLots:       3,
 	}
 
-	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, sameStreamInputs(candles), 0, 0)
+	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, sameStreamInputs(candles), models.BacktestRunConfig{Lots: 3})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -452,7 +450,7 @@ func TestRunBacktest_SplitStreamsExecuteAtNextTradeOpen(t *testing.T) {
 		Interval:      models.CandleInterval5M,
 		SignalCandles: signalCandles,
 		TradeCandles:  tradeCandles,
-	}, 0, 0)
+	}, models.BacktestRunConfig{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -484,7 +482,7 @@ func TestRunBacktest_TradeGapAtSignalTimestampSkipsEntry(t *testing.T) {
 		Interval:      models.CandleInterval5M,
 		SignalCandles: signalCandles,
 		TradeCandles:  tradeCandles,
-	}, 0, 0)
+	}, models.BacktestRunConfig{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -511,7 +509,7 @@ func TestRunBacktest_TradeSideExitWithoutSignalBar(t *testing.T) {
 		Interval:      models.CandleInterval5M,
 		SignalCandles: signalCandles,
 		TradeCandles:  tradeCandles,
-	}, 0, 0)
+	}, models.BacktestRunConfig{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -537,7 +535,7 @@ func TestRunBacktest_SameInstrumentBaselineUsesNextBarOpen(t *testing.T) {
 		LotSize:            1,
 	}
 
-	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, sameStreamInputs(candles), 0, 0)
+	result, err := NewBacktester(zeroCharges{}).RunBacktest(s, sameStreamInputs(candles), models.BacktestRunConfig{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -571,7 +569,7 @@ func TestRunBacktest_TradeSideTargetExitWithoutSignalBar(t *testing.T) {
 		Interval:      models.CandleInterval5M,
 		SignalCandles: signalCandles,
 		TradeCandles:  tradeCandles,
-	}, 0, 0)
+	}, models.BacktestRunConfig{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -620,7 +618,7 @@ func TestRunBacktest_DailyIntervalDoesNotInferWeekendGap(t *testing.T) {
 		Interval:      models.CandleInterval1D,
 		SignalCandles: signalCandles,
 		TradeCandles:  tradeCandles,
-	}, 0, 0)
+	}, models.BacktestRunConfig{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -650,10 +648,9 @@ func TestRunBacktest_AppliesCharges(t *testing.T) {
 		EntryConditionType: models.EntryConditionMACrossover,
 		InstrumentType:     models.InstrumentTypeOptionsIndex,
 		LotSize:            50,
-		NumberOfLots:       1,
 	}
 
-	result, err := NewBacktester(NewCharges()).RunBacktest(s, sameStreamInputs(candles), 100000, 0)
+	result, err := NewBacktester(NewCharges()).RunBacktest(s, sameStreamInputs(candles), models.BacktestRunConfig{InitialCapital: 100000})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -720,7 +717,6 @@ func TestRunBacktest_AppliesUserSlippage(t *testing.T) {
 	s := &models.Strategy{
 		EntryConditionType: models.EntryConditionMomentum,
 		LotSize:            1,
-		NumberOfLots:       1,
 	}
 	inputs := models.EngineInputs{
 		Interval:      models.CandleInterval5M,
@@ -729,7 +725,7 @@ func TestRunBacktest_AppliesUserSlippage(t *testing.T) {
 	}
 
 	// With slippagePct=0.05: slippage = (0.05/100) × (entryOpen + exitClose) × qty
-	resultWithSlippage, err := NewBacktester(zeroCharges{}).RunBacktest(s, inputs, 0, 0.05)
+	resultWithSlippage, err := NewBacktester(zeroCharges{}).RunBacktest(s, inputs, models.BacktestRunConfig{SlippagePct: 0.05})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -746,7 +742,7 @@ func TestRunBacktest_AppliesUserSlippage(t *testing.T) {
 	}
 
 	// With slippagePct=0: Slippage must be exactly 0.
-	resultZero, err := NewBacktester(zeroCharges{}).RunBacktest(s, inputs, 0, 0)
+	resultZero, err := NewBacktester(zeroCharges{}).RunBacktest(s, inputs, models.BacktestRunConfig{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

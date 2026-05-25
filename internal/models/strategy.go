@@ -35,10 +35,8 @@ type Strategy struct {
 	TargetPct          *float64
 	StopLossPct        *float64
 	TimeExitMinutes    *int
-	LotSize            int
-	NumberOfLots       int
-	CapitalPerTrade    *float64
-	Mode               string
+	LotSize int
+	Mode    string
 	IsReadyForRun      bool
 	CreatedAt          time.Time
 	UpdatedAt          time.Time

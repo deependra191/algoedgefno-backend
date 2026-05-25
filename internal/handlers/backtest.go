@@ -56,9 +56,11 @@ func (h *BacktestHandler) Submit(c *gin.Context) {
 		Underlying:   req.Inputs.Underlying,
 		From:         from,
 		To:           to,
-		Lots:         req.Inputs.Lots,
-		Capital:      req.Inputs.Capital,
-		SlippagePct:  req.Inputs.SlippagePct,
+		Cfg: models.BacktestRunConfig{
+			Lots:           req.Inputs.Lots,
+			InitialCapital: req.Inputs.Capital,
+			SlippagePct:    req.Inputs.SlippagePct,
+		},
 	})
 	if err != nil {
 		switch {
