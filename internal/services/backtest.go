@@ -163,8 +163,6 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 
 	// Runs intentionally snapshot the current trade lot size at submission time.
 	// Historical re-runs after exchange lot-size changes need explicit lot-size history.
-	// NumberOfLots is the phase-A bridge: the engine reads Lots from the cfg, but
-	// the field exists on Strategy and is removed in phase B (drop runtime fields).
 	engineStrategy := &models.Strategy{
 		Name:               builtin.Name,
 		Description:        builtin.Description,
@@ -176,7 +174,6 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 		StopLossPct:        builtin.StopLossPct,
 		TimeExitMinutes:    builtin.TimeExitMinutes,
 		LotSize:            tradeInst.LotSize,
-		NumberOfLots:       req.Cfg.Lots,
 	}
 
 	run, err := s.createAndStartRun(ctx, signalInst, tradeInst, builtin, req)
