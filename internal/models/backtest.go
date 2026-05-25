@@ -83,12 +83,14 @@ type ChartData struct {
 // GrossPnL is the sum of trade-level GrossPnL; Slippage is the sum of trade-level
 // Slippage; TotalCharges is the sum of non-slippage charge components. NetPnL
 // is GrossPnL − TotalCharges − Slippage within float-rounding tolerance.
-// WinCount/LossCount are bucketed on trade-level NetPnL.
+// WinCount/LossCount are bucketed on trade-level NetPnL. SlippagePct is echoed
+// from the user-supplied run parameter so callers can read it back from the result.
 type BacktestResult struct {
 	Trades       []Trade
 	GrossPnL     float64
 	TotalCharges float64
 	Slippage     float64
+	SlippagePct  float64
 	NetPnL       float64
 	TotalTrades  int
 	WinCount     int
@@ -120,6 +122,10 @@ type BacktestEngine interface {
 	// capital is the user's starting capital. It seeds running equity and the
 	// initial drawdown peak; MaxDrawdown is reported as a fraction of the
 	// running equity peak.
+	// slippagePct is the per-leg slippage applied symmetrically on entry and exit of
+	// every trade leg: slippage = (slippagePct / 100) × (entryPrice + exitPrice) × qty.
+	// It is a percent value — 0.05 means 0.05%. Valid range is [0, 1]; the caller is
+	// responsible for validation before passing it to the engine.
 	// Returns an error only if the strategy configuration is invalid.
 	//
 	// Each returned Trade carries a full charge breakdown (Slippage, Brokerage, STT,
@@ -127,7 +133,7 @@ type BacktestEngine interface {
 	// NetPnL. At both trade and aggregate BacktestResult levels, TotalCharges excludes
 	// Slippage; NetPnL = GrossPnL − TotalCharges − Slippage. The equity curve and
 	// drawdown are driven by NetPnL (the post-cost series).
-	RunBacktest(strategy *Strategy, inputs EngineInputs, capital float64) (*BacktestResult, error)
+	RunBacktest(strategy *Strategy, inputs EngineInputs, capital float64, slippagePct float64) (*BacktestResult, error)
 	// ComputeTradeStats derives performance statistics from a completed trade list.
 	// from and to are the backtest date range used to compute tradesPerWeek.
 	// Pointer fields in the result are nil when mathematically undefined.
@@ -198,6 +204,7 @@ type BacktestRun struct {
 	Underlying            *string
 	ResultStats           *TradeStats
 	ChartData             *ChartData
+	SlippagePct           float64
 }
 
 // Backtest run status values stored in the status column of backtest_runs.

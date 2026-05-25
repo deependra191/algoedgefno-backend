@@ -19,23 +19,29 @@ type BuiltinStrategy struct {
 }
 
 // StrategyInput describes a single user-configurable input for a strategy's backtest form.
+// Prefix, Suffix, Caption, and CaptionAtZero are used by NUMBER_INPUT to provide
+// contextual hints in the Android form renderer.
 type StrategyInput struct {
-	Key          string
-	Label        string
-	Type         string
-	Options      []string
-	Constraints  map[string]any
-	DefaultValue any
-	DefaultFrom  string
-	DefaultTo    string
+	Key           string
+	Label         string
+	Type          string
+	Options       []string
+	Constraints   map[string]any
+	DefaultValue  any
+	DefaultFrom   string
+	DefaultTo     string
+	Prefix        string
+	Suffix        string
+	Caption       string
+	CaptionAtZero string
 }
 
 // Input type constants for StrategyInput.Type — used by both the registry and the Android form renderer.
 const (
-	InputTypeSelect    = "SELECT"
-	InputTypeDateRange = "DATE_RANGE"
-	InputTypeNumber    = "NUMBER"
-	InputTypeCurrency  = "CURRENCY"
+	InputTypeSelect      = "SELECT"
+	InputTypeDateRange   = "DATE_RANGE"
+	InputTypeStepper     = "STEPPER"
+	InputTypeNumberInput = "NUMBER_INPUT"
 )
 
 // Strategy input key constants used by built-ins and services.
@@ -45,9 +51,10 @@ const (
 
 // Constraint key constants used in StrategyInput.Constraints maps.
 const (
-	ConstraintMin     = "min"
-	ConstraintMax     = "max"
-	ConstraintMinDate = "minDate"
+	ConstraintMin      = "min"
+	ConstraintMax      = "max"
+	ConstraintMinDate  = "minDate"
+	ConstraintDecimals = "decimals"
 )
 
 // BuiltinStrategyLookup is the contract for resolving code-defined strategies by slug.

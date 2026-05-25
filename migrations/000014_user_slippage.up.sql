@@ -1,0 +1,2 @@
+ALTER TABLE backtest_runs
+  ADD COLUMN slippage_pct DOUBLE PRECISION NOT NULL DEFAULT 0;

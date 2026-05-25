@@ -48,6 +48,9 @@ func (h *BacktestHandler) Submit(c *gin.Context) {
 		return
 	}
 
+	// slippagePct precision: contract is 2 decimal places (handoff §1.1).
+	req.Inputs.SlippagePct = normalizeSlippagePct(req.Inputs.SlippagePct)
+
 	run, err := h.backtestSvc.Submit(c.Request.Context(), services.BacktestRequest{
 		StrategySlug: req.StrategyID,
 		Underlying:   req.Inputs.Underlying,
@@ -55,6 +58,7 @@ func (h *BacktestHandler) Submit(c *gin.Context) {
 		To:           to,
 		Lots:         req.Inputs.Lots,
 		Capital:      req.Inputs.Capital,
+		SlippagePct:  req.Inputs.SlippagePct,
 	})
 	if err != nil {
 		switch {
@@ -72,6 +76,8 @@ func (h *BacktestHandler) Submit(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "no instrument found for underlying"})
 		case errors.Is(err, services.ErrNoCandleData):
 			c.JSON(http.StatusBadRequest, gin.H{"error": "no candle data available"})
+		case errors.Is(err, services.ErrInvalidSlippagePct):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "slippage percent must be between 0 and 1"})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "backtest failed"})
 		}

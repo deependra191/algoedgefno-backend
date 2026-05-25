@@ -33,16 +33,23 @@ func TestBacktestMapperPreservesResultSlippage(t *testing.T) {
 		TotalCharges: ptrFloat(87.66),
 		Slippage:     &slippage,
 		TotalTrades:  ptrInt(4),
+		SlippagePct:  0.05,
 	}
 
 	entity := toBacktestEntity(model)
 	if entity.Slippage == nil || *entity.Slippage != slippage {
 		t.Fatalf("entity slippage = %v, want %.2f", entity.Slippage, slippage)
 	}
+	if entity.SlippagePct != 0.05 {
+		t.Fatalf("entity SlippagePct = %v, want 0.05", entity.SlippagePct)
+	}
 
 	roundTrip := toBacktestModel(entity)
 	if roundTrip.Slippage == nil || *roundTrip.Slippage != slippage {
 		t.Fatalf("model slippage = %v, want %.2f", roundTrip.Slippage, slippage)
+	}
+	if roundTrip.SlippagePct != 0.05 {
+		t.Fatalf("model SlippagePct = %v, want 0.05", roundTrip.SlippagePct)
 	}
 }
 
@@ -67,6 +74,7 @@ func TestScanBacktestRunScansResultSlippage(t *testing.T) {
 	grossPnl := 1000.0
 	totalCharges := 87.66
 	slippage := 12.34
+	slippagePct := 0.05
 
 	row := scanRow{
 		id, &strategyID, "NIFTY_FUT_CONT", &signalToken, from, to,
@@ -75,7 +83,7 @@ func TestScanBacktestRunScansResultSlippage(t *testing.T) {
 		&errMsg, createdAt, &completedAt,
 		&strategySlug, &capital, &lots, &underlying,
 		[]byte(`{"LongestWinStreak":2}`), []byte(`{"Equity":[]}`),
-		&grossPnl, &totalCharges, &slippage,
+		&grossPnl, &totalCharges, &slippage, slippagePct,
 	}
 
 	entity, err := scanBacktestRun(row)
@@ -84,6 +92,9 @@ func TestScanBacktestRunScansResultSlippage(t *testing.T) {
 	}
 	if entity.Slippage == nil || *entity.Slippage != slippage {
 		t.Fatalf("scanned slippage = %v, want %.2f", entity.Slippage, slippage)
+	}
+	if entity.SlippagePct != slippagePct {
+		t.Fatalf("scanned SlippagePct = %v, want %.2f", entity.SlippagePct, slippagePct)
 	}
 }
 
@@ -108,6 +119,7 @@ func TestScanBacktestRunWithTradesScansResultSlippage(t *testing.T) {
 	grossPnl := 1000.0
 	totalCharges := 87.66
 	slippage := 12.34
+	slippagePct := 0.05
 
 	row := scanRow{
 		id, &strategyID, "NIFTY_FUT_CONT", &signalToken, from, to,
@@ -115,7 +127,7 @@ func TestScanBacktestRunWithTradesScansResultSlippage(t *testing.T) {
 		&netPnl, &totalTrades, &winCount, &lossCount, &maxDrawdown,
 		[]byte(`[{"Slippage":12.34}]`), &errMsg, createdAt, &completedAt,
 		&strategySlug, &capital, &lots, &underlying,
-		&grossPnl, &totalCharges, &slippage,
+		&grossPnl, &totalCharges, &slippage, slippagePct,
 	}
 
 	entity, err := scanBacktestRunWithTrades(row)
@@ -124,6 +136,9 @@ func TestScanBacktestRunWithTradesScansResultSlippage(t *testing.T) {
 	}
 	if entity.Slippage == nil || *entity.Slippage != slippage {
 		t.Fatalf("scanned slippage = %v, want %.2f", entity.Slippage, slippage)
+	}
+	if entity.SlippagePct != slippagePct {
+		t.Fatalf("scanned SlippagePct = %v, want %.2f", entity.SlippagePct, slippagePct)
 	}
 }
 

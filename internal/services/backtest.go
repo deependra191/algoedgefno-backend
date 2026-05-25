@@ -34,6 +34,7 @@ var (
 	ErrBacktestDateRangeExceeded   = errors.New("backtest date range exceeds maximum allowed days")
 	ErrBacktestCandleCountExceeded = errors.New("backtest candle count exceeds maximum")
 	ErrBacktestPnlIdentityMismatch = errors.New("backtest pnl identity mismatch")
+	ErrInvalidSlippagePct          = errors.New("invalid slippage percent")
 )
 
 // BacktestLimits defines the operational constraints for backtest submission.
@@ -98,6 +99,8 @@ type BacktestRequest struct {
 	To           time.Time
 	Lots         int
 	Capital      float64
+	// SlippagePct is the per-leg slippage percent applied symmetrically. 0.05 means 0.05%.
+	SlippagePct float64
 }
 
 // Submit validates the request and creates a RUNNING backtest run, then fires the
@@ -115,6 +118,10 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 		if rangeDays > s.limits.MaxDays {
 			return nil, ErrBacktestDateRangeExceeded
 		}
+	}
+
+	if req.SlippagePct < 0 || req.SlippagePct > 1 {
+		return nil, ErrInvalidSlippagePct
 	}
 
 	builtin, ok := s.builtins.Get(req.StrategySlug)
@@ -178,7 +185,7 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 
 	// Return a snapshot of the RUNNING run before the goroutine can mutate it.
 	snapshot := *run
-	s.launch(func() { s.executeRun(run, engineStrategy, inputs, req.Capital) })
+	s.launch(func() { s.executeRun(run, engineStrategy, inputs, req.Capital, req.SlippagePct) })
 
 	return &snapshot, nil
 }
@@ -224,7 +231,7 @@ func (s *BacktestService) populateStrategyName(run *models.BacktestRun) {
 // executeRun runs the engine and persists the result. It is called in a goroutine
 // and uses context.Background() since the originating HTTP request context will
 // have been cancelled by the time this executes.
-func (s *BacktestService) executeRun(run *models.BacktestRun, strategy *models.Strategy, inputs models.EngineInputs, capital float64) {
+func (s *BacktestService) executeRun(run *models.BacktestRun, strategy *models.Strategy, inputs models.EngineInputs, capital float64, slippagePct float64) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("backtest %s: engine panic: %v", run.ID, r)
@@ -232,7 +239,7 @@ func (s *BacktestService) executeRun(run *models.BacktestRun, strategy *models.S
 		}
 	}()
 	ctx := context.Background()
-	result, err := s.engine.RunBacktest(strategy, inputs, capital)
+	result, err := s.engine.RunBacktest(strategy, inputs, capital, slippagePct)
 	if err != nil {
 		s.failRun(ctx, run, fmt.Errorf("engine error: %w", err))
 		return
@@ -366,6 +373,7 @@ func (s *BacktestService) createAndStartRun(
 		Capital:               &req.Capital,
 		Lots:                  &req.Lots,
 		Underlying:            &req.Underlying,
+		SlippagePct:           req.SlippagePct,
 	}
 	if err := s.backtestStore.Create(ctx, run); err != nil {
 		return nil, fmt.Errorf("failed to create backtest run: %w", err)
@@ -385,6 +393,7 @@ func (s *BacktestService) applyResult(ctx context.Context, run *models.BacktestR
 	run.GrossPnl = &result.GrossPnL
 	run.TotalCharges = &result.TotalCharges
 	run.Slippage = &result.Slippage
+	run.SlippagePct = result.SlippagePct
 	run.TotalTrades = &result.TotalTrades
 	run.WinCount = &result.WinCount
 	run.LossCount = &result.LossCount

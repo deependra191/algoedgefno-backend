@@ -23,8 +23,9 @@ const (
 var _ models.BacktestEngine = (*Backtester)(nil)
 
 // Backtester is the standard implementation of models.BacktestEngine.
-// It deducts a per-trade Indian retail cost stack (slippage, brokerage, statutory
-// charges, GST, stamp) via the injected ChargeCalculator before computing NetPnL.
+// It deducts a per-trade Indian retail statutory cost stack (brokerage, STT,
+// exchange fees, SEBI fees, GST, stamp) via the injected ChargeCalculator before
+// computing NetPnL. User-supplied slippage is applied separately in closeTrade.
 type Backtester struct {
 	charges models.ChargeCalculator
 }
@@ -44,7 +45,9 @@ func NewBacktester(charges models.ChargeCalculator) *Backtester {
 // capital seeds running equity and the drawdown peak; MaxDrawdown is reported
 // as a fraction of the running equity peak (matching the chart-series semantics
 // in BuildChartData).
-func (b *Backtester) RunBacktest(strategy *models.Strategy, inputs models.EngineInputs, capital float64) (*models.BacktestResult, error) {
+// slippagePct is the user-supplied per-leg slippage assumption in percent units
+// (0.05 means 0.05%). It is applied symmetrically on entry and exit of every trade.
+func (b *Backtester) RunBacktest(strategy *models.Strategy, inputs models.EngineInputs, capital float64, slippagePct float64) (*models.BacktestResult, error) {
 	if len(inputs.SignalCandles) == 0 || len(inputs.TradeCandles) == 0 {
 		return &models.BacktestResult{}, nil
 	}
@@ -70,6 +73,7 @@ func (b *Backtester) RunBacktest(strategy *models.Strategy, inputs models.Engine
 	qty := lotSize * nLots
 
 	result := &models.BacktestResult{}
+	result.SlippagePct = slippagePct
 	var openTrade *models.Trade
 	sigIdx := 0
 	equity, peakEquity, maxDrawdown := capital, capital, 0.0
@@ -80,7 +84,7 @@ func (b *Backtester) RunBacktest(strategy *models.Strategy, inputs models.Engine
 
 		if openTrade != nil {
 			if reason, price := checkExitConditions(openTrade, candle, strategy); reason != "" {
-				b.closeTrade(openTrade, price, candle.Timestamp, reason, qty, segment)
+				b.closeTrade(openTrade, price, candle.Timestamp, reason, qty, segment, slippagePct)
 				recordTrade(result, *openTrade, &equity, &peakEquity, &maxDrawdown)
 				openTrade = nil
 			}
@@ -94,7 +98,7 @@ func (b *Backtester) RunBacktest(strategy *models.Strategy, inputs models.Engine
 				if !isReversal(openTrade.Side, sig.Signal.Side) {
 					continue
 				}
-				b.closeTrade(openTrade, candle.Open, candle.Timestamp, ExitReasonSignalReversal, qty, segment)
+				b.closeTrade(openTrade, candle.Open, candle.Timestamp, ExitReasonSignalReversal, qty, segment, slippagePct)
 				recordTrade(result, *openTrade, &equity, &peakEquity, &maxDrawdown)
 				openTrade = nil
 			}
@@ -111,7 +115,7 @@ func (b *Backtester) RunBacktest(strategy *models.Strategy, inputs models.Engine
 
 	if openTrade != nil && len(inputs.TradeCandles) > 0 {
 		last := inputs.TradeCandles[len(inputs.TradeCandles)-1]
-		b.closeTrade(openTrade, last.Close, last.Timestamp, ExitReasonEndOfData, qty, segment)
+		b.closeTrade(openTrade, last.Close, last.Timestamp, ExitReasonEndOfData, qty, segment, slippagePct)
 		recordTrade(result, *openTrade, &equity, &peakEquity, &maxDrawdown)
 	}
 
@@ -254,7 +258,9 @@ func checkExitConditions(trade *models.Trade, candle *models.Candle, strategy *m
 // post-charges NetPnL. GrossPnL is positive for a profitable long (exitPrice >
 // entryPrice) and for a profitable short (entryPrice > exitPrice); NetPnL =
 // GrossPnL − TotalCharges − Slippage.
-func (b *Backtester) closeTrade(trade *models.Trade, exitPrice float64, exitTime time.Time, reason string, qty int, segment string) {
+// slippagePct is the user-supplied percent value (0.05 means 0.05%) applied
+// symmetrically on entry and exit: slippage = (slippagePct / 100) × (entryPrice + exitPrice) × qty.
+func (b *Backtester) closeTrade(trade *models.Trade, exitPrice float64, exitTime time.Time, reason string, qty int, segment string, slippagePct float64) {
 	trade.ExitTimestamp = exitTime
 	trade.ExitPrice = exitPrice
 	trade.ExitReason = reason
@@ -265,13 +271,13 @@ func (b *Backtester) closeTrade(trade *models.Trade, exitPrice float64, exitTime
 	}
 
 	cb := b.charges.Compute(segment, trade.Side, trade.EntryPrice, exitPrice, qty)
-	trade.Slippage = cb.Slippage
+	trade.Slippage = (slippagePct / 100) * (trade.EntryPrice + exitPrice) * float64(qty)
 	trade.Brokerage = cb.Brokerage
 	trade.STT = cb.STT
 	trade.ExchangeFees = cb.ExchangeFees
 	trade.SEBIFees = cb.SEBIFees
 	trade.GST = cb.GST
 	trade.StampDuty = cb.StampDuty
-	trade.TotalCharges = cb.Total - cb.Slippage
+	trade.TotalCharges = cb.Total
 	trade.NetPnL = trade.GrossPnL - trade.TotalCharges - trade.Slippage
 }

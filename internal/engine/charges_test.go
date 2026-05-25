@@ -23,7 +23,6 @@ func TestCharges_OPTIDX_Long_LegMapping(t *testing.T) {
 
 	assertInDelta(t, "STT", cb.STT, 0.0015*120*50, chargeTolerance)              // 9.0
 	assertInDelta(t, "StampDuty", cb.StampDuty, 0.00003*100*50, chargeTolerance) // 0.15
-	assertInDelta(t, "Slippage", cb.Slippage, 0.0010*(100+120)*50, chargeTolerance)
 	assertInDelta(t, "ExchangeFees", cb.ExchangeFees, 0.0003553*(100*50+120*50), chargeTolerance)
 	assertInDelta(t, "SEBIFees", cb.SEBIFees, 0.000001*(100*50+120*50), chargeTolerance)
 
@@ -108,12 +107,6 @@ func TestCharges_UnknownSegment(t *testing.T) {
 	}
 }
 
-// Slippage follows the documented formula across segments.
-func TestCharges_SlippageFormula(t *testing.T) {
-	cb := NewCharges().Compute(models.InstrumentTypeOptionsStock, models.OrderSideBuy, 50, 60, 100)
-	assertInDelta(t, "Slippage OPTSTK", cb.Slippage, 0.0015*(50+60)*100, chargeTolerance)
-}
-
 // Total invariant: every individual component sums to Total within float-rounding tolerance.
 func TestCharges_TotalInvariant(t *testing.T) {
 	cases := []struct {
@@ -132,7 +125,7 @@ func TestCharges_TotalInvariant(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cb := NewCharges().Compute(tc.segment, tc.side, tc.entry, tc.exit, tc.qty)
-			sum := cb.Slippage + cb.Brokerage + cb.STT + cb.ExchangeFees + cb.SEBIFees + cb.GST + cb.StampDuty
+			sum := cb.Brokerage + cb.STT + cb.ExchangeFees + cb.SEBIFees + cb.GST + cb.StampDuty
 			assertInDelta(t, "Total invariant", cb.Total, sum, chargeTolerance)
 		})
 	}

@@ -132,13 +132,15 @@ func (m *mockInstrumentRepo) UpsertBatch(_ context.Context, _ []models.Instrumen
 }
 
 type mockEngine struct {
-	result         *models.BacktestResult
-	err            error
-	capturedInputs models.EngineInputs
+	result              *models.BacktestResult
+	err                 error
+	capturedInputs      models.EngineInputs
+	gotSlippagePct      float64
 }
 
-func (m *mockEngine) RunBacktest(_ *models.Strategy, inputs models.EngineInputs, _ float64) (*models.BacktestResult, error) {
+func (m *mockEngine) RunBacktest(_ *models.Strategy, inputs models.EngineInputs, _ float64, slippagePct float64) (*models.BacktestResult, error) {
 	m.capturedInputs = inputs
+	m.gotSlippagePct = slippagePct
 	return m.result, m.err
 }
 func (m *mockEngine) ComputeTradeStats(trades []models.Trade, from, to time.Time) *models.TradeStats {
@@ -935,5 +937,56 @@ func TestSubmit_NoDayLimit_AllowsLargeRange(t *testing.T) {
 	_, err := svc.Submit(context.Background(), req)
 	if errors.Is(err, ErrBacktestDateRangeExceeded) {
 		t.Fatal("expected no date-range check when MaxDays=0, but got ErrBacktestDateRangeExceeded")
+	}
+}
+
+// TestSubmit_RejectsOutOfRangeSlippagePct asserts the service-level guard at
+// internal/services/backtest.go rejects slippagePct outside [0, 1] with
+// ErrInvalidSlippagePct, independent of the handler-side binding.
+func TestSubmit_RejectsOutOfRangeSlippagePct(t *testing.T) {
+	tests := []struct {
+		name        string
+		slippagePct float64
+	}{
+		{name: "above 1", slippagePct: 1.5},
+		{name: "negative", slippagePct: -0.1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := newService(
+				&mockBacktestRepo{},
+				defaultLookup(),
+				&mockCandleRepo{},
+				&mockInstrumentRepo{listResult: defaultInstruments()},
+				&mockEngine{},
+			)
+			req := defaultRequest()
+			req.SlippagePct = tt.slippagePct
+			_, err := svc.Submit(context.Background(), req)
+			if !errors.Is(err, ErrInvalidSlippagePct) {
+				t.Fatalf("expected ErrInvalidSlippagePct for slippagePct=%v, got %v", tt.slippagePct, err)
+			}
+		})
+	}
+}
+
+func TestSubmit_SlippagePctPlumbedToEngine(t *testing.T) {
+	eng := &mockEngine{result: defaultEngineResult()}
+	svc := newService(
+		&mockBacktestRepo{},
+		defaultLookup(),
+		&mockCandleRepo{result: defaultCandles()},
+		&mockInstrumentRepo{listResult: defaultInstruments()},
+		eng,
+	)
+	req := defaultRequest()
+	req.SlippagePct = 0.05
+
+	_, err := svc.Submit(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if eng.gotSlippagePct != 0.05 {
+		t.Errorf("expected slippagePct 0.05 to reach engine, got %v", eng.gotSlippagePct)
 	}
 }

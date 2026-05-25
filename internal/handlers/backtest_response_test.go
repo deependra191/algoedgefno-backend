@@ -64,7 +64,7 @@ func TestBacktestResultPayloadJSONShape(t *testing.T) {
 		"bestTrade", "capEnd", "capStart", "chart",
 		"from", "grossPnl", "interval", "longestLossStreak", "longestWinStreak",
 		"lots", "maxDrawdownPct", "netPnl", "profitFactor", "returnPct",
-		"rewardRisk", "slippage", "strategy", "to",
+		"rewardRisk", "slippage", "slippagePct", "strategy", "to",
 		"totalCharges", "tradeCount", "tradesPerWeek", "underlying", "winRate", "worstTrade",
 	}
 	assertKeysEqual(t, keys, want)
@@ -484,6 +484,32 @@ func TestParseTradesPagination(t *testing.T) {
 				t.Fatalf("expected page=%d limit=%d, got page=%d limit=%d", tt.wantPage, tt.wantLimit, page, limit)
 			}
 		})
+	}
+}
+
+// TestNormalizeSlippagePct verifies floor-to-3dp behaviour: inputs with >3dp
+// precision are truncated, not rounded up. 3dp is needed because at high-turnover
+// F&O contracts 0.01% already translates to ~₹130 per leg — the smallest 2dp
+// non-zero step is too coarse for users to model realistic-ish fills.
+func TestNormalizeSlippagePct(t *testing.T) {
+	tests := []struct {
+		input float64
+		want  float64
+	}{
+		{input: 0.0004, want: 0.000},
+		{input: 0.0005, want: 0.000},
+		{input: 0.001, want: 0.001},
+		{input: 0.005, want: 0.005},
+		{input: 0.05, want: 0.05},
+		{input: 0.999, want: 0.999},
+		{input: 1.0, want: 1.0},
+		{input: 0.0, want: 0.0},
+	}
+	for _, tt := range tests {
+		got := normalizeSlippagePct(tt.input)
+		if math.Abs(got-tt.want) > 1e-9 {
+			t.Errorf("normalizeSlippagePct(%v) = %v, want %v", tt.input, got, tt.want)
+		}
 	}
 }
 

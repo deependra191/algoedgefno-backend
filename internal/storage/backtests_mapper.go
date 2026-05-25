@@ -36,6 +36,7 @@ func toBacktestModel(e *entities.BacktestRun) *models.BacktestRun {
 		Capital:               e.Capital,
 		Lots:                  e.Lots,
 		Underlying:            e.Underlying,
+		SlippagePct:           e.SlippagePct,
 	}
 	if len(e.ResultStatsJSON) > 0 {
 		var stats models.TradeStats
@@ -82,6 +83,7 @@ func toBacktestEntity(r *models.BacktestRun) *entities.BacktestRun {
 		Capital:               r.Capital,
 		Lots:                  r.Lots,
 		Underlying:            r.Underlying,
+		SlippagePct:           r.SlippagePct,
 	}
 	if r.ResultStats != nil {
 		if b, err := json.Marshal(r.ResultStats); err == nil {
@@ -111,7 +113,7 @@ func scanBacktestRun(row pgx.Row) (*entities.BacktestRun, error) {
 		&errMsg, &r.CreatedAt, &r.CompletedAt,
 		&r.StrategySlug, &r.Capital, &r.Lots, &r.Underlying,
 		&resultStatsBytes, &chartDataBytes,
-		&grossPnl, &totalCharges, &slippage,
+		&grossPnl, &totalCharges, &slippage, &r.SlippagePct,
 	)
 	if err != nil {
 		return nil, err
@@ -144,7 +146,7 @@ func scanBacktestRunWithTrades(row pgx.Row) (*entities.BacktestRun, error) {
 		&netPnl, &totalTrades, &winCount, &lossCount, &maxDrawdown,
 		&tradesBytes, &errMsg, &r.CreatedAt, &r.CompletedAt,
 		&r.StrategySlug, &r.Capital, &r.Lots, &r.Underlying,
-		&grossPnl, &totalCharges, &slippage,
+		&grossPnl, &totalCharges, &slippage, &r.SlippagePct,
 	)
 	if err != nil {
 		return nil, err
@@ -174,7 +176,7 @@ func scanBacktestRunRow(rows pgx.Rows) (*entities.BacktestRun, error) {
 		&netPnl, &totalTrades, &winCount, &lossCount, &maxDrawdown,
 		&errMsg, &r.CreatedAt, &r.CompletedAt,
 		&r.StrategySlug, &r.Capital, &r.Lots, &r.Underlying,
-		&grossPnl, &totalCharges, &slippage,
+		&grossPnl, &totalCharges, &slippage, &r.SlippagePct,
 	)
 	if err != nil {
 		return nil, err
