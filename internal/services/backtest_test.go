@@ -132,15 +132,15 @@ func (m *mockInstrumentRepo) UpsertBatch(_ context.Context, _ []models.Instrumen
 }
 
 type mockEngine struct {
-	result              *models.BacktestResult
-	err                 error
-	capturedInputs      models.EngineInputs
-	gotSlippagePct      float64
+	result         *models.BacktestResult
+	err            error
+	capturedInputs models.EngineInputs
+	capturedCfg    models.BacktestRunConfig
 }
 
-func (m *mockEngine) RunBacktest(_ *models.Strategy, inputs models.EngineInputs, _ float64, slippagePct float64) (*models.BacktestResult, error) {
+func (m *mockEngine) RunBacktest(_ *models.Strategy, inputs models.EngineInputs, cfg models.BacktestRunConfig) (*models.BacktestResult, error) {
 	m.capturedInputs = inputs
-	m.gotSlippagePct = slippagePct
+	m.capturedCfg = cfg
 	return m.result, m.err
 }
 func (m *mockEngine) ComputeTradeStats(trades []models.Trade, from, to time.Time) *models.TradeStats {
@@ -251,8 +251,10 @@ func defaultRequest() BacktestRequest {
 		Underlying:   "NIFTY",
 		From:         time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
 		To:           time.Date(2025, 6, 30, 0, 0, 0, 0, time.UTC),
-		Lots:         2,
-		Capital:      200000,
+		Cfg: models.BacktestRunConfig{
+			Lots:           2,
+			InitialCapital: 200000,
+		},
 	}
 }
 
@@ -749,11 +751,11 @@ func TestSubmit_RunCarriesSlugAndInputs(t *testing.T) {
 	if run.StrategySlug == nil || *run.StrategySlug != req.StrategySlug {
 		t.Errorf("expected StrategySlug %q, got %v", req.StrategySlug, run.StrategySlug)
 	}
-	if run.Capital == nil || *run.Capital != req.Capital {
-		t.Errorf("expected Capital %f, got %v", req.Capital, run.Capital)
+	if run.Capital == nil || *run.Capital != req.Cfg.InitialCapital {
+		t.Errorf("expected Capital %f, got %v", req.Cfg.InitialCapital, run.Capital)
 	}
-	if run.Lots == nil || *run.Lots != req.Lots {
-		t.Errorf("expected Lots %d, got %v", req.Lots, run.Lots)
+	if run.Lots == nil || *run.Lots != req.Cfg.Lots {
+		t.Errorf("expected Lots %d, got %v", req.Cfg.Lots, run.Lots)
 	}
 	if run.Underlying == nil || *run.Underlying != req.Underlying {
 		t.Errorf("expected Underlying %q, got %v", req.Underlying, run.Underlying)
@@ -961,7 +963,7 @@ func TestSubmit_RejectsOutOfRangeSlippagePct(t *testing.T) {
 				&mockEngine{},
 			)
 			req := defaultRequest()
-			req.SlippagePct = tt.slippagePct
+			req.Cfg.SlippagePct = tt.slippagePct
 			_, err := svc.Submit(context.Background(), req)
 			if !errors.Is(err, ErrInvalidSlippagePct) {
 				t.Fatalf("expected ErrInvalidSlippagePct for slippagePct=%v, got %v", tt.slippagePct, err)
@@ -980,13 +982,42 @@ func TestSubmit_SlippagePctPlumbedToEngine(t *testing.T) {
 		eng,
 	)
 	req := defaultRequest()
-	req.SlippagePct = 0.05
+	req.Cfg.SlippagePct = 0.05
 
 	_, err := svc.Submit(context.Background(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if eng.gotSlippagePct != 0.05 {
-		t.Errorf("expected slippagePct 0.05 to reach engine, got %v", eng.gotSlippagePct)
+	if eng.capturedCfg.SlippagePct != 0.05 {
+		t.Errorf("expected slippagePct 0.05 to reach engine, got %v", eng.capturedCfg.SlippagePct)
+	}
+}
+
+// TestSubmit_CfgPlumbedToEngine asserts the full BacktestRunConfig (Lots,
+// InitialCapital, SlippagePct) reaches the engine intact — not just SlippagePct.
+// Guards against future refactors silently dropping a cfg field on the path
+// from BacktestRequest through Submit/executeRun to RunBacktest.
+func TestSubmit_CfgPlumbedToEngine(t *testing.T) {
+	eng := &mockEngine{result: defaultEngineResult()}
+	svc := newService(
+		&mockBacktestRepo{},
+		defaultLookup(),
+		&mockCandleRepo{result: defaultCandles()},
+		&mockInstrumentRepo{listResult: defaultInstruments()},
+		eng,
+	)
+	req := defaultRequest()
+	req.Cfg = models.BacktestRunConfig{
+		Lots:           7,
+		InitialCapital: 333000,
+		SlippagePct:    0.03,
+	}
+
+	_, err := svc.Submit(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if eng.capturedCfg != req.Cfg {
+		t.Errorf("expected engine to receive cfg %+v, got %+v", req.Cfg, eng.capturedCfg)
 	}
 }

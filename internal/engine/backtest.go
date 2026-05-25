@@ -42,12 +42,9 @@ func NewBacktester(charges models.ChargeCalculator) *Backtester {
 // Signals are generated from completed signal bars and executed at the open of
 // the next eligible trade bar. Exit checks and end-of-data closure are driven by
 // the trade-side candle stream.
-// capital seeds running equity and the drawdown peak; MaxDrawdown is reported
-// as a fraction of the running equity peak (matching the chart-series semantics
-// in BuildChartData).
-// slippagePct is the user-supplied per-leg slippage assumption in percent units
-// (0.05 means 0.05%). It is applied symmetrically on entry and exit of every trade.
-func (b *Backtester) RunBacktest(strategy *models.Strategy, inputs models.EngineInputs, capital float64, slippagePct float64) (*models.BacktestResult, error) {
+// cfg carries per-run sizing (Lots, InitialCapital) and the SlippagePct
+// simulation assumption; see models.BacktestRunConfig for semantics.
+func (b *Backtester) RunBacktest(strategy *models.Strategy, inputs models.EngineInputs, cfg models.BacktestRunConfig) (*models.BacktestResult, error) {
 	if len(inputs.SignalCandles) == 0 || len(inputs.TradeCandles) == 0 {
 		return &models.BacktestResult{}, nil
 	}
@@ -66,11 +63,14 @@ func (b *Backtester) RunBacktest(strategy *models.Strategy, inputs models.Engine
 	if lotSize <= 0 {
 		lotSize = 1
 	}
-	nLots := strategy.NumberOfLots
+	nLots := cfg.Lots
 	if nLots <= 0 {
 		nLots = 1
 	}
 	qty := lotSize * nLots
+
+	capital := cfg.InitialCapital
+	slippagePct := cfg.SlippagePct
 
 	result := &models.BacktestResult{}
 	result.SlippagePct = slippagePct
