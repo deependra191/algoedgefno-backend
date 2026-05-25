@@ -83,12 +83,14 @@ type ChartData struct {
 // GrossPnL is the sum of trade-level GrossPnL; Slippage is the sum of trade-level
 // Slippage; TotalCharges is the sum of non-slippage charge components. NetPnL
 // is GrossPnL − TotalCharges − Slippage within float-rounding tolerance.
-// WinCount/LossCount are bucketed on trade-level NetPnL.
+// WinCount/LossCount are bucketed on trade-level NetPnL. SlippagePct is echoed
+// from the user-supplied run parameter so callers can read it back from the result.
 type BacktestResult struct {
 	Trades       []Trade
 	GrossPnL     float64
 	TotalCharges float64
 	Slippage     float64
+	SlippagePct  float64
 	NetPnL       float64
 	TotalTrades  int
 	WinCount     int
@@ -101,6 +103,23 @@ type EngineInputs struct {
 	Interval      string
 	SignalCandles []Candle
 	TradeCandles  []Candle
+}
+
+// BacktestRunConfig carries the per-run sizing and simulation assumptions that
+// belong to a single backtest execution rather than to the strategy definition.
+// Strategy defines what to trade and when; BacktestRunConfig defines how much to
+// trade and under what simulation assumptions.
+//
+// Lots is the number of trading lots; engine quantity = strategy.LotSize × Lots.
+// InitialCapital seeds running equity and the drawdown peak; MaxDrawdown is reported
+// as a fraction of the running equity peak.
+// SlippagePct is per-leg slippage in percent units (0.05 means 0.05%), applied
+// symmetrically on entry and exit. Valid range is [0, 1]; callers validate before
+// passing to the engine.
+type BacktestRunConfig struct {
+	Lots           int
+	InitialCapital float64
+	SlippagePct    float64
 }
 
 // BacktestEngine is the contract every backtest engine implementation must satisfy.
@@ -117,9 +136,9 @@ type BacktestEngine interface {
 	// open of the next trade bar starting at or after T plus the strategy interval.
 	// Open positions evaluate exits on every trade-side bar, even when no signal
 	// candle exists for that timestamp.
-	// capital is the user's starting capital. It seeds running equity and the
-	// initial drawdown peak; MaxDrawdown is reported as a fraction of the
-	// running equity peak.
+	// cfg carries the per-run sizing (Lots, InitialCapital) and simulation
+	// assumptions (SlippagePct). See BacktestRunConfig for field-level semantics
+	// and validation expectations.
 	// Returns an error only if the strategy configuration is invalid.
 	//
 	// Each returned Trade carries a full charge breakdown (Slippage, Brokerage, STT,
@@ -127,7 +146,7 @@ type BacktestEngine interface {
 	// NetPnL. At both trade and aggregate BacktestResult levels, TotalCharges excludes
 	// Slippage; NetPnL = GrossPnL − TotalCharges − Slippage. The equity curve and
 	// drawdown are driven by NetPnL (the post-cost series).
-	RunBacktest(strategy *Strategy, inputs EngineInputs, capital float64) (*BacktestResult, error)
+	RunBacktest(strategy *Strategy, inputs EngineInputs, cfg BacktestRunConfig) (*BacktestResult, error)
 	// ComputeTradeStats derives performance statistics from a completed trade list.
 	// from and to are the backtest date range used to compute tradesPerWeek.
 	// Pointer fields in the result are nil when mathematically undefined.
@@ -198,6 +217,7 @@ type BacktestRun struct {
 	Underlying            *string
 	ResultStats           *TradeStats
 	ChartData             *ChartData
+	SlippagePct           float64
 }
 
 // Backtest run status values stored in the status column of backtest_runs.

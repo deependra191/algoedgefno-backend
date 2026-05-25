@@ -1,5 +1,8 @@
-// Package engine — charges.go contains the Indian retail F&O cost model used to
-// deduct slippage, brokerage, and statutory charges from every backtest trade.
+// Package engine — charges.go contains the Indian retail F&O statutory cost model
+// used to deduct brokerage and statutory charges from every backtest trade.
+//
+// Slippage is no longer modeled here — it's a user-input run parameter applied by
+// the engine in closeTrade.
 //
 // Rates as of 2026-05-11, verified against Zerodha's published charges schedule.
 // F&O STT reflects the Finance Act 2026 hike effective 2026-04-01
@@ -19,16 +22,6 @@ package engine
 
 import (
 	"github.com/deependra191/algoedgefno-backend/internal/models"
-)
-
-// Slippage percentages per side (one-way), keyed on Strategy.InstrumentType.
-// A round-trip pays slipPct × (entryPrice + exitPrice) × qty.
-const (
-	slipPctEQ     = 0.0005 // 0.05%
-	slipPctFUTIDX = 0.0003 // 0.03%
-	slipPctFUTSTK = 0.0005 // 0.05%
-	slipPctOPTIDX = 0.0010 // 0.10%
-	slipPctOPTSTK = 0.0015 // 0.15%
 )
 
 // Securities Transaction Tax — applies to the SELL leg only.
@@ -80,7 +73,7 @@ func NewCharges() *IndianRetailCharges {
 // Returns a zero ChargeBreakdown when segment is not a recognised InstrumentType
 // so a misconfigured strategy fails open with no charges rather than panicking.
 func (IndianRetailCharges) Compute(segment string, side models.OrderSide, entryPrice, exitPrice float64, quantity int) models.ChargeBreakdown {
-	slipPct, exchPct, sttPct, stampPct, ok := rateTable(segment)
+	exchPct, sttPct, stampPct, ok := rateTable(segment)
 	if !ok {
 		return models.ChargeBreakdown{}
 	}
@@ -90,7 +83,6 @@ func (IndianRetailCharges) Compute(segment string, side models.OrderSide, entryP
 	exitTurnover := exitPrice * qty
 	totalTurnover := entryTurnover + exitTurnover
 
-	slippage := slipPct * (entryPrice + exitPrice) * qty
 	brokerage := perLegBrokerage(entryTurnover) + perLegBrokerage(exitTurnover)
 	exchange := exchPct * totalTurnover
 	sebi := sebiPct * totalTurnover
@@ -109,10 +101,9 @@ func (IndianRetailCharges) Compute(segment string, side models.OrderSide, entryP
 	stamp := stampPct * stampTurnover
 
 	gst := gstPct * (brokerage + exchange + sebi)
-	total := slippage + brokerage + stt + exchange + sebi + gst + stamp
+	total := brokerage + stt + exchange + sebi + gst + stamp
 
 	return models.ChargeBreakdown{
-		Slippage:     slippage,
 		Brokerage:    brokerage,
 		STT:          stt,
 		ExchangeFees: exchange,
@@ -131,21 +122,21 @@ func perLegBrokerage(turnover float64) float64 {
 	return brokerageFlatPerLeg
 }
 
-// rateTable resolves the (slippage, exchange, STT, stamp) rates for a segment.
+// rateTable resolves the (exchange, STT, stamp) rates for a segment.
 // ok is false when the segment is unknown — callers MUST return a zero breakdown.
-func rateTable(segment string) (slipPct, exchPct, sttPct, stampPct float64, ok bool) {
+func rateTable(segment string) (exchPct, sttPct, stampPct float64, ok bool) {
 	switch segment {
 	case models.InstrumentTypeEquity:
-		return slipPctEQ, exchPctEQ, sttPctEQ, stampPctEQ, true
+		return exchPctEQ, sttPctEQ, stampPctEQ, true
 	case models.InstrumentTypeFuturesIndex, models.InstrumentTypeFuturesIndexCont:
-		return slipPctFUTIDX, exchPctFUT, sttPctFUT, stampPctFUT, true
+		return exchPctFUT, sttPctFUT, stampPctFUT, true
 	case models.InstrumentTypeFuturesStock, models.InstrumentTypeFuturesStockCont:
-		return slipPctFUTSTK, exchPctFUT, sttPctFUT, stampPctFUT, true
+		return exchPctFUT, sttPctFUT, stampPctFUT, true
 	case models.InstrumentTypeOptionsIndex:
-		return slipPctOPTIDX, exchPctOPT, sttPctOPT, stampPctOPT, true
+		return exchPctOPT, sttPctOPT, stampPctOPT, true
 	case models.InstrumentTypeOptionsStock:
-		return slipPctOPTSTK, exchPctOPT, sttPctOPT, stampPctOPT, true
+		return exchPctOPT, sttPctOPT, stampPctOPT, true
 	default:
-		return 0, 0, 0, 0, false
+		return 0, 0, 0, false
 	}
 }

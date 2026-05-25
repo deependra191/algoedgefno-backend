@@ -22,7 +22,6 @@ func toStrategyModel(e *entities.Strategy) *models.Strategy {
 		StopLossPct:        e.StopLossPct,
 		TimeExitMinutes:    e.TimeExitMinutes,
 		LotSize:            e.LotSize,
-		CapitalPerTrade:    e.CapitalPerTrade,
 		Mode:               e.Mode,
 		IsReadyForRun:      e.IsReadyForRun,
 		CreatedAt:          e.CreatedAt,
@@ -44,7 +43,6 @@ func toStrategyEntity(s *models.Strategy) *entities.Strategy {
 		StopLossPct:        s.StopLossPct,
 		TimeExitMinutes:    s.TimeExitMinutes,
 		LotSize:            s.LotSize,
-		CapitalPerTrade:    s.CapitalPerTrade,
 		Mode:               s.Mode,
 		IsReadyForRun:      s.IsReadyForRun,
 		CreatedAt:          s.CreatedAt,
@@ -56,13 +54,13 @@ func toStrategyEntity(s *models.Strategy) *entities.Strategy {
 func scanStrategy(row pgx.Row) (*entities.Strategy, error) {
 	var st entities.Strategy
 	var optionLegBytes []byte
-	var targetPct, stopLossPct, capitalPerTrade *float64
+	var targetPct, stopLossPct *float64
 	var timeExitMinutes *int
 	err := row.Scan(
 		&st.ID, &st.Name, &st.Description, &st.Underlying, &st.InstrumentType,
 		&st.ExpiryRule, &optionLegBytes, &st.EntryConditionType,
 		&targetPct, &stopLossPct, &timeExitMinutes,
-		&st.LotSize, &capitalPerTrade, &st.Mode, &st.IsReadyForRun,
+		&st.LotSize, &st.Mode, &st.IsReadyForRun,
 		&st.CreatedAt, &st.UpdatedAt,
 	)
 	if err != nil {
@@ -72,20 +70,19 @@ func scanStrategy(row pgx.Row) (*entities.Strategy, error) {
 	st.TargetPct = targetPct
 	st.StopLossPct = stopLossPct
 	st.TimeExitMinutes = timeExitMinutes
-	st.CapitalPerTrade = capitalPerTrade
 	return &st, nil
 }
 
 func scanStrategyRow(rows pgx.Rows) (*entities.Strategy, error) {
 	var st entities.Strategy
 	var optionLegBytes []byte
-	var targetPct, stopLossPct, capitalPerTrade *float64
+	var targetPct, stopLossPct *float64
 	var timeExitMinutes *int
 	err := rows.Scan(
 		&st.ID, &st.Name, &st.Description, &st.Underlying, &st.InstrumentType,
 		&st.ExpiryRule, &optionLegBytes, &st.EntryConditionType,
 		&targetPct, &stopLossPct, &timeExitMinutes,
-		&st.LotSize, &capitalPerTrade, &st.Mode, &st.IsReadyForRun,
+		&st.LotSize, &st.Mode, &st.IsReadyForRun,
 		&st.CreatedAt, &st.UpdatedAt,
 	)
 	if err != nil {
@@ -95,6 +92,5 @@ func scanStrategyRow(rows pgx.Rows) (*entities.Strategy, error) {
 	st.TargetPct = targetPct
 	st.StopLossPct = stopLossPct
 	st.TimeExitMinutes = timeExitMinutes
-	st.CapitalPerTrade = capitalPerTrade
 	return &st, nil
 }
