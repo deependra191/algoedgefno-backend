@@ -354,30 +354,10 @@ run_auth_checks() {
     fi
 }
 
+# run_large_range_or_disabled_check: SKIP in PR 1 closed-interval — tenant endpoints return
+# 401 to the static token; PR 2 reintroduces this test via Firebase JWT.
 run_large_range_or_disabled_check() {
-    local result code body actual_error
-    if [[ "${expect_backtests_disabled}" == "true" ]]; then
-        result="$(submit_backtest "backtest-disabled" "${test_from}" "${test_to}")"
-        code="${result%%|*}"
-        body="${result#*|}"
-        actual_error="$(json_error_value "${body}")"
-        if [[ "${code}" == "${HTTP_STATUS_SERVICE_UNAVAILABLE}" && "${actual_error}" == "${ERR_BACKTEST_DISABLED}" ]]; then
-            record_result "PASS" "backtest-disabled" "HTTP ${HTTP_STATUS_SERVICE_UNAVAILABLE} with expected error JSON"
-        else
-            record_result "FAIL" "backtest-disabled" "got HTTP ${code} error '${actual_error}', want HTTP ${HTTP_STATUS_SERVICE_UNAVAILABLE} expected error JSON"
-        fi
-        return
-    fi
-
-    result="$(submit_backtest "backtest-large-date-range" "${LARGE_RANGE_FROM}" "${LARGE_RANGE_TO}")"
-    code="${result%%|*}"
-    body="${result#*|}"
-    actual_error="$(json_error_value "${body}")"
-    if [[ "${code}" == "${HTTP_STATUS_UNPROCESSABLE_ENTITY}" && "${actual_error}" == "${ERR_DATE_RANGE_EXCEEDED}" ]]; then
-        record_result "PASS" "backtest-large-date-range" "HTTP ${HTTP_STATUS_UNPROCESSABLE_ENTITY} with expected error JSON"
-    else
-        record_result "FAIL" "backtest-large-date-range" "got HTTP ${code} error '${actual_error}', want HTTP ${HTTP_STATUS_UNPROCESSABLE_ENTITY} expected error JSON"
-    fi
+    record_result "SKIP" "backtest-large-date-range" "PR 1 closed-interval — tenant endpoints return 401 to static token; PR 2 reintroduces this test via Firebase JWT"
 }
 
 is_clean_burst_response() {
@@ -400,34 +380,10 @@ is_clean_burst_response() {
     return 1
 }
 
+# run_burst_check: SKIP in PR 1 closed-interval — tenant endpoints return 401 to the static
+# token; PR 2 reintroduces this test via Firebase JWT.
 run_burst_check() {
-    if [[ "${env_name}" != "${ENV_STAGING}" ]]; then
-        record_result "SKIP" "burst-backtest-submit" "prod load test disabled by design"
-        return
-    fi
-    if [[ "${expect_backtests_disabled}" == "true" ]]; then
-        record_result "SKIP" "burst-backtest-submit" "backtests-disabled mode only asserts kill switch"
-        return
-    fi
-
-    local i result code body bad_count
-    bad_count=0
-    for ((i = 1; i <= BURST_REQUESTS; i++)); do
-        result="$(submit_backtest "burst-${i}" "${test_from}" "${test_to}")"
-        code="${result%%|*}"
-        body="${result#*|}"
-        if [[ "${code}" =~ ${HTTP_STATUS_SERVER_ERROR_PREFIX_REGEX} ]]; then
-            bad_count=$((bad_count + 1))
-        elif ! is_clean_burst_response "${code}" "${body}"; then
-            bad_count=$((bad_count + 1))
-        fi
-    done
-
-    if [[ "${bad_count}" -eq 0 ]]; then
-        record_result "PASS" "burst-backtest-submit" "${BURST_REQUESTS} sequential submit attempts; no 5xx or unexpected responses"
-    else
-        record_result "FAIL" "burst-backtest-submit" "${bad_count} of ${BURST_REQUESTS} requests returned 5xx or unexpected responses"
-    fi
+    record_result "SKIP" "burst-backtest-submit" "PR 1 closed-interval — tenant endpoints return 401 to static token; PR 2 reintroduces this test via Firebase JWT"
 }
 
 is_clean_poll_response() {
@@ -440,36 +396,30 @@ is_clean_poll_response() {
     return 1
 }
 
+# run_poll_check: SKIP in PR 1 closed-interval — tenant endpoints return 401 to the static
+# token; PR 2 reintroduces this test via Firebase JWT.
 run_poll_check() {
-    if [[ "${env_name}" != "${ENV_STAGING}" ]]; then
-        record_result "SKIP" "aggressive-result-poll" "prod load test disabled by design"
-        return
-    fi
-    if [[ "${expect_backtests_disabled}" == "true" ]]; then
-        record_result "SKIP" "aggressive-result-poll" "backtests-disabled mode only asserts kill switch"
-        return
-    fi
+    record_result "SKIP" "aggressive-result-poll" "PR 1 closed-interval — tenant endpoints return 401 to static token; PR 2 reintroduces this test via Firebase JWT"
+}
 
-    local i result code bad_count
-    bad_count=0
-    for ((i = 1; i <= POLL_REQUESTS; i++)); do
-        result="$(http_request "poll-${i}" \
-            --config "${selected_auth_cfg}" \
-            "${base_url}${BACKTESTS_PATH}/${POLL_BACKTEST_ID}")"
-        code="${result%%|*}"
-        if [[ "${code}" =~ ${HTTP_STATUS_SERVER_ERROR_PREFIX_REGEX} ]]; then
-            bad_count=$((bad_count + 1))
-        elif ! is_clean_poll_response "${code}"; then
-            bad_count=$((bad_count + 1))
-        fi
-        sleep "${POLL_INTERVAL_SECONDS}"
-    done
+# run_pr1_closed_interval_check: asserts that the static APP_SECRET_TOKEN is rejected (401)
+# on all tenant endpoints after PR 1 deploys. /api/v1/config/app 200 is already covered by
+# run_auth_checks. Uses BACKTESTS_PATH and HTTP_STATUS_UNAUTHORIZED constants (rule 17);
+# uses auth_config curl helper to avoid token-in-URL leakage (rule 4).
+run_pr1_closed_interval_check() {
+    local payload_file="${tmpdir}/pr1-closed-interval-post.json"
+    printf '{}' > "${payload_file}"
 
-    if [[ "${bad_count}" -eq 0 ]]; then
-        record_result "PASS" "aggressive-result-poll" "${POLL_REQUESTS} requests over ${POLL_DURATION_SECONDS}s; no 5xx or unexpected responses"
-    else
-        record_result "FAIL" "aggressive-result-poll" "${bad_count} of ${POLL_REQUESTS} polls returned 5xx or unexpected responses"
-    fi
+    assert_status "pr1-static-token-get-backtests" "${HTTP_STATUS_UNAUTHORIZED}" \
+        --config "${selected_auth_cfg}" \
+        "${base_url}${BACKTESTS_PATH}"
+
+    assert_status "pr1-static-token-post-backtests" "${HTTP_STATUS_UNAUTHORIZED}" \
+        -X POST \
+        -H 'Content-Type: application/json' \
+        --data-binary "@${payload_file}" \
+        --config "${selected_auth_cfg}" \
+        "${base_url}${BACKTESTS_PATH}"
 }
 
 run_log_redaction_check() {
@@ -491,8 +441,9 @@ run_log_redaction_check() {
 }
 
 run_auth_checks
+run_pr1_closed_interval_check
 run_large_range_or_disabled_check
-record_result "SKIP" "cross-tenant-strategy-backtest-id-lookup" "[skip: single-user platform]"
+record_result "SKIP" "cross-tenant-strategy-backtest-id-lookup" "PR 1 closed-interval — no JWT path exists; PR 2 implements real cross-tenant test via Firebase JWT"
 run_burst_check
 run_poll_check
 run_log_redaction_check

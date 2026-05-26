@@ -17,6 +17,21 @@ permissions:
 jobs:
   ci:
     runs-on: ubuntu-24.04
+    services:
+      timescaledb:
+        image: timescale/timescaledb:2.26.4-pg16   # matches docker/docker-compose.yml; required by migration 000003 (TimescaleDB hypertable)
+        env:
+          POSTGRES_USER: algoedge
+          POSTGRES_PASSWORD: algoedge
+          POSTGRES_DB: algoedgefno_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U algoedge -d algoedgefno_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 6
+    env:
+      TEST_DATABASE_URL: postgres://algoedge:algoedge@localhost:5432/algoedgefno_test?sslmode=disable
     steps:
       - uses: actions/checkout@v4
 
@@ -33,6 +48,11 @@ jobs:
 
       - name: Vet
         run: go vet ./...
+
+      - name: Run migrations (TimescaleDB)
+        run: |
+          go run -tags postgres github.com/golang-migrate/migrate/v4/cmd/migrate \
+              -path migrations -database "$TEST_DATABASE_URL" up
 
       - name: Test
         run: go test ./...
