@@ -5,6 +5,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
@@ -55,12 +57,13 @@ func NewStrategyService(
 }
 
 // ListSections returns BUILTIN and CUSTOM sections for the strategies list screen.
-func (s *StrategyService) ListSections(ctx context.Context) ([]StrategySection, error) {
+// userID is used to scope the last-backtest lookup to the requesting user.
+func (s *StrategyService) ListSections(ctx context.Context, userID uuid.UUID) ([]StrategySection, error) {
 	all := s.builtins.All()
 	items := make([]StrategyListItem, len(all))
 	for i, b := range all {
 		item := StrategyListItem{Strategy: b}
-		run, err := s.backtestRepo.LatestCompletedBySlug(ctx, b.ID)
+		run, err := s.backtestRepo.LatestCompletedBySlug(ctx, b.ID, userID)
 		if err != nil && !errors.Is(err, models.ErrNotFound) {
 			return nil, err
 		}
@@ -83,7 +86,8 @@ func (s *StrategyService) ListSections(ctx context.Context) ([]StrategySection, 
 }
 
 // GetBySlug returns the full strategy detail for a built-in slug.
-func (s *StrategyService) GetBySlug(ctx context.Context, slug string) (*StrategyDetail, error) {
+// userID is used to scope the last-backtest lookup to the requesting user.
+func (s *StrategyService) GetBySlug(ctx context.Context, slug string, userID uuid.UUID) (*StrategyDetail, error) {
 	b, ok := s.builtins.Get(slug)
 	if !ok {
 		return nil, models.ErrNotFound
@@ -99,7 +103,7 @@ func (s *StrategyService) GetBySlug(ctx context.Context, slug string) (*Strategy
 		MaxDate:  maxDate,
 	}
 
-	run, err := s.backtestRepo.LatestCompletedBySlug(ctx, slug)
+	run, err := s.backtestRepo.LatestCompletedBySlug(ctx, slug, userID)
 	if err != nil && !errors.Is(err, models.ErrNotFound) {
 		return nil, err
 	}

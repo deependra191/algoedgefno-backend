@@ -25,8 +25,10 @@ func (r scanRow) Scan(dest ...any) error {
 
 func TestBacktestMapperPreservesResultSlippage(t *testing.T) {
 	slippage := 12.34
+	userID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
 	model := &models.BacktestRun{
 		ID:           uuid.New(),
+		UserID:       &userID,
 		Status:       models.BacktestCompleted,
 		NetPnl:       ptrFloat(900),
 		GrossPnl:     ptrFloat(1000),
@@ -43,6 +45,9 @@ func TestBacktestMapperPreservesResultSlippage(t *testing.T) {
 	if entity.SlippagePct != 0.05 {
 		t.Fatalf("entity SlippagePct = %v, want 0.05", entity.SlippagePct)
 	}
+	if entity.UserID == nil || *entity.UserID != userID {
+		t.Fatalf("entity UserID = %v, want %v", entity.UserID, userID)
+	}
 
 	roundTrip := toBacktestModel(entity)
 	if roundTrip.Slippage == nil || *roundTrip.Slippage != slippage {
@@ -51,10 +56,14 @@ func TestBacktestMapperPreservesResultSlippage(t *testing.T) {
 	if roundTrip.SlippagePct != 0.05 {
 		t.Fatalf("model SlippagePct = %v, want 0.05", roundTrip.SlippagePct)
 	}
+	if roundTrip.UserID == nil || *roundTrip.UserID != userID {
+		t.Fatalf("model UserID = %v, want %v", roundTrip.UserID, userID)
+	}
 }
 
 func TestScanBacktestRunScansResultSlippage(t *testing.T) {
 	id := uuid.New()
+	userID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
 	strategyID := uuid.New()
 	signalToken := "NIFTY"
 	from := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -77,7 +86,7 @@ func TestScanBacktestRunScansResultSlippage(t *testing.T) {
 	slippagePct := 0.05
 
 	row := scanRow{
-		id, &strategyID, "NIFTY_FUT_CONT", &signalToken, from, to,
+		id, &userID, &strategyID, "NIFTY_FUT_CONT", &signalToken, from, to,
 		models.CandleInterval1D, models.BacktestCompleted,
 		&netPnl, &totalTrades, &winCount, &lossCount, &maxDrawdown,
 		&errMsg, createdAt, &completedAt,
@@ -100,6 +109,7 @@ func TestScanBacktestRunScansResultSlippage(t *testing.T) {
 
 func TestScanBacktestRunWithTradesScansResultSlippage(t *testing.T) {
 	id := uuid.New()
+	userID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
 	strategyID := uuid.New()
 	signalToken := "NIFTY"
 	from := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -122,7 +132,7 @@ func TestScanBacktestRunWithTradesScansResultSlippage(t *testing.T) {
 	slippagePct := 0.05
 
 	row := scanRow{
-		id, &strategyID, "NIFTY_FUT_CONT", &signalToken, from, to,
+		id, &userID, &strategyID, "NIFTY_FUT_CONT", &signalToken, from, to,
 		models.CandleInterval1D, models.BacktestCompleted,
 		&netPnl, &totalTrades, &winCount, &lossCount, &maxDrawdown,
 		[]byte(`[{"Slippage":12.34}]`), &errMsg, createdAt, &completedAt,

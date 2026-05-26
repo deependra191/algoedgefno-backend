@@ -9,6 +9,7 @@ import (
 // BacktestRun is the DB row for the backtest_runs table.
 type BacktestRun struct {
 	ID                    uuid.UUID
+	UserID                *uuid.UUID // NULL for rows created before migration 016
 	StrategyID            *uuid.UUID
 	InstrumentToken       string
 	SignalInstrumentToken *string
