@@ -78,9 +78,9 @@ func TestMigration016_DownGuard_RaisesWhenUserIDRowExists(t *testing.T) {
 	runID := uuid.New()
 	_, err = pool.Exec(context.Background(),
 		`INSERT INTO backtest_runs
-		  (id, user_id, instrument_token, from_ts, to_ts, candle_interval, status, created_at)
-		 VALUES ($1, $2, $3, '2025-01-01', '2025-03-31', '1d', 'COMPLETED', NOW())`,
-		runID, userID, "NIFTY-FUT",
+		  (id, user_id, instrument_token, from_ts, to_ts, candle_interval, status, strategy_slug, created_at)
+		 VALUES ($1, $2, $3, '2025-01-01', '2025-03-31', '1d', 'COMPLETED', $4, NOW())`,
+		runID, userID, "NIFTY-FUT", "ma_crossover",
 	)
 	if err != nil {
 		t.Fatalf("insert backtest_run for migration test: %v", err)
