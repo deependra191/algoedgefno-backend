@@ -71,7 +71,8 @@ Run this twice — once for `APP_SECRET_TOKEN`, once for `JWT_SECRET`. Never reu
 - [ ] Hit `/ready` endpoint and confirm `200 OK`
 - [ ] Hit `/version` endpoint and confirm environment, commit, and migration version
 - [ ] Hit a protected endpoint without a token — confirm `401 Unauthorized`
-- [ ] Hit a protected endpoint with the correct `APP_SECRET_TOKEN` — confirm it works
+- [ ] Hit `/api/v1/config/app` with the correct `APP_SECRET_TOKEN` — confirm `200 OK`
+- [ ] Hit `/api/v1/backtests` with the correct `APP_SECRET_TOKEN` — confirm `401 Unauthorized` during the PR 1 closed interval
 - [ ] Confirm logs contain request IDs and do not contain bearer tokens, JWTs, DB passwords, or full DSNs
 - [ ] Run `scripts/security/abuse-suite.sh --env staging` and confirm zero failures before merging closed-beta security changes
 - [ ] Run the production-safe subset with `scripts/security/abuse-suite.sh --env prod` before first external user access
