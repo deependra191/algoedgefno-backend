@@ -8,10 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const (
-	UserIDKey    = "userID"
-	bearerPrefix = "Bearer "
-)
+const bearerPrefix = "Bearer "
 
 // Auth permits the static APP_SECRET_TOKEN on "/api/v1/config/app" only; all other paths return 401 until PR 2 reintroduces the JWT path.
 func Auth(appSecretToken string) gin.HandlerFunc {

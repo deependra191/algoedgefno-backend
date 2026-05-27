@@ -5,14 +5,14 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/deependra191/algoedgefno-backend/internal/middleware"
+	"github.com/deependra191/algoedgefno-backend/internal/models"
 	"github.com/gin-gonic/gin"
 )
 
 // extractUserID retrieves the typed UUID identity set by the auth middleware.
 // Returns (uuid.Nil, false) after writing a 401 — caller must just return.
 func extractUserID(c *gin.Context) (uuid.UUID, bool) {
-	raw, ok := c.Get(middleware.UserIDKey)
+	raw, ok := c.Get(models.UserIDKey)
 	if !ok {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing user identity"})
 		return uuid.Nil, false

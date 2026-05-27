@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"github.com/deependra191/algoedgefno-backend/internal/middleware"
+	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
 // newStrategyListRouter returns a gin engine with a single /api/v1/strategies GET
@@ -36,7 +36,7 @@ func TestStrategyHandler_MissingIdentity(t *testing.T) {
 // TestStrategyHandler_StringIdentity asserts that a string value for UserIDKey causes 401 (row 8).
 func TestStrategyHandler_StringIdentity(t *testing.T) {
 	r := newStrategyListRouter(func(c *gin.Context) {
-		c.Set(middleware.UserIDKey, "not-a-uuid")
+		c.Set(models.UserIDKey, "not-a-uuid")
 	})
 	assertMissingUserIdentity(t, doGetJSON(r, "/api/v1/strategies"))
 }
@@ -44,7 +44,7 @@ func TestStrategyHandler_StringIdentity(t *testing.T) {
 // TestStrategyHandler_NilUUIDIdentity asserts that uuid.Nil as the UserIDKey value causes 401 (row 9).
 func TestStrategyHandler_NilUUIDIdentity(t *testing.T) {
 	r := newStrategyListRouter(func(c *gin.Context) {
-		c.Set(middleware.UserIDKey, uuid.Nil)
+		c.Set(models.UserIDKey, uuid.Nil)
 	})
 	assertMissingUserIdentity(t, doGetJSON(r, "/api/v1/strategies"))
 }
