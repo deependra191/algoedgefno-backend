@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -21,7 +22,7 @@ func init() {
 func newAuthRouter(appSecretToken string) *gin.Engine {
 	r := gin.New()
 	r.Use(Auth(appSecretToken))
-	r.GET("/api/v1/config/app", func(c *gin.Context) {
+	r.GET(appConfigPath, func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 	r.GET("/api/v1/backtests", func(c *gin.Context) {
@@ -42,6 +43,21 @@ func doRequest(r *gin.Engine, path, authHeader string) *httptest.ResponseRecorde
 	return w
 }
 
+// assertAuthRejected asserts the canonical 401 response emitted by Auth.
+func assertAuthRejected(t *testing.T, w *httptest.ResponseRecorder) {
+	t.Helper()
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d; body: %s", w.Code, w.Body)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body["error"] != errMissingOrInvalidAuthorizationHeader {
+		t.Errorf("expected error %q, got %q", errMissingOrInvalidAuthorizationHeader, body["error"])
+	}
+}
+
 // TestAuth_StaticTokenBlockedOnTenantEndpoints asserts that the static APP_SECRET_TOKEN
 // is rejected on any path other than /api/v1/config/app (rows 1, 5).
 func TestAuth_StaticTokenBlockedOnTenantEndpoints(t *testing.T) {
@@ -49,9 +65,7 @@ func TestAuth_StaticTokenBlockedOnTenantEndpoints(t *testing.T) {
 	r := newAuthRouter(secret)
 
 	w := doRequest(r, "/api/v1/backtests", "Bearer "+secret)
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 on tenant endpoint with static token, got %d", w.Code)
-	}
+	assertAuthRejected(t, w)
 }
 
 // TestAuth_StaticTokenAcceptedOnConfigApp asserts that a valid static token is
@@ -60,7 +74,7 @@ func TestAuth_StaticTokenAcceptedOnConfigApp(t *testing.T) {
 	const secret = "test-secret"
 	r := newAuthRouter(secret)
 
-	w := doRequest(r, "/api/v1/config/app", "Bearer "+secret)
+	w := doRequest(r, appConfigPath, "Bearer "+secret)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200 on config/app with valid static token, got %d", w.Code)
 	}
@@ -85,15 +99,11 @@ func TestAuth_HMACJWTRejected(t *testing.T) {
 
 	// Try on a tenant path.
 	w := doRequest(r, "/api/v1/backtests", "Bearer "+tokenStr)
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 for HMAC JWT on tenant path, got %d", w.Code)
-	}
+	assertAuthRejected(t, w)
 
 	// Try on config/app — JWT is not the static token, so it must also be rejected.
-	w = doRequest(r, "/api/v1/config/app", "Bearer "+tokenStr)
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 for HMAC JWT on config/app path, got %d", w.Code)
-	}
+	w = doRequest(r, appConfigPath, "Bearer "+tokenStr)
+	assertAuthRejected(t, w)
 }
 
 // TestAuth_MissingAuthorizationHeader asserts that requests without an Authorization
@@ -101,12 +111,10 @@ func TestAuth_HMACJWTRejected(t *testing.T) {
 func TestAuth_MissingAuthorizationHeader(t *testing.T) {
 	r := newAuthRouter("test-secret")
 
-	for _, path := range []string{"/api/v1/config/app", "/api/v1/backtests"} {
+	for _, path := range []string{appConfigPath, "/api/v1/backtests"} {
 		t.Run(fmt.Sprintf("path=%s", path), func(t *testing.T) {
 			w := doRequest(r, path, "")
-			if w.Code != http.StatusUnauthorized {
-				t.Fatalf("expected 401 with missing header on %s, got %d", path, w.Code)
-			}
+			assertAuthRejected(t, w)
 		})
 	}
 }
@@ -116,8 +124,6 @@ func TestAuth_MissingAuthorizationHeader(t *testing.T) {
 func TestAuth_WrongTokenOnConfigPath(t *testing.T) {
 	r := newAuthRouter("correct-secret")
 
-	w := doRequest(r, "/api/v1/config/app", "Bearer wrong-secret")
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 for wrong token on config/app, got %d", w.Code)
-	}
+	w := doRequest(r, appConfigPath, "Bearer wrong-secret")
+	assertAuthRejected(t, w)
 }

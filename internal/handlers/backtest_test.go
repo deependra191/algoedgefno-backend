@@ -38,8 +38,8 @@ func assertMissingUserIdentity(t *testing.T, w *httptest.ResponseRecorder) {
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
-	if body["error"] != "missing user identity" {
-		t.Errorf("expected error %q, got %q", "missing user identity", body["error"])
+	if body["error"] != errMissingUserIdentity {
+		t.Errorf("expected error %q, got %q", errMissingUserIdentity, body["error"])
 	}
 }
 
