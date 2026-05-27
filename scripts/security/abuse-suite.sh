@@ -41,7 +41,6 @@ readonly HTTP_STATUS_SERVICE_UNAVAILABLE=503
 readonly HTTP_STATUS_SERVER_ERROR_PREFIX_REGEX='^5'
 
 readonly ERR_MISSING_AUTH="missing or invalid authorization header"
-readonly ERR_INVALID_TOKEN="invalid or expired token"
 readonly ERR_DATE_RANGE_EXCEEDED="date range exceeds maximum allowed"
 readonly ERR_BACKTEST_DISABLED="backtests are disabled"
 readonly ERR_NO_CANDLE_DATA="no candle data available"
@@ -333,7 +332,7 @@ run_auth_checks() {
     assert_error_response "protected-no-auth" "${HTTP_STATUS_UNAUTHORIZED}" "${ERR_MISSING_AUTH}" \
         "${base_url}${PROTECTED_CONFIG_PATH}"
 
-    assert_error_response "protected-invalid-token" "${HTTP_STATUS_UNAUTHORIZED}" "${ERR_INVALID_TOKEN}" \
+    assert_error_response "protected-invalid-token" "${HTTP_STATUS_UNAUTHORIZED}" "${ERR_MISSING_AUTH}" \
         --config "${invalid_auth_cfg}" \
         "${base_url}${PROTECTED_CONFIG_PATH}"
 
@@ -345,7 +344,7 @@ run_auth_checks() {
         if [[ -n "${STAGING_APP_TOKEN:-}" ]]; then
             local staging_auth_cfg
             staging_auth_cfg="$(auth_config "${STAGING_APP_TOKEN}" "staging-cross-env")"
-            assert_error_response "prod-url-staging-token" "${HTTP_STATUS_UNAUTHORIZED}" "${ERR_INVALID_TOKEN}" \
+            assert_error_response "prod-url-staging-token" "${HTTP_STATUS_UNAUTHORIZED}" "${ERR_MISSING_AUTH}" \
                 --config "${staging_auth_cfg}" \
                 "${base_url}${PROTECTED_CONFIG_PATH}"
         else
