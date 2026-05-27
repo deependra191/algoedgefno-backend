@@ -54,6 +54,9 @@ usage: scripts/security/abuse-suite.sh --env staging|prod [--expect-backtests-di
 Runs deterministic HTTP abuse checks and writes a sanitized markdown report under
 scratch/security-runs/YYYY-MM-DD-{env}.md. The suite never reads server env
 files and never prints bearer token values.
+
+During the PR 1 closed interval, --expect-backtests-disabled is unavailable
+because authenticated tenant requests are restored only in PR 2.
 EOF
 }
 
@@ -122,6 +125,10 @@ esac
 
 if [[ "${env_name}" == "${ENV_PROD}" && "${expect_backtests_disabled}" == "true" ]]; then
     fail_usage "--expect-backtests-disabled is staging-only"
+fi
+
+if [[ "${expect_backtests_disabled}" == "true" ]]; then
+    fail_fast "--expect-backtests-disabled cannot validate BACKTEST_ENABLED during the PR 1 closed interval; retry after PR 2 restores authenticated tenant requests"
 fi
 
 if [[ -z "${app_token}" ]]; then

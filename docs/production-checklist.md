@@ -75,7 +75,7 @@ Run this twice — once for `APP_SECRET_TOKEN`, once for `JWT_SECRET`. Never reu
 - [ ] Confirm logs contain request IDs and do not contain bearer tokens, JWTs, DB passwords, or full DSNs
 - [ ] Run `scripts/security/abuse-suite.sh --env staging` and confirm zero failures before merging closed-beta security changes
 - [ ] Run the production-safe subset with `scripts/security/abuse-suite.sh --env prod` before first external user access
-- [ ] If validating the staging kill switch, follow `docs/security-abuse-suite.md` and run `scripts/security/abuse-suite.sh --env staging --expect-backtests-disabled`
+- Kill-switch validation is unavailable during the PR 1 closed interval: `--expect-backtests-disabled` fails fast until PR 2 restores authenticated tenant requests.
 
 **PR 1 closed-interval abuse-suite contract** (applies after PR 1 deploys, until PR 2 adds Firebase JWT):
 - `GET /api/v1/backtests` with the static `APP_SECRET_TOKEN` → asserted **401** (`pr1-static-token-get-backtests`).
@@ -83,6 +83,7 @@ Run this twice — once for `APP_SECRET_TOKEN`, once for `JWT_SECRET`. Never reu
 - `GET /api/v1/config/app` with the static `APP_SECRET_TOKEN` → still **200** (asserted by `protected-valid-token`).
 - `burst-backtest-submit`, `aggressive-result-poll`, and `backtest-large-date-range` are SKIP (tenant endpoints 401 to static token; PR 2 reintroduces them via Firebase JWT).
 - `cross-tenant-strategy-backtest-id-lookup` remains SKIP until PR 2 introduces Firebase tokens.
+- `--expect-backtests-disabled` is rejected rather than reporting a misleading SKIP; validate the kill switch only after PR 2 restores authenticated tenant requests.
 - "Abuse suite green" in the PR 1 interval means: `run_auth_checks` passes + `run_pr1_closed_interval_check` passes + all other entries are SKIP, zero failures.
 - [ ] Create and review a screen-by-screen smoke-test sheet before live. For each Android screen/state, list the expected test cases, identify missing/unimplemented cases first, then run proper smoke testing against the implemented flows.
 

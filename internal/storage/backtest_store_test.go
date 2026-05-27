@@ -10,17 +10,8 @@ import (
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
-// insertTestUser inserts a minimal users row and returns its ID.
-// Tests call this once per user identity they need to isolate.
-func insertTestUser(t *testing.T, ctx context.Context, pool interface {
-	Exec(ctx context.Context, sql string, arguments ...any) (interface{ RowsAffected() int64 }, error)
-}) uuid.UUID {
-	t.Helper()
-	return uuid.Nil // placeholder — real impl below
-}
-
-// insertTestUserReal inserts a users row and returns its ID.
-func insertTestUserReal(t *testing.T, ctx context.Context, s *BacktestStore) uuid.UUID {
+// insertTestUser inserts a users row and returns its ID.
+func insertTestUser(t *testing.T, ctx context.Context, s *BacktestStore) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
 	_, err := s.pool.Exec(ctx,
@@ -32,8 +23,9 @@ func insertTestUserReal(t *testing.T, ctx context.Context, s *BacktestStore) uui
 		t.Fatalf("insert test user: %v", err)
 	}
 	t.Cleanup(func() {
-		// DELETE cascade handles backtest_runs via FK.
-		_, _ = s.pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, id)
+		if _, err := s.pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, id); err != nil {
+			t.Errorf("delete test user %s: %v", id, err)
+		}
 	})
 	return id
 }
@@ -47,27 +39,29 @@ func insertTestBacktestRun(t *testing.T, ctx context.Context, s *BacktestStore, 
 	total := 5
 	wins := 3
 	run := &models.BacktestRun{
-		ID:             uuid.New(),
-		UserID:         &userID,
+		ID:              uuid.New(),
+		UserID:          &userID,
 		InstrumentToken: "NIFTY-FUT",
-		FromTs:         time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
-		ToTs:           time.Date(2025, 3, 31, 0, 0, 0, 0, time.UTC),
-		CandleInterval: models.CandleInterval1D,
-		Status:         models.BacktestCompleted,
-		StrategySlug:   &slug,
-		Capital:        &capital,
-		NetPnl:         &pnl,
-		TotalTrades:    &total,
-		WinCount:       &wins,
+		FromTs:          time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		ToTs:            time.Date(2025, 3, 31, 0, 0, 0, 0, time.UTC),
+		CandleInterval:  models.CandleInterval1D,
+		Status:          models.BacktestCompleted,
+		StrategySlug:    &slug,
+		Capital:         &capital,
+		NetPnl:          &pnl,
+		TotalTrades:     &total,
+		WinCount:        &wins,
 	}
 	if err := s.Create(ctx, run); err != nil {
 		t.Fatalf("create test backtest run: %v", err)
 	}
-	// Stamp completed_at and total_trades so it appears in ListCompleted.
-	if _, err := s.pool.Exec(ctx,
-		`UPDATE backtest_runs SET completed_at = NOW() WHERE id = $1`, run.ID,
-	); err != nil {
-		t.Fatalf("stamp completed_at: %v", err)
+	t.Cleanup(func() {
+		if _, err := s.pool.Exec(ctx, `DELETE FROM backtest_runs WHERE id = $1`, run.ID); err != nil {
+			t.Errorf("delete test backtest run %s: %v", run.ID, err)
+		}
+	})
+	if err := s.UpdateResult(ctx, run); err != nil {
+		t.Fatalf("complete test backtest run: %v", err)
 	}
 	return run
 }
@@ -79,8 +73,8 @@ func TestBacktestStore_GetByID_TenantIsolation(t *testing.T) {
 	s := NewBacktestStore(pool)
 	ctx := context.Background()
 
-	ownerID := insertTestUserReal(t, ctx, s)
-	otherID := insertTestUserReal(t, ctx, s)
+	ownerID := insertTestUser(t, ctx, s)
+	otherID := insertTestUser(t, ctx, s)
 
 	run := insertTestBacktestRun(t, ctx, s, ownerID)
 
@@ -107,8 +101,8 @@ func TestBacktestStore_GetByIDWithTrades_TenantIsolation(t *testing.T) {
 	s := NewBacktestStore(pool)
 	ctx := context.Background()
 
-	ownerID := insertTestUserReal(t, ctx, s)
-	otherID := insertTestUserReal(t, ctx, s)
+	ownerID := insertTestUser(t, ctx, s)
+	otherID := insertTestUser(t, ctx, s)
 
 	run := insertTestBacktestRun(t, ctx, s, ownerID)
 
@@ -135,36 +129,35 @@ func TestBacktestStore_ListCompleted_TenantIsolation(t *testing.T) {
 	s := NewBacktestStore(pool)
 	ctx := context.Background()
 
-	ownerID := insertTestUserReal(t, ctx, s)
-	otherID := insertTestUserReal(t, ctx, s)
+	ownerID := insertTestUser(t, ctx, s)
+	otherID := insertTestUser(t, ctx, s)
 
 	// Insert one run for each tenant.
-	insertTestBacktestRun(t, ctx, s, ownerID)
-	insertTestBacktestRun(t, ctx, s, otherID)
+	ownerRun := insertTestBacktestRun(t, ctx, s, ownerID)
+	otherRun := insertTestBacktestRun(t, ctx, s, otherID)
 
 	// Owner's list must contain only their run; COUNT must match.
 	runs, total, err := s.ListCompleted(ctx, ownerID, 1, 100)
 	if err != nil {
 		t.Fatalf("ListCompleted: %v", err)
 	}
-	for _, r := range runs {
-		if r.UserID == nil || *r.UserID != ownerID {
-			t.Errorf("ListCompleted returned run owned by a different user: %s", r.ID)
-		}
+	if total != 1 || len(runs) != 1 {
+		t.Fatalf("owner ListCompleted returned total=%d rows=%d, want exactly one owned row", total, len(runs))
 	}
-	if total != len(runs) {
-		t.Errorf("total count %d does not match returned rows %d — COUNT and SELECT predicates are out of sync", total, len(runs))
+	if runs[0].ID != ownerRun.ID || runs[0].UserID == nil || *runs[0].UserID != ownerID {
+		t.Errorf("owner ListCompleted returned run %s for user %v, want run %s for user %s", runs[0].ID, runs[0].UserID, ownerRun.ID, ownerID)
 	}
 
 	// Other tenant's list must not include owner's rows.
-	otherRuns, _, err := s.ListCompleted(ctx, otherID, 1, 100)
+	otherRuns, otherTotal, err := s.ListCompleted(ctx, otherID, 1, 100)
 	if err != nil {
 		t.Fatalf("ListCompleted (other): %v", err)
 	}
-	for _, r := range otherRuns {
-		if r.UserID != nil && *r.UserID == ownerID {
-			t.Errorf("other tenant's ListCompleted leaked owner's run %s", r.ID)
-		}
+	if otherTotal != 1 || len(otherRuns) != 1 {
+		t.Fatalf("other ListCompleted returned total=%d rows=%d, want exactly one owned row", otherTotal, len(otherRuns))
+	}
+	if otherRuns[0].ID != otherRun.ID || otherRuns[0].UserID == nil || *otherRuns[0].UserID != otherID {
+		t.Errorf("other ListCompleted returned run %s for user %v, want run %s for user %s", otherRuns[0].ID, otherRuns[0].UserID, otherRun.ID, otherID)
 	}
 }
 
@@ -175,7 +168,7 @@ func TestBacktestStore_Create_PersistsUserID(t *testing.T) {
 	s := NewBacktestStore(pool)
 	ctx := context.Background()
 
-	ownerID := insertTestUserReal(t, ctx, s)
+	ownerID := insertTestUser(t, ctx, s)
 
 	run := insertTestBacktestRun(t, ctx, s, ownerID)
 
