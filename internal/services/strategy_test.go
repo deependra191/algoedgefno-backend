@@ -25,19 +25,19 @@ func (m *mockBacktestRepoForStrategy) UpdateStatus(_ context.Context, _ *models.
 func (m *mockBacktestRepoForStrategy) UpdateResult(_ context.Context, _ *models.BacktestRun) error {
 	return nil
 }
-func (m *mockBacktestRepoForStrategy) GetByID(_ context.Context, _ uuid.UUID) (*models.BacktestRun, error) {
+func (m *mockBacktestRepoForStrategy) GetByID(_ context.Context, _, _ uuid.UUID) (*models.BacktestRun, error) {
 	return nil, models.ErrNotFound
 }
-func (m *mockBacktestRepoForStrategy) LatestCompletedBySlug(_ context.Context, slug string) (*models.BacktestRun, error) {
+func (m *mockBacktestRepoForStrategy) LatestCompletedBySlug(_ context.Context, slug string, _ uuid.UUID) (*models.BacktestRun, error) {
 	if run, ok := m.latestBySlug[slug]; ok {
 		return run, nil
 	}
 	return nil, models.ErrNotFound
 }
-func (m *mockBacktestRepoForStrategy) GetByIDWithTrades(_ context.Context, _ uuid.UUID) (*models.BacktestRun, error) {
+func (m *mockBacktestRepoForStrategy) GetByIDWithTrades(_ context.Context, _, _ uuid.UUID) (*models.BacktestRun, error) {
 	return nil, models.ErrNotFound
 }
-func (m *mockBacktestRepoForStrategy) ListCompleted(_ context.Context, _, _ int) ([]models.BacktestRun, int, error) {
+func (m *mockBacktestRepoForStrategy) ListCompleted(_ context.Context, _ uuid.UUID, _, _ int) ([]models.BacktestRun, int, error) {
 	return nil, 0, nil
 }
 
@@ -69,7 +69,7 @@ func TestListSections_ReturnsBothSections(t *testing.T) {
 		&mockCandleRepoForStrategy{},
 	)
 
-	sections, err := svc.ListSections(context.Background())
+	sections, err := svc.ListSections(context.Background(), testUserID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestListSections_BuiltinHasStrategy(t *testing.T) {
 		&mockCandleRepoForStrategy{},
 	)
 
-	sections, err := svc.ListSections(context.Background())
+	sections, err := svc.ListSections(context.Background(), testUserID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestListSections_BuiltinWithLastBacktest(t *testing.T) {
 		&mockCandleRepoForStrategy{},
 	)
 
-	sections, err := svc.ListSections(context.Background())
+	sections, err := svc.ListSections(context.Background(), testUserID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestListSections_CustomIsEmpty(t *testing.T) {
 		&mockCandleRepoForStrategy{},
 	)
 
-	sections, err := svc.ListSections(context.Background())
+	sections, err := svc.ListSections(context.Background(), testUserID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestGetBySlug_Found(t *testing.T) {
 		&mockCandleRepoForStrategy{maxDate: maxDate},
 	)
 
-	detail, err := svc.GetBySlug(context.Background(), testSlug)
+	detail, err := svc.GetBySlug(context.Background(), testSlug, testUserID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestGetBySlug_NotFound(t *testing.T) {
 		&mockCandleRepoForStrategy{},
 	)
 
-	_, err := svc.GetBySlug(context.Background(), "nonexistent")
+	_, err := svc.GetBySlug(context.Background(), "nonexistent", testUserID)
 	if err == nil {
 		t.Fatal("expected error for nonexistent slug")
 	}

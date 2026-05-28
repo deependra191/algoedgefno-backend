@@ -166,31 +166,42 @@ type BacktestEngine interface {
 // BacktestRepository is the storage contract for persisting backtest run records.
 type BacktestRepository interface {
 	// Create inserts a new BacktestRun record with PENDING status.
+	// user_id flows through run.UserID; callers must set it before calling Create.
 	Create(ctx context.Context, run *BacktestRun) error
 	// UpdateStatus persists only the status field — used for PENDING→RUNNING transitions.
+	// Keyed by run ID only; no tenant filter applied (run was loaded via a tenant-scoped read).
 	UpdateStatus(ctx context.Context, run *BacktestRun) error
 	// UpdateResult persists final metrics and stamps completed_at — used for COMPLETED/FAILED.
+	// Keyed by run ID only; no tenant filter applied (run was loaded via a tenant-scoped read).
 	UpdateResult(ctx context.Context, run *BacktestRun) error
-	// GetByID returns the run with the given ID, or models.ErrNotFound.
+	// GetByID returns the run with the given ID scoped to the given userID, or ErrNotFound.
+	// Returns ErrNotFound for both "row doesn't exist" and "row belongs to a different user"
+	// — the tenant boundary leaks no information about other users' run IDs.
 	// Does not load the trades_json blob; use GetByIDWithTrades when trade data is needed.
-	GetByID(ctx context.Context, id uuid.UUID) (*BacktestRun, error)
-	// GetByIDWithTrades returns the run with the given ID including the trades_json blob, or models.ErrNotFound.
+	GetByID(ctx context.Context, id, userID uuid.UUID) (*BacktestRun, error)
+	// GetByIDWithTrades returns the run with the given ID scoped to the given userID,
+	// including the trades_json blob, or ErrNotFound.
+	// Returns ErrNotFound for both "row doesn't exist" and "row belongs to a different user"
+	// — the tenant boundary leaks no information about other users' run IDs.
 	// Use only when trade-level data is needed (e.g. the paginated trades endpoint).
-	GetByIDWithTrades(ctx context.Context, id uuid.UUID) (*BacktestRun, error)
-	// LatestCompletedBySlug returns the most recent COMPLETED backtest for a built-in strategy slug.
-	// Returns models.ErrNotFound if no completed run exists.
-	LatestCompletedBySlug(ctx context.Context, slug string) (*BacktestRun, error)
-	// ListCompleted returns completed backtest runs that produced at least one trade,
-	// ordered by completed_at descending. 0-trade runs are persisted (and reachable
-	// via GetByID) but excluded from this user-facing list view — they are noise on
-	// the results screen, not history worth scanning. The returned total reflects
-	// the same filter so callers can paginate correctly.
-	ListCompleted(ctx context.Context, page, limit int) ([]BacktestRun, int, error)
+	GetByIDWithTrades(ctx context.Context, id, userID uuid.UUID) (*BacktestRun, error)
+	// LatestCompletedBySlug returns the most recent COMPLETED backtest for a built-in
+	// strategy slug scoped to the given userID.
+	// Returns ErrNotFound for both "no completed run exists" and "run belongs to a
+	// different user" — the tenant boundary leaks no information about other users' runs.
+	LatestCompletedBySlug(ctx context.Context, slug string, userID uuid.UUID) (*BacktestRun, error)
+	// ListCompleted returns completed backtest runs scoped to the given userID that
+	// produced at least one trade, ordered by completed_at descending. 0-trade runs are
+	// persisted (and reachable via GetByID) but excluded from this user-facing list view
+	// — they are noise on the results screen, not history worth scanning. The returned
+	// total reflects the same filter so callers can paginate correctly.
+	ListCompleted(ctx context.Context, userID uuid.UUID, page, limit int) ([]BacktestRun, int, error)
 }
 
 // BacktestRun is the domain representation of a single backtest execution.
 type BacktestRun struct {
 	ID                    uuid.UUID
+	UserID                *uuid.UUID // nil for legacy rows created before migration 016
 	StrategyID            *uuid.UUID
 	InstrumentToken       string
 	SignalInstrumentToken *string

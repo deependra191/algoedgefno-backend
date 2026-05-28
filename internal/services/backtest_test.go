@@ -44,16 +44,16 @@ func (m *mockBacktestRepo) UpdateResult(_ context.Context, run *models.BacktestR
 	m.capturedUpdateResult = append(m.capturedUpdateResult, &cp)
 	return m.updateResultErr
 }
-func (m *mockBacktestRepo) GetByID(_ context.Context, _ uuid.UUID) (*models.BacktestRun, error) {
+func (m *mockBacktestRepo) GetByID(_ context.Context, _, _ uuid.UUID) (*models.BacktestRun, error) {
 	return m.getByIDResult, m.getByIDErr
 }
-func (m *mockBacktestRepo) LatestCompletedBySlug(_ context.Context, _ string) (*models.BacktestRun, error) {
+func (m *mockBacktestRepo) LatestCompletedBySlug(_ context.Context, _ string, _ uuid.UUID) (*models.BacktestRun, error) {
 	return nil, models.ErrNotFound
 }
-func (m *mockBacktestRepo) GetByIDWithTrades(_ context.Context, _ uuid.UUID) (*models.BacktestRun, error) {
+func (m *mockBacktestRepo) GetByIDWithTrades(_ context.Context, _, _ uuid.UUID) (*models.BacktestRun, error) {
 	return m.getByIDResult, m.getByIDErr
 }
-func (m *mockBacktestRepo) ListCompleted(_ context.Context, page, limit int) ([]models.BacktestRun, int, error) {
+func (m *mockBacktestRepo) ListCompleted(_ context.Context, _ uuid.UUID, page, limit int) ([]models.BacktestRun, int, error) {
 	m.capturedListPage = page
 	m.capturedListLimit = limit
 	total := m.listTotal
@@ -156,6 +156,8 @@ const (
 	testSlug                    = "ma_crossover"
 	unsupportedStrategyInterval = "1m"
 )
+
+var testUserID = uuid.MustParse("11111111-1111-1111-1111-111111111111")
 
 func defaultBuiltin() *models.BuiltinStrategy {
 	return &models.BuiltinStrategy{
@@ -290,7 +292,7 @@ func TestSubmit_StrategyNotFound(t *testing.T) {
 
 	req := defaultRequest()
 	req.StrategySlug = "nonexistent"
-	_, err := svc.Submit(context.Background(), req)
+	_, err := svc.Submit(context.Background(), testUserID, req)
 	if !errors.Is(err, ErrStrategyNotFound) {
 		t.Fatalf("expected ErrStrategyNotFound, got %v", err)
 	}
@@ -305,7 +307,7 @@ func TestSubmit_InstrumentNotFound(t *testing.T) {
 		&mockEngine{},
 	)
 
-	_, err := svc.Submit(context.Background(), defaultRequest())
+	_, err := svc.Submit(context.Background(), testUserID, defaultRequest())
 	if !errors.Is(err, ErrNoInstrument) {
 		t.Fatalf("expected ErrNoInstrument, got %v", err)
 	}
@@ -322,7 +324,7 @@ func TestSubmit_InvalidUnderlying(t *testing.T) {
 
 	req := defaultRequest()
 	req.Underlying = "INVALID"
-	_, err := svc.Submit(context.Background(), req)
+	_, err := svc.Submit(context.Background(), testUserID, req)
 	if !errors.Is(err, ErrInvalidUnderlying) {
 		t.Fatalf("expected ErrInvalidUnderlying, got %v", err)
 	}
@@ -337,7 +339,7 @@ func TestSubmit_CreateFails(t *testing.T) {
 		&mockEngine{},
 	)
 
-	_, err := svc.Submit(context.Background(), defaultRequest())
+	_, err := svc.Submit(context.Background(), testUserID, defaultRequest())
 	if err == nil {
 		t.Fatal("expected error on create failure")
 	}
@@ -354,7 +356,7 @@ func TestSubmit_NoCandleData(t *testing.T) {
 	)
 
 	// Candle check is synchronous — error propagates immediately, no run is created.
-	_, err := svc.Submit(context.Background(), defaultRequest())
+	_, err := svc.Submit(context.Background(), testUserID, defaultRequest())
 	if !errors.Is(err, ErrNoCandleData) {
 		t.Fatalf("expected ErrNoCandleData, got %v", err)
 	}
@@ -375,7 +377,7 @@ func TestSubmit_EngineError(t *testing.T) {
 
 	// Submit returns RUNNING immediately; engine error is handled in the background.
 	// The sync launch in tests ensures the goroutine completes before we check.
-	run, err := svc.Submit(context.Background(), defaultRequest())
+	run, err := svc.Submit(context.Background(), testUserID, defaultRequest())
 	if err != nil {
 		t.Fatalf("unexpected error from Submit: %v", err)
 	}
@@ -406,7 +408,7 @@ func TestSubmit_EnginePnlIdentityMismatchFailsRun(t *testing.T) {
 		&mockEngine{result: badResult},
 	)
 
-	run, err := svc.Submit(context.Background(), defaultRequest())
+	run, err := svc.Submit(context.Background(), testUserID, defaultRequest())
 	if err != nil {
 		t.Fatalf("unexpected error from Submit: %v", err)
 	}
@@ -435,7 +437,7 @@ func TestSubmit_StatusTransitions(t *testing.T) {
 		&mockEngine{result: defaultEngineResult()},
 	)
 
-	run, err := svc.Submit(context.Background(), defaultRequest())
+	run, err := svc.Submit(context.Background(), testUserID, defaultRequest())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -472,7 +474,7 @@ func TestSubmit_Success_MetricsPopulated(t *testing.T) {
 		&mockEngine{result: engineResult},
 	)
 
-	run, err := svc.Submit(context.Background(), defaultRequest())
+	run, err := svc.Submit(context.Background(), testUserID, defaultRequest())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -538,7 +540,7 @@ func TestSubmit_FetchesSignalAndTradeCandles(t *testing.T) {
 		eng,
 	)
 
-	_, err := svc.Submit(context.Background(), defaultRequest())
+	_, err := svc.Submit(context.Background(), testUserID, defaultRequest())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -597,7 +599,7 @@ func TestSubmit_ContinuousFutureTradeCandlesCanCrossExpiryBoundary(t *testing.T)
 	req.From = expiryBoundary.AddDate(0, 0, -1)
 	req.To = expiryBoundary.AddDate(0, 0, 1)
 
-	_, err := svc.Submit(context.Background(), req)
+	_, err := svc.Submit(context.Background(), testUserID, req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -649,7 +651,7 @@ func TestSubmit_SameInstrumentSourcesPersistSameToken(t *testing.T) {
 	req := defaultRequest()
 	req.Underlying = underlying
 
-	run, err := svc.Submit(context.Background(), req)
+	run, err := svc.Submit(context.Background(), testUserID, req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -676,7 +678,7 @@ func TestSubmit_InvalidSourceInterval(t *testing.T) {
 		&mockEngine{},
 	)
 
-	_, err := svc.Submit(context.Background(), defaultRequest())
+	_, err := svc.Submit(context.Background(), testUserID, defaultRequest())
 	if !errors.Is(err, ErrInvalidStrategySources) {
 		t.Fatalf("expected ErrInvalidStrategySources, got %v", err)
 	}
@@ -700,7 +702,7 @@ func TestSubmit_AmbiguousInstrumentResolution(t *testing.T) {
 		&mockEngine{},
 	)
 
-	_, err := svc.Submit(context.Background(), defaultRequest())
+	_, err := svc.Submit(context.Background(), testUserID, defaultRequest())
 	if !errors.Is(err, ErrInvalidStrategySources) {
 		t.Fatalf("expected ErrInvalidStrategySources, got %v", err)
 	}
@@ -726,7 +728,7 @@ func TestSubmit_RejectsNonContinuousFuturesSourceKindInV1(t *testing.T) {
 		&mockEngine{},
 	)
 
-	_, err := svc.Submit(context.Background(), defaultRequest())
+	_, err := svc.Submit(context.Background(), testUserID, defaultRequest())
 	if !errors.Is(err, ErrInvalidStrategySources) {
 		t.Fatalf("expected ErrInvalidStrategySources, got %v", err)
 	}
@@ -743,7 +745,7 @@ func TestSubmit_RunCarriesSlugAndInputs(t *testing.T) {
 	)
 
 	req := defaultRequest()
-	run, err := svc.Submit(context.Background(), req)
+	run, err := svc.Submit(context.Background(), testUserID, req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -775,7 +777,7 @@ func TestSubmit_FailRunStoresSafeMessage(t *testing.T) {
 		&mockEngine{err: errors.New("pq: connection refused to 10.0.0.5:5432")},
 	)
 
-	_, _ = svc.Submit(context.Background(), defaultRequest())
+	_, _ = svc.Submit(context.Background(), testUserID, defaultRequest())
 	if len(br.capturedUpdateResult) == 0 {
 		t.Fatal("expected UpdateResult to be called on failure")
 	}
@@ -794,7 +796,7 @@ func TestGetByID(t *testing.T) {
 	br := &mockBacktestRepo{getByIDResult: expected}
 	svc := newService(br, emptyLookup(), &mockCandleRepo{}, &mockInstrumentRepo{}, &mockEngine{})
 
-	run, err := svc.GetByID(context.Background(), id)
+	run, err := svc.GetByID(context.Background(), id, testUserID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -811,7 +813,7 @@ func TestListCompleted_PopulatesStrategyNamesAndPassesPagination(t *testing.T) {
 	br := &mockBacktestRepo{listResult: runs, listTotal: 8}
 	svc := newService(br, defaultLookup(), &mockCandleRepo{}, &mockInstrumentRepo{}, &mockEngine{})
 
-	result, total, err := svc.ListCompleted(context.Background(), 2, 20)
+	result, total, err := svc.ListCompleted(context.Background(), testUserID, 2, 20)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -840,7 +842,7 @@ func TestSubmit_KillSwitchDisabled(t *testing.T) {
 	)
 	svc.launch = func(fn func()) { fn() }
 
-	_, err := svc.Submit(context.Background(), defaultRequest())
+	_, err := svc.Submit(context.Background(), testUserID, defaultRequest())
 	if !errors.Is(err, ErrBacktestDisabled) {
 		t.Fatalf("expected ErrBacktestDisabled, got %v", err)
 	}
@@ -859,7 +861,7 @@ func TestSubmit_DateRangeExceeded(t *testing.T) {
 
 	req := defaultRequest()
 	// defaultRequest spans Jan 1 – Jun 30 = 181 inclusive days, exceeds MaxDays=30.
-	_, err := svc.Submit(context.Background(), req)
+	_, err := svc.Submit(context.Background(), testUserID, req)
 	if !errors.Is(err, ErrBacktestDateRangeExceeded) {
 		t.Fatalf("expected ErrBacktestDateRangeExceeded, got %v", err)
 	}
@@ -878,7 +880,7 @@ func TestSubmit_DateRangeAtExactLimit_Passes(t *testing.T) {
 
 	req := defaultRequest()
 	// defaultRequest spans Jan 1 – Jun 30 = 181 inclusive days; MaxDays=181 must pass.
-	_, err := svc.Submit(context.Background(), req)
+	_, err := svc.Submit(context.Background(), testUserID, req)
 	if errors.Is(err, ErrBacktestDateRangeExceeded) {
 		t.Fatal("expected request with exactly MaxDays to pass, but got ErrBacktestDateRangeExceeded")
 	}
@@ -897,7 +899,7 @@ func TestSubmit_CandleCountExceeded(t *testing.T) {
 	)
 	svc.launch = func(fn func()) { fn() }
 
-	_, err := svc.Submit(context.Background(), defaultRequest())
+	_, err := svc.Submit(context.Background(), testUserID, defaultRequest())
 	if !errors.Is(err, ErrBacktestCandleCountExceeded) {
 		t.Fatalf("expected ErrBacktestCandleCountExceeded, got %v", err)
 	}
@@ -916,7 +918,7 @@ func TestSubmit_CandleCountAtExactLimit_Passes(t *testing.T) {
 	)
 	svc.launch = func(fn func()) { fn() }
 
-	_, err := svc.Submit(context.Background(), defaultRequest())
+	_, err := svc.Submit(context.Background(), testUserID, defaultRequest())
 	if errors.Is(err, ErrBacktestCandleCountExceeded) {
 		t.Fatal("expected request with exactly MaxCandles to pass, but got ErrBacktestCandleCountExceeded")
 	}
@@ -936,7 +938,7 @@ func TestSubmit_NoDayLimit_AllowsLargeRange(t *testing.T) {
 	req := defaultRequest()
 	req.From = time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
 	req.To = time.Date(2025, 12, 31, 0, 0, 0, 0, time.UTC)
-	_, err := svc.Submit(context.Background(), req)
+	_, err := svc.Submit(context.Background(), testUserID, req)
 	if errors.Is(err, ErrBacktestDateRangeExceeded) {
 		t.Fatal("expected no date-range check when MaxDays=0, but got ErrBacktestDateRangeExceeded")
 	}
@@ -964,7 +966,7 @@ func TestSubmit_RejectsOutOfRangeSlippagePct(t *testing.T) {
 			)
 			req := defaultRequest()
 			req.Cfg.SlippagePct = tt.slippagePct
-			_, err := svc.Submit(context.Background(), req)
+			_, err := svc.Submit(context.Background(), testUserID, req)
 			if !errors.Is(err, ErrInvalidSlippagePct) {
 				t.Fatalf("expected ErrInvalidSlippagePct for slippagePct=%v, got %v", tt.slippagePct, err)
 			}
@@ -984,7 +986,7 @@ func TestSubmit_SlippagePctPlumbedToEngine(t *testing.T) {
 	req := defaultRequest()
 	req.Cfg.SlippagePct = 0.05
 
-	_, err := svc.Submit(context.Background(), req)
+	_, err := svc.Submit(context.Background(), testUserID, req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1013,7 +1015,7 @@ func TestSubmit_CfgPlumbedToEngine(t *testing.T) {
 		SlippagePct:    0.03,
 	}
 
-	_, err := svc.Submit(context.Background(), req)
+	_, err := svc.Submit(context.Background(), testUserID, req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

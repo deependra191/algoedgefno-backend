@@ -29,10 +29,10 @@ func (s *BacktestStore) Create(ctx context.Context, run *models.BacktestRun) err
 	ent := toBacktestEntity(run)
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO backtest_runs
-			(id, strategy_id, strategy_slug, instrument_token, signal_instrument_token, from_ts, to_ts,
+			(id, user_id, strategy_id, strategy_slug, instrument_token, signal_instrument_token, from_ts, to_ts,
 			 candle_interval, status, capital, lots, underlying, slippage_pct, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())`,
-		ent.ID, ent.StrategyID, ent.StrategySlug, ent.InstrumentToken, ent.SignalInstrumentToken,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())`,
+		ent.ID, ent.UserID, ent.StrategyID, ent.StrategySlug, ent.InstrumentToken, ent.SignalInstrumentToken,
 		ent.FromTs, ent.ToTs, ent.CandleInterval, ent.Status,
 		ent.Capital, ent.Lots, ent.Underlying, ent.SlippagePct,
 	)
@@ -91,15 +91,15 @@ func (s *BacktestStore) UpdateResult(ctx context.Context, run *models.BacktestRu
 	return err
 }
 
-func (s *BacktestStore) GetByID(ctx context.Context, id uuid.UUID) (*models.BacktestRun, error) {
+func (s *BacktestStore) GetByID(ctx context.Context, id, userID uuid.UUID) (*models.BacktestRun, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT id, strategy_id, instrument_token, signal_instrument_token, from_ts, to_ts, candle_interval, status,
+		SELECT id, user_id, strategy_id, instrument_token, signal_instrument_token, from_ts, to_ts, candle_interval, status,
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
 		       error_message, created_at, completed_at,
 		       strategy_slug, capital, lots, underlying,
 		       result_stats, chart_data,
 		       gross_pnl, total_charges, slippage, slippage_pct
-		FROM backtest_runs WHERE id = $1`, id)
+		FROM backtest_runs WHERE id = $1 AND user_id = $2`, id, userID)
 	ent, err := scanBacktestRun(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, models.ErrNotFound
@@ -111,14 +111,14 @@ func (s *BacktestStore) GetByID(ctx context.Context, id uuid.UUID) (*models.Back
 }
 
 // GetByIDWithTrades returns the run including the trades_json blob — use only for the trades endpoint.
-func (s *BacktestStore) GetByIDWithTrades(ctx context.Context, id uuid.UUID) (*models.BacktestRun, error) {
+func (s *BacktestStore) GetByIDWithTrades(ctx context.Context, id, userID uuid.UUID) (*models.BacktestRun, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT id, strategy_id, instrument_token, signal_instrument_token, from_ts, to_ts, candle_interval, status,
+		SELECT id, user_id, strategy_id, instrument_token, signal_instrument_token, from_ts, to_ts, candle_interval, status,
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
 		       trades_json, error_message, created_at, completed_at,
 		       strategy_slug, capital, lots, underlying,
 		       gross_pnl, total_charges, slippage, slippage_pct
-		FROM backtest_runs WHERE id = $1`, id)
+		FROM backtest_runs WHERE id = $1 AND user_id = $2`, id, userID)
 	ent, err := scanBacktestRunWithTrades(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, models.ErrNotFound
@@ -137,28 +137,30 @@ func (s *BacktestStore) GetByIDWithTrades(ctx context.Context, id uuid.UUID) (*m
 	return run, nil
 }
 
-// ListCompleted implements BacktestRepository. The total_trades > 0 predicate is
-// repeated in both the COUNT and the paginated SELECT — they must stay in sync,
-// otherwise the returned total and the page contents disagree and pagination breaks.
-func (s *BacktestStore) ListCompleted(ctx context.Context, page, limit int) ([]models.BacktestRun, int, error) {
+// ListCompleted implements BacktestRepository. The total_trades > 0 predicate and
+// the user_id = $N filter are repeated in both the COUNT and the paginated SELECT
+// — they must stay in sync, otherwise the returned total and the page contents
+// disagree and pagination breaks.
+func (s *BacktestStore) ListCompleted(ctx context.Context, userID uuid.UUID, page, limit int) ([]models.BacktestRun, int, error) {
 	var total int
 	if err := s.pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM backtest_runs
-		WHERE status = $1 AND completed_at IS NOT NULL AND total_trades > 0`, models.BacktestCompleted).Scan(&total); err != nil {
+		WHERE status = $1 AND completed_at IS NOT NULL AND total_trades > 0 AND user_id = $2`,
+		models.BacktestCompleted, userID).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
 	offset := (page - 1) * limit
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, strategy_id, instrument_token, signal_instrument_token, from_ts, to_ts, candle_interval, status,
+		SELECT id, user_id, strategy_id, instrument_token, signal_instrument_token, from_ts, to_ts, candle_interval, status,
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
 		       error_message, created_at, completed_at,
 		       strategy_slug, capital, lots, underlying,
 		       gross_pnl, total_charges, slippage, slippage_pct
 		FROM backtest_runs
-		WHERE status = $1 AND completed_at IS NOT NULL AND total_trades > 0
+		WHERE status = $1 AND completed_at IS NOT NULL AND total_trades > 0 AND user_id = $2
 		ORDER BY completed_at DESC, created_at DESC
-		LIMIT $2 OFFSET $3`, models.BacktestCompleted, limit, offset)
+		LIMIT $3 OFFSET $4`, models.BacktestCompleted, userID, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -175,18 +177,19 @@ func (s *BacktestStore) ListCompleted(ctx context.Context, page, limit int) ([]m
 	return result, total, rows.Err()
 }
 
-// LatestCompletedBySlug returns the most recent COMPLETED backtest for a built-in strategy slug.
-func (s *BacktestStore) LatestCompletedBySlug(ctx context.Context, slug string) (*models.BacktestRun, error) {
+// LatestCompletedBySlug returns the most recent COMPLETED backtest for a built-in strategy slug
+// scoped to the given userID.
+func (s *BacktestStore) LatestCompletedBySlug(ctx context.Context, slug string, userID uuid.UUID) (*models.BacktestRun, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT id, strategy_id, instrument_token, signal_instrument_token, from_ts, to_ts, candle_interval, status,
+		SELECT id, user_id, strategy_id, instrument_token, signal_instrument_token, from_ts, to_ts, candle_interval, status,
 		       net_pnl, total_trades, win_count, loss_count, max_drawdown,
 		       error_message, created_at, completed_at,
 		       strategy_slug, capital, lots, underlying,
 		       result_stats, chart_data,
 		       gross_pnl, total_charges, slippage, slippage_pct
 		FROM backtest_runs
-		WHERE strategy_slug = $1 AND status = $2
-		ORDER BY created_at DESC LIMIT 1`, slug, models.BacktestCompleted)
+		WHERE strategy_slug = $1 AND status = $2 AND user_id = $3
+		ORDER BY created_at DESC LIMIT 1`, slug, models.BacktestCompleted, userID)
 	ent, err := scanBacktestRun(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, models.ErrNotFound

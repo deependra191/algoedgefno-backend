@@ -18,10 +18,6 @@ func Register(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, registry *p
 	healthSvc := services.NewHealthService(healthStore, cfg.Env)
 	healthHandler := handlers.NewHealthHandler(healthSvc, cfg.Env)
 
-	userRepo := storage.NewUserStore(pool)
-	authSvc := services.NewAuthService(userRepo, cfg.JWTSecret)
-	authHandler := handlers.NewAuthHandler(authSvc)
-
 	backtestStore := storage.NewBacktestStore(pool)
 	candleStore := storage.NewCandleStore(pool)
 	instrumentStore := storage.NewInstrumentStore(pool)
@@ -43,14 +39,8 @@ func Register(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, registry *p
 
 	v1 := r.Group("/api/v1")
 	{
-		auth := v1.Group("/auth")
-		{
-			auth.POST("/register", authHandler.Register)
-			auth.POST("/login", authHandler.Login)
-		}
-
 		protected := v1.Group("")
-		protected.Use(middleware.Auth(cfg.AppSecretToken, authSvc))
+		protected.Use(middleware.Auth(cfg.AppSecretToken))
 		{
 			protected.GET("/config/app", handlers.AppConfig)
 
