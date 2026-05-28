@@ -26,6 +26,11 @@ func NewBacktestHandler(backtestSvc *services.BacktestService) *BacktestHandler 
 // Submit validates the request, creates a run, and fires the engine asynchronously.
 // Returns HTTP 202 with {id, status} immediately; client polls GET /backtests/:id.
 func (h *BacktestHandler) Submit(c *gin.Context) {
+	userID, ok := extractUserID(c)
+	if !ok {
+		return
+	}
+
 	var req backtestSubmitRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
@@ -51,7 +56,7 @@ func (h *BacktestHandler) Submit(c *gin.Context) {
 	// slippagePct precision: contract is 2 decimal places (handoff §1.1).
 	req.Inputs.SlippagePct = normalizeSlippagePct(req.Inputs.SlippagePct)
 
-	run, err := h.backtestSvc.Submit(c.Request.Context(), services.BacktestRequest{
+	run, err := h.backtestSvc.Submit(c.Request.Context(), userID, services.BacktestRequest{
 		StrategySlug: req.StrategyID,
 		Underlying:   req.Inputs.Underlying,
 		From:         from,
@@ -91,8 +96,12 @@ func (h *BacktestHandler) Submit(c *gin.Context) {
 
 // List returns completed backtest runs ordered by most recent completion first.
 func (h *BacktestHandler) List(c *gin.Context) {
+	userID, ok := extractUserID(c)
+	if !ok {
+		return
+	}
 	page, limit := parseBacktestListPagination(c)
-	runs, total, err := h.backtestSvc.ListCompleted(c.Request.Context(), page, limit)
+	runs, total, err := h.backtestSvc.ListCompleted(c.Request.Context(), userID, page, limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list backtests"})
 		return
@@ -113,13 +122,17 @@ func (h *BacktestHandler) List(c *gin.Context) {
 // COMPLETED: returns id, status, and the full result payload.
 // FAILED: returns id, status, and errorMessage.
 func (h *BacktestHandler) GetByID(c *gin.Context) {
+	userID, ok := extractUserID(c)
+	if !ok {
+		return
+	}
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid backtest ID"})
 		return
 	}
 
-	run, err := h.backtestSvc.GetByID(c.Request.Context(), id)
+	run, err := h.backtestSvc.GetByID(c.Request.Context(), id, userID)
 	if err != nil {
 		if errors.Is(err, models.ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "backtest not found"})
@@ -135,13 +148,17 @@ func (h *BacktestHandler) GetByID(c *gin.Context) {
 // GetTrades returns a paginated list of individual trades for a completed backtest.
 // Query params: page (default 1), limit (default 50, max 200).
 func (h *BacktestHandler) GetTrades(c *gin.Context) {
+	userID, ok := extractUserID(c)
+	if !ok {
+		return
+	}
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid backtest ID"})
 		return
 	}
 
-	run, err := h.backtestSvc.GetByIDWithTrades(c.Request.Context(), id)
+	run, err := h.backtestSvc.GetByIDWithTrades(c.Request.Context(), id, userID)
 	if err != nil {
 		if errors.Is(err, models.ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "backtest not found"})

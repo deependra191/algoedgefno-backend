@@ -40,10 +40,10 @@ Run staging first and confirm zero failures:
 scripts/security/abuse-suite.sh --env staging
 ```
 
-Then run production. Production intentionally skips load cases. It still calls
-`/api/v1/backtests` for the large-range validation case, but that is considered
-prod-safe because the request is expected to fail pre-execution with `422` and
-`date range exceeds maximum allowed`.
+Then run production. During the PR 1 closed interval, both environments assert
+that the static app token works only for config delivery and is rejected for
+tenant backtest endpoints. Tenant-authenticated abuse checks are restored in
+PR 2.
 
 ```bash
 scripts/security/abuse-suite.sh --env prod
@@ -59,25 +59,17 @@ The report is an operational artifact and is not source-controlled.
 
 ## Kill-Switch Check
 
-The script never toggles `BACKTEST_ENABLED` and never restarts containers. The
-operator performs the staging-only kill-switch workflow manually:
-
-1. Set `BACKTEST_ENABLED=false` in the staging env file on the VPS.
-2. Restart only the staging backend container.
-3. Run:
+During the PR 1 closed interval, kill-switch validation is unavailable. Static
+app tokens cannot reach tenant backtest endpoints, so an HTTP assertion cannot
+distinguish `BACKTEST_ENABLED=false` from the authentication lockdown. To
+prevent a false-positive report, this command fails fast:
 
 ```bash
 scripts/security/abuse-suite.sh --env staging --expect-backtests-disabled
 ```
 
-4. Confirm the backtest submission check returns `503` with the expected error
-   JSON.
-5. Restore `BACKTEST_ENABLED=true`, restart staging, and run the normal staging
-   suite again:
-
-```bash
-scripts/security/abuse-suite.sh --env staging
-```
+PR 2 must restore this check using authenticated tenant requests before an
+operator treats a `503` response as kill-switch evidence.
 
 ## Independent Log Check
 
@@ -105,11 +97,9 @@ scripts/security/check-log-redaction.sh --env staging --secret-file /path/to/sec
 - Protected endpoint with invalid token returns `401`.
 - Production URL with staging token returns `401` when `STAGING_APP_TOKEN` is
   available during the prod run.
-- Large backtest date range returns `422`.
-- Staging kill-switch mode returns `503`.
-- Staging burst submit and aggressive result polling produce no `5xx`.
-- Production load tests are skipped.
-- Cross-tenant lookup remains visible as `[skip: single-user platform]` until
-  multi-user auth lands.
+- Static-token requests to tenant backtest endpoints return `401` during the PR
+  1 closed interval.
+- Large-range, burst-submit, aggressive-poll, cross-tenant, and kill-switch
+  checks are unavailable until PR 2 restores authenticated tenant requests.
 - Recent logs contain no bearer tokens, JWT markers, app secret markers, DB
   passwords, or full DSNs.

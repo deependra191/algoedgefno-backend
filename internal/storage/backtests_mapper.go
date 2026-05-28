@@ -13,6 +13,7 @@ import (
 func toBacktestModel(e *entities.BacktestRun) *models.BacktestRun {
 	run := &models.BacktestRun{
 		ID:                    e.ID,
+		UserID:                e.UserID,
 		StrategyID:            e.StrategyID,
 		InstrumentToken:       e.InstrumentToken,
 		SignalInstrumentToken: e.SignalInstrumentToken,
@@ -60,6 +61,7 @@ func toBacktestModel(e *entities.BacktestRun) *models.BacktestRun {
 func toBacktestEntity(r *models.BacktestRun) *entities.BacktestRun {
 	ent := &entities.BacktestRun{
 		ID:                    r.ID,
+		UserID:                r.UserID,
 		StrategyID:            r.StrategyID,
 		InstrumentToken:       r.InstrumentToken,
 		SignalInstrumentToken: r.SignalInstrumentToken,
@@ -107,7 +109,7 @@ func scanBacktestRun(row pgx.Row) (*entities.BacktestRun, error) {
 	var totalTrades, winCount, lossCount *int
 	var errMsg *string
 	err := row.Scan(
-		&r.ID, &r.StrategyID, &r.InstrumentToken, &r.SignalInstrumentToken, &r.FromTs, &r.ToTs,
+		&r.ID, &r.UserID, &r.StrategyID, &r.InstrumentToken, &r.SignalInstrumentToken, &r.FromTs, &r.ToTs,
 		&r.CandleInterval, &r.Status,
 		&netPnl, &totalTrades, &winCount, &lossCount, &maxDrawdown,
 		&errMsg, &r.CreatedAt, &r.CompletedAt,
@@ -141,7 +143,7 @@ func scanBacktestRunWithTrades(row pgx.Row) (*entities.BacktestRun, error) {
 	var totalTrades, winCount, lossCount *int
 	var errMsg *string
 	err := row.Scan(
-		&r.ID, &r.StrategyID, &r.InstrumentToken, &r.SignalInstrumentToken, &r.FromTs, &r.ToTs,
+		&r.ID, &r.UserID, &r.StrategyID, &r.InstrumentToken, &r.SignalInstrumentToken, &r.FromTs, &r.ToTs,
 		&r.CandleInterval, &r.Status,
 		&netPnl, &totalTrades, &winCount, &lossCount, &maxDrawdown,
 		&tradesBytes, &errMsg, &r.CreatedAt, &r.CompletedAt,
@@ -171,7 +173,7 @@ func scanBacktestRunRow(rows pgx.Rows) (*entities.BacktestRun, error) {
 	var totalTrades, winCount, lossCount *int
 	var errMsg *string
 	err := rows.Scan(
-		&r.ID, &r.StrategyID, &r.InstrumentToken, &r.SignalInstrumentToken, &r.FromTs, &r.ToTs,
+		&r.ID, &r.UserID, &r.StrategyID, &r.InstrumentToken, &r.SignalInstrumentToken, &r.FromTs, &r.ToTs,
 		&r.CandleInterval, &r.Status,
 		&netPnl, &totalTrades, &winCount, &lossCount, &maxDrawdown,
 		&errMsg, &r.CreatedAt, &r.CompletedAt,

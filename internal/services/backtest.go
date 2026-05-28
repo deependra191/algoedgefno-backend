@@ -107,7 +107,8 @@ type BacktestRequest struct {
 // poll GetByID until status transitions to COMPLETED or FAILED.
 // Candle availability is checked synchronously so the caller gets an immediate error
 // if no data exists for the requested range.
-func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*models.BacktestRun, error) {
+// userID is set on the run before Create so storage records ownership.
+func (s *BacktestService) Submit(ctx context.Context, userID uuid.UUID, req BacktestRequest) (*models.BacktestRun, error) {
 	if !s.limits.BacktestsEnabled {
 		return nil, ErrBacktestDisabled
 	}
@@ -176,7 +177,7 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 		LotSize:            tradeInst.LotSize,
 	}
 
-	run, err := s.createAndStartRun(ctx, signalInst, tradeInst, builtin, req)
+	run, err := s.createAndStartRun(ctx, userID, signalInst, tradeInst, builtin, req)
 	if err != nil {
 		return nil, err
 	}
@@ -188,10 +189,11 @@ func (s *BacktestService) Submit(ctx context.Context, req BacktestRequest) (*mod
 	return &snapshot, nil
 }
 
-// GetByID returns a single backtest run by its UUID. Does not include the trades blob.
+// GetByID returns a single backtest run by its UUID scoped to the given userID.
+// Does not include the trades blob.
 // StrategyName is populated from the builtins registry when the run references a built-in slug.
-func (s *BacktestService) GetByID(ctx context.Context, id uuid.UUID) (*models.BacktestRun, error) {
-	run, err := s.backtestStore.GetByID(ctx, id)
+func (s *BacktestService) GetByID(ctx context.Context, id, userID uuid.UUID) (*models.BacktestRun, error) {
+	run, err := s.backtestStore.GetByID(ctx, id, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -199,15 +201,16 @@ func (s *BacktestService) GetByID(ctx context.Context, id uuid.UUID) (*models.Ba
 	return run, nil
 }
 
-// GetByIDWithTrades returns a single backtest run by its UUID including the raw trades blob.
-// Use this only for the paginated trades endpoint.
-func (s *BacktestService) GetByIDWithTrades(ctx context.Context, id uuid.UUID) (*models.BacktestRun, error) {
-	return s.backtestStore.GetByIDWithTrades(ctx, id)
+// GetByIDWithTrades returns a single backtest run by its UUID scoped to the given userID,
+// including the raw trades blob. Use this only for the paginated trades endpoint.
+func (s *BacktestService) GetByIDWithTrades(ctx context.Context, id, userID uuid.UUID) (*models.BacktestRun, error) {
+	return s.backtestStore.GetByIDWithTrades(ctx, id, userID)
 }
 
-// ListCompleted returns completed backtest runs ordered by most recent completion first.
-func (s *BacktestService) ListCompleted(ctx context.Context, page, limit int) ([]models.BacktestRun, int, error) {
-	runs, total, err := s.backtestStore.ListCompleted(ctx, page, limit)
+// ListCompleted returns completed backtest runs scoped to the given userID,
+// ordered by most recent completion first.
+func (s *BacktestService) ListCompleted(ctx context.Context, userID uuid.UUID, page, limit int) ([]models.BacktestRun, int, error) {
+	runs, total, err := s.backtestStore.ListCompleted(ctx, userID, page, limit)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -351,8 +354,10 @@ func (s *BacktestService) fetchCandles(ctx context.Context, instrumentID uuid.UU
 
 // createAndStartRun builds the BacktestRun record, persists it, and transitions
 // it to RUNNING. Returns the persisted run ready for engine execution.
+// userID is stamped onto the run before Create so storage records ownership.
 func (s *BacktestService) createAndStartRun(
 	ctx context.Context,
+	userID uuid.UUID,
 	signalInst *models.Instrument,
 	tradeInst *models.Instrument,
 	builtin *models.BuiltinStrategy,
@@ -361,6 +366,7 @@ func (s *BacktestService) createAndStartRun(
 	signalToken := signalInst.Symbol
 	run := &models.BacktestRun{
 		ID:                    uuid.New(),
+		UserID:                &userID,
 		StrategySlug:          &req.StrategySlug,
 		InstrumentToken:       tradeInst.Symbol,
 		SignalInstrumentToken: &signalToken,
