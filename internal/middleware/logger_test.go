@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/deependra191/algoedgefno-backend/internal/middleware"
+	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
 // recordingHandler captures slog records for test assertions.
@@ -94,7 +95,7 @@ func TestLogger_RequestIDFromContext(t *testing.T) {
 	req.Header.Set(middleware.RequestIDHeader, want)
 	r.ServeHTTP(httptest.NewRecorder(), req)
 
-	attr, ok := h.attrByKey(middleware.LogAttrRequestID)
+	attr, ok := h.attrByKey(models.LogAttrRequestID)
 	if !ok {
 		t.Fatal("request_id not logged")
 	}
@@ -193,7 +194,7 @@ func TestLogger_PanicLogsStatus500AndRequestID(t *testing.T) {
 		t.Errorf("logged status: got %d want 500", got)
 	}
 
-	ridAttr, ok := h.attrByKey(middleware.LogAttrRequestID)
+	ridAttr, ok := h.attrByKey(models.LogAttrRequestID)
 	if !ok {
 		t.Fatal("request_id not logged")
 	}
