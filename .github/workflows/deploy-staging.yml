@@ -7,6 +7,12 @@ on:
         description: "Digest-qualified backend image, for example ghcr.io/deependra191/algoedgefno-backend@sha256:<digest>"
         required: true
         type: string
+      smoke_mode:
+        description: "launch | standard"
+        required: true
+        type: choice
+        options: [launch, standard]
+        default: launch
 
 permissions: {}
 
@@ -18,11 +24,55 @@ env:
   IMAGE_PREFIX: "ghcr.io/deependra191/algoedgefno-backend@sha256:"
 
 jobs:
+  preflight_pr1_rollback_target:
+    name: Assert PR 1 is the current rollback target
+    runs-on: [self-hosted, algoedgefno-staging]
+    if: github.ref == 'refs/heads/main'
+    env:
+      BASE_URL: ${{ vars.STAGING_BASE_URL }}
+    steps:
+      - name: Read current image and version from VPS state
+        id: current
+        run: |
+          set -euo pipefail
+          COMPOSE_ENV="/opt/algoedgefno/compose/.env"
+          [[ -r "$COMPOSE_ENV" ]] || { echo "$COMPOSE_ENV unreadable" >&2; exit 1; }
+
+          previous="$(grep -E '^BACKEND_STAGING_IMAGE=' "$COMPOSE_ENV" | tail -1 | cut -d= -f2-)"
+
+          version_json="$(curl -fsS "${BASE_URL}/version")"
+          actual_commit="$(printf '%s' "$version_json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("commit_sha",""))')"
+          actual_migration="$(printf '%s' "$version_json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("migration_version",""))')"
+
+          echo "previous=$previous"                       >> "$GITHUB_OUTPUT"
+          echo "actual_commit=$actual_commit"             >> "$GITHUB_OUTPUT"
+          echo "actual_migration=$actual_migration"       >> "$GITHUB_OUTPUT"
+
+      - name: Assert PR 1 is still the rollback target
+        env:
+          EXPECTED_PR1_IMAGE: ${{ vars.PR1_IMAGE_DIGEST }}
+          EXPECTED_PR1_COMMIT: ${{ vars.PR1_COMMIT_SHA }}
+          EXPECTED_PR1_MIGRATION: ${{ vars.PR1_MIGRATION_VERSION }}
+          EXPECTED_CANDIDATE_MIGRATION: ${{ vars.PR2_CANDIDATE_MIGRATION_VERSION }}
+        run: |
+          set -euo pipefail
+          previous="${{ steps.current.outputs.previous }}"
+          [[ "$previous" == "$EXPECTED_PR1_IMAGE" ]] \
+              || { echo "rollback image is $previous, want PR 1 image $EXPECTED_PR1_IMAGE" >&2; exit 1; }
+          [[ "${{ steps.current.outputs.actual_commit }}" == "$EXPECTED_PR1_COMMIT" ]] \
+              || { echo "running commit not PR 1" >&2; exit 1; }
+
+          m="${{ steps.current.outputs.actual_migration }}"
+          if [[ "$m" != "$EXPECTED_PR1_MIGRATION" && "$m" != "$EXPECTED_CANDIDATE_MIGRATION" ]]; then
+              echo "migration version $m is neither PR 1 ($EXPECTED_PR1_MIGRATION) nor candidate ($EXPECTED_CANDIDATE_MIGRATION)" >&2
+              exit 1
+          fi
+
   deploy-staging:
     name: Deploy image to staging VPS
+    needs: preflight_pr1_rollback_target
     runs-on: [self-hosted, algoedgefno-staging]
-    if: github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main'
-    environment: staging
+    if: github.ref == 'refs/heads/main'
     timeout-minutes: 15
     env:
       DEPLOY_IMAGE: ${{ inputs.image }}
@@ -58,7 +108,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          sudo -n /usr/local/sbin/algoedgefno-deploy-staging "${DEPLOY_IMAGE}" "${STAGING_BASE_URL}"
+          sudo -n /usr/local/sbin/algoedgefno-deploy-staging \
+            --smoke-mode=${{ inputs.smoke_mode }} \
+            "${DEPLOY_IMAGE}" "${STAGING_BASE_URL}"
 
       - name: Summarize staging deployment
         run: |
@@ -67,5 +119,6 @@ jobs:
             echo ""
             echo "- Image: \`${DEPLOY_IMAGE}\`"
             echo "- Staging URL: \`${STAGING_BASE_URL}\`"
+            echo "- Smoke mode: \`${{ inputs.smoke_mode }}\`"
             echo "- Result: smoke checks passed"
           } >> "${GITHUB_STEP_SUMMARY}"

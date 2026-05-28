@@ -1,6 +1,9 @@
 # Env — never commit
 .env
 
+# Firebase service-account key files — never commit
+*serviceaccount*.json
+
 # Build output
 /bin/
 *.exe

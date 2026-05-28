@@ -62,3 +62,187 @@ jobs:
 
       - name: Arch lint
         run: go-arch-lint check
+
+      # --- CI lint: workflow and script invariants (§14) ---
+
+      - name: publish-backend-image.yml has no deploy-staging job
+        run: |
+          ! grep -E '^\s*deploy-staging:' .github/workflows/publish-backend-image.yml
+
+      - name: deploy-staging.yml is workflow_dispatch only (no auto-trigger)
+        run: |
+          ! grep -E '^\s*push:|^\s*pull_request:|^\s*schedule:' .github/workflows/deploy-staging.yml
+
+      - name: deploy-production.yml is workflow_dispatch only (no auto-trigger)
+        run: |
+          ! grep -E '^\s*push:|^\s*pull_request:|^\s*schedule:' .github/workflows/deploy-production.yml
+
+      - name: no workflow declares algoedgefno-prod runner label
+        run: |
+          ! grep -rE 'algoedgefno-prod' \
+              .github/workflows/publish-backend-image.yml \
+              .github/workflows/deploy-staging.yml \
+              .github/workflows/deploy-production.yml
+
+      - name: deploy-staging.yml includes preflight_pr1_rollback_target with IN-set migration check
+        run: |
+          grep -q 'preflight_pr1_rollback_target' .github/workflows/deploy-staging.yml
+          grep -q 'EXPECTED_CANDIDATE_MIGRATION' .github/workflows/deploy-staging.yml
+
+      - name: deploy-production.yml includes preflight_pr1_rollback_target with IN-set migration check
+        run: |
+          grep -q 'preflight_pr1_rollback_target' .github/workflows/deploy-production.yml
+          grep -q 'EXPECTED_CANDIDATE_MIGRATION' .github/workflows/deploy-production.yml
+
+      - name: preflight reads /opt/algoedgefno/compose/.env (staging workflow)
+        run: |
+          grep -q '/opt/algoedgefno/compose/.env' .github/workflows/deploy-staging.yml
+
+      - name: preflight reads /opt/algoedgefno/compose/.env (production workflow)
+        run: |
+          grep -q '/opt/algoedgefno/compose/.env' .github/workflows/deploy-production.yml
+
+      - name: deploy-production.yml has no inputs.image
+        run: |
+          ! grep -E 'inputs\.image|^\s+image:' .github/workflows/deploy-production.yml
+
+      - name: deploy-staging.yml declares smoke_mode input and passes it to wrapper
+        run: |
+          grep -q 'smoke_mode' .github/workflows/deploy-staging.yml
+          grep -q '\-\-smoke-mode=' .github/workflows/deploy-staging.yml
+
+      - name: deploy-production.yml declares smoke_mode input and passes it to wrapper
+        run: |
+          grep -q 'smoke_mode' .github/workflows/deploy-production.yml
+          grep -q '\-\-smoke-mode=' .github/workflows/deploy-production.yml
+
+      - name: smoke-prod-launch.sh makes no /auth/session /auth/refresh or /auth/logout call
+        run: |
+          ! grep -E '/auth/(session|refresh|logout)' scripts/smoke-prod-launch.sh
+
+      - name: smoke-prod.sh has no TEST_UID_* reference
+        run: |
+          ! grep -E 'TEST_UID_' scripts/smoke-prod.sh
+
+      - name: smoke-prod.sh has no staging-only or seed-conflict-fixture reference
+        run: |
+          ! grep -E 'staging.only|seed.conflict.fixture' scripts/smoke-prod.sh
+
+      - name: abuse-suite prod path references no Firebase session/logout mutation or staging-only paths
+        run: |
+          python3 - scripts/security/abuse-suite.sh <<'PY'
+          import sys, re
+
+          path = sys.argv[1]
+          with open(path, encoding="utf-8") as f:
+              content = f.read()
+
+          # Find the else branch (prod path) block.
+          # The prod block is between "else" and final "fi" of the main if/else.
+          # We look for the prod-tagged comment and extract to end of else block.
+          prod_match = re.search(
+              r'#\s*Production path.*?(?=run_finished_at)',
+              content, re.DOTALL
+          )
+          if not prod_match:
+              print("FAIL: could not locate production path block in abuse-suite.sh", file=sys.stderr)
+              sys.exit(1)
+
+          prod_block = prod_match.group(0)
+
+          forbidden = [
+              r'AUTH_SESSION_PATH',
+              r'AUTH_LOGOUT_PATH',
+              r'firebase_id_token_for_uid',
+              r'staging.only',
+              r'seed.conflict.fixture',
+              r'firebase-token',
+          ]
+          violations = []
+          for pattern in forbidden:
+              if re.search(pattern, prod_block, re.IGNORECASE):
+                  violations.append(pattern)
+
+          if violations:
+              print(f"FAIL: prod block references forbidden patterns: {violations}", file=sys.stderr)
+              sys.exit(1)
+
+          print("PASS: prod block is clean")
+          PY
+
+      - name: Dockerfile copies scripts
+        run: |
+          grep -q 'COPY scripts /app/scripts' Dockerfile
+
+      - name: staging-only files live under scripts/staging-only/
+        run: |
+          test -f scripts/staging-only/seed-conflict-fixture.sh
+
+      - name: deploy-staging.yml does not declare environment:
+        run: |
+          ! grep -E '^\s+environment:\s*(staging|production)' .github/workflows/deploy-staging.yml
+
+      - name: deploy-production.yml does not declare environment:
+        run: |
+          ! grep -E '^\s+environment:\s*(staging|production)' .github/workflows/deploy-production.yml
+
+      - name: every self-hosted-runner job in deploy-staging.yml has explicit if github.ref guard
+        run: |
+          python3 - .github/workflows/deploy-staging.yml <<'PY'
+          import sys, re
+
+          with open(sys.argv[1], encoding="utf-8") as f:
+              content = f.read()
+
+          # Find all jobs that run on self-hosted runners.
+          jobs_section = re.search(r'^jobs:(.*)', content, re.DOTALL | re.MULTILINE)
+          if not jobs_section:
+              print("FAIL: no jobs section found", file=sys.stderr)
+              sys.exit(1)
+
+          job_blocks = re.split(r'\n  [a-zA-Z_][a-zA-Z0-9_-]*:\n', '\n' + jobs_section.group(1))
+          violations = []
+          job_names = re.findall(r'\n  ([a-zA-Z_][a-zA-Z0-9_-]*):\n', '\n' + jobs_section.group(1))
+
+          for name, block in zip(job_names, job_blocks[1:]):
+              if 'self-hosted' in block and 'github.ref' not in block:
+                  violations.append(name)
+
+          if violations:
+              print(f"FAIL: self-hosted jobs without if: github.ref guard: {violations}", file=sys.stderr)
+              sys.exit(1)
+
+          print("PASS: all self-hosted jobs have if: github.ref guard")
+          PY
+
+      - name: every self-hosted-runner job in deploy-production.yml has explicit if github.ref guard
+        run: |
+          python3 - .github/workflows/deploy-production.yml <<'PY'
+          import sys, re
+
+          with open(sys.argv[1], encoding="utf-8") as f:
+              content = f.read()
+
+          jobs_section = re.search(r'^jobs:(.*)', content, re.DOTALL | re.MULTILINE)
+          if not jobs_section:
+              print("FAIL: no jobs section found", file=sys.stderr)
+              sys.exit(1)
+
+          job_blocks = re.split(r'\n  [a-zA-Z_][a-zA-Z0-9_-]*:\n', '\n' + jobs_section.group(1))
+          violations = []
+          job_names = re.findall(r'\n  ([a-zA-Z_][a-zA-Z0-9_-]*):\n', '\n' + jobs_section.group(1))
+
+          for name, block in zip(job_names, job_blocks[1:]):
+              if 'self-hosted' in block and 'github.ref' not in block:
+                  violations.append(name)
+
+          if violations:
+              print(f"FAIL: self-hosted jobs without if: github.ref guard: {violations}", file=sys.stderr)
+              sys.exit(1)
+
+          print("PASS: all self-hosted jobs have if: github.ref guard")
+          PY
+
+      - name: cmd/sync/main.go does not import internal/firebaseauth
+        run: |
+          ! grep -q 'internal/firebaseauth' cmd/sync/main.go

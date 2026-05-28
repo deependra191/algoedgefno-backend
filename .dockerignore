@@ -4,6 +4,9 @@
 .env.*
 !.env.example
 
+# Firebase service-account key files — never bundle
+*serviceaccount*.json
+
 bin/
 *.exe
 

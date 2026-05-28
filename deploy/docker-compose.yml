@@ -48,6 +48,8 @@ services:
     cpus: "0.70"
     env_file:
       - ${ENV_DIR:-/opt/algoedgefno/env}/prod.env
+    volumes:
+      - /run/secrets/firebase-serviceaccount-prod.json:/run/secrets/firebase-serviceaccount-prod.json:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -65,6 +67,8 @@ services:
     cpus: "0.30"
     env_file:
       - ${ENV_DIR:-/opt/algoedgefno/env}/staging.env
+    volumes:
+      - /run/secrets/firebase-serviceaccount-staging.json:/run/secrets/firebase-serviceaccount-staging.json:ro
     depends_on:
       postgres:
         condition: service_healthy

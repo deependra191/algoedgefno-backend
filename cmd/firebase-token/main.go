@@ -129,7 +129,7 @@ func mintIDToken(ctx context.Context, credsFile, projectID, apiKey, uid string) 
 // returns the resulting ID token. The API key and custom token are never
 // included in log output (rule 4).
 func exchangeCustomToken(ctx context.Context, apiKey, customToken string) (string, error) {
-	body, err := json.Marshal(map[string]interface{}{
+	body, err := json.Marshal(map[string]any{
 		jsonFieldToken:             customToken,
 		jsonFieldReturnSecureToken: true,
 	})
@@ -150,7 +150,7 @@ func exchangeCustomToken(ctx context.Context, apiKey, customToken string) (strin
 	}
 	defer resp.Body.Close()
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", fmt.Errorf("decode response: %w", err)
 	}

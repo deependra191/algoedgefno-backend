@@ -16,10 +16,9 @@ import (
 // Route-path constants — named per rule 17 (used in multiple places and in
 // the rate-limiter key, so a reader cannot safely inline them).
 const (
-	routeAuthSession      = "/api/v1/auth/session"
-	routeAuthRefresh      = "/api/v1/auth/refresh"
-	routeAuthLogout       = "/api/v1/auth/logout"
-	routeAuthDebugSession = "/api/v1/auth/debug-session"
+	routeAuthSession = "/api/v1/auth/session"
+	routeAuthRefresh = "/api/v1/auth/refresh"
+	routeAuthLogout  = "/api/v1/auth/logout"
 )
 
 // Body-cap constants (bytes) for auth endpoints.

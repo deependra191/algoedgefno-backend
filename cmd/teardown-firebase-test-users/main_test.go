@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -63,17 +62,6 @@ func stderrCapture(t *testing.T) (r *os.File, w *os.File) {
 	}
 	t.Cleanup(func() { r.Close(); w.Close() })
 	return r, w
-}
-
-// drainPipe reads all content from the read end of the pipe after closing the write end.
-func drainPipe(t *testing.T, r, w *os.File) string {
-	t.Helper()
-	w.Close()
-	b, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("read pipe: %v", err)
-	}
-	return string(b)
 }
 
 // --- Guard tests ---

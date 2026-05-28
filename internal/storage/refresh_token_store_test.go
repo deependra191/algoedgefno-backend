@@ -11,16 +11,6 @@ import (
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
-// insertTestUserForTokens inserts a minimal users row and returns its UUID.
-// Used by refresh-token tests that need a valid FK target.
-func insertTestUserForTokens(t *testing.T, ctx context.Context, pool interface {
-	Exec(context.Context, string, ...any) (interface{ RowsAffected() int64 }, error)
-}) uuid.UUID {
-	t.Helper()
-	// Use the UserStore for insertion to avoid raw SQL duplication.
-	return uuid.Nil // placeholder — real implementation uses pool.Exec
-}
-
 // insertRefreshTokenUser inserts a test user via the UserStore and returns its ID.
 func insertRefreshTokenUser(t *testing.T, ctx context.Context, s *RefreshTokenStore) uuid.UUID {
 	t.Helper()

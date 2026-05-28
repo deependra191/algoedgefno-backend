@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -59,17 +58,6 @@ func makeGetenv(m map[string]string) func(string) string {
 	return func(k string) string { return m[k] }
 }
 
-// devNull returns an *os.File pointing at /dev/null to swallow output.
-func devNull(t *testing.T) *os.File {
-	t.Helper()
-	f, err := os.Open(os.DevNull)
-	if err != nil {
-		t.Fatalf("open /dev/null: %v", err)
-	}
-	t.Cleanup(func() { f.Close() })
-	return f
-}
-
 // stderrCapture creates a pipe and returns (read end, write end). The write
 // end is passed to run() as stderr; the read end is used to collect output.
 func stderrCapture(t *testing.T) (r *os.File, w *os.File) {
@@ -80,17 +68,6 @@ func stderrCapture(t *testing.T) (r *os.File, w *os.File) {
 	}
 	t.Cleanup(func() { r.Close(); w.Close() })
 	return r, w
-}
-
-// drainPipe reads all content from the read end of the pipe after closing the write end.
-func drainPipe(t *testing.T, r, w *os.File) string {
-	t.Helper()
-	w.Close()
-	b, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("read pipe: %v", err)
-	}
-	return string(b)
 }
 
 // --- Guard tests ---

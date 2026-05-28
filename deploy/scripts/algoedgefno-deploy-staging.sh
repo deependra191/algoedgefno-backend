@@ -3,8 +3,36 @@ set -euo pipefail
 
 PATH="/usr/sbin:/usr/bin:/sbin:/bin"
 
+SMOKE_MODE=""
+
+# Parse flags before positional arguments.
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --smoke-mode=*)
+            SMOKE_MODE="${1#--smoke-mode=}"
+            shift
+            ;;
+        --smoke-mode)
+            [[ $# -ge 2 ]] || { printf 'usage: %s [--smoke-mode=<launch|standard>] <digest-qualified-image> <staging-base-url>\n' "$0" >&2; exit 2; }
+            SMOKE_MODE="$2"
+            shift 2
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            printf 'unknown flag: %s\n' "$1" >&2
+            exit 2
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
 if [[ $# -ne 2 ]]; then
-    printf 'usage: %s <digest-qualified-image> <staging-base-url>\n' "$0" >&2
+    printf 'usage: %s [--smoke-mode=<launch|standard>] <digest-qualified-image> <staging-base-url>\n' "$0" >&2
     exit 2
 fi
 
@@ -16,7 +44,8 @@ MIGRATION_VERSION_PATTERN='^[0-9]+$'
 COMPOSE_DIR="/opt/algoedgefno/compose"
 ENV_FILE="${COMPOSE_DIR}/.env"
 ENV_BACKUP_PREFIX="${ENV_FILE}.bak.preflight."
-SMOKE_SCRIPT="/opt/algoedgefno/scripts/smoke-staging.sh"
+SMOKE_SCRIPT_LAUNCH="/opt/algoedgefno/scripts/smoke-staging.sh"
+SMOKE_SCRIPT_STANDARD="/opt/algoedgefno/scripts/smoke-staging.sh"
 
 fail() {
     printf 'FAIL %s\n' "$1" >&2
@@ -115,7 +144,8 @@ require_cmd mktemp
 require_cmd python3
 
 [[ -f "${ENV_FILE}" ]] || fail "${ENV_FILE} is missing"
-[[ -x "${SMOKE_SCRIPT}" ]] || fail "${SMOKE_SCRIPT} must exist and be executable"
+[[ -x "${SMOKE_SCRIPT_LAUNCH}" ]] || fail "${SMOKE_SCRIPT_LAUNCH} must exist and be executable"
+[[ -x "${SMOKE_SCRIPT_STANDARD}" ]] || fail "${SMOKE_SCRIPT_STANDARD} must exist and be executable"
 grep -q '^BACKEND_PROD_IMAGE=' "${ENV_FILE}" || fail "BACKEND_PROD_IMAGE must already be set; production image was not modified"
 
 configured_staging_host="$(env_file_value STAGING_API_HOST || true)"
@@ -224,9 +254,25 @@ if [[ "${actual_migration}" != "${expected_migration}" ]]; then
 fi
 pass "version: commit ${expected_commit}, migration ${expected_migration}"
 
-if ! EXPECTED_IMAGE="${DEPLOY_IMAGE}" \
-    SMOKE_BASE_URL="${STAGING_BASE_URL}" \
-        "${SMOKE_SCRIPT}" "${expected_commit}" "${expected_migration}"; then
+run_smoke() {
+    case "${SMOKE_MODE:-}" in
+        launch)
+            EXPECTED_IMAGE="${DEPLOY_IMAGE}" \
+            SMOKE_BASE_URL="${STAGING_BASE_URL}" \
+                "${SMOKE_SCRIPT_LAUNCH}" "${expected_commit}" "${expected_migration}"
+            ;;
+        standard)
+            EXPECTED_IMAGE="${DEPLOY_IMAGE}" \
+            SMOKE_BASE_URL="${STAGING_BASE_URL}" \
+                "${SMOKE_SCRIPT_STANDARD}" "${expected_commit}" "${expected_migration}"
+            ;;
+        *)
+            fail "unknown smoke_mode: ${SMOKE_MODE}"
+            ;;
+    esac
+}
+
+if ! run_smoke; then
     rollback_and_fail "staging smoke failed"
 fi
 

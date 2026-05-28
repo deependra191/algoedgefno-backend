@@ -8,25 +8,15 @@ readonly DEFAULT_PROD_BASE_URL="https://api.algoedgefno.com"
 readonly DEFAULT_STAGING_CONTAINER="algoedgefno-backend-staging"
 readonly DEFAULT_PROD_CONTAINER="algoedgefno-backend-prod"
 readonly REPORT_DIR="scratch/security-runs"
+readonly COMPOSE_DIR="${COMPOSE_DIR:-/opt/algoedgefno/compose}"
 
 readonly PROTECTED_CONFIG_PATH="/api/v1/config/app"
 readonly BACKTESTS_PATH="/api/v1/backtests"
-readonly POLL_BACKTEST_ID="11111111-1111-4111-8111-111111111111"
-
-readonly DEFAULT_TEST_STRATEGY="ma_crossover"
-readonly DEFAULT_TEST_UNDERLYING="NIFTY"
-readonly DEFAULT_TEST_LOTS=1
-readonly DEFAULT_TEST_CAPITAL=200000
-readonly DEFAULT_TEST_FROM_OFFSET_DAYS=37
-readonly DEFAULT_TEST_TO_OFFSET_DAYS=7
-readonly LARGE_RANGE_FROM="2015-01-01"
-readonly LARGE_RANGE_TO="2026-01-01"
+readonly AUTH_SESSION_PATH="/api/v1/auth/session"
+readonly AUTH_LOGOUT_PATH="/api/v1/auth/logout"
+readonly STAGING_ONLY_SEED_SCRIPT="/opt/algoedgefno/scripts/staging-only/seed-conflict-fixture.sh"
 
 readonly BURST_REQUESTS=50
-readonly POLL_INTERVAL_SECONDS="0.1"
-readonly POLL_DURATION_SECONDS=30
-readonly POLL_REQUESTS=300
-
 readonly EXIT_USAGE=2
 readonly EXIT_FAILURE=1
 
@@ -35,28 +25,44 @@ readonly HTTP_STATUS_ACCEPTED=202
 readonly HTTP_STATUS_BAD_REQUEST=400
 readonly HTTP_STATUS_UNAUTHORIZED=401
 readonly HTTP_STATUS_NOT_FOUND=404
+readonly HTTP_STATUS_CONFLICT=409
 readonly HTTP_STATUS_UNPROCESSABLE_ENTITY=422
 readonly HTTP_STATUS_TOO_MANY_REQUESTS=429
-readonly HTTP_STATUS_SERVICE_UNAVAILABLE=503
-readonly HTTP_STATUS_SERVER_ERROR_PREFIX_REGEX='^5'
 
 readonly ERR_MISSING_AUTH="missing or invalid authorization header"
-readonly ERR_DATE_RANGE_EXCEEDED="date range exceeds maximum allowed"
-readonly ERR_BACKTEST_DISABLED="backtests are disabled"
+readonly ERR_IDENTITY_CONFLICT="identity_conflict"
 readonly ERR_NO_CANDLE_DATA="no candle data available"
 readonly ERR_NO_INSTRUMENT="no instrument found for underlying"
 readonly ERR_CANDLE_COUNT_EXCEEDED="candle count exceeds maximum allowed"
 
 usage() {
     cat >&2 <<'EOF'
-usage: scripts/security/abuse-suite.sh --env staging|prod [--expect-backtests-disabled]
+usage: scripts/security/abuse-suite.sh --env staging|prod
 
-Runs deterministic HTTP abuse checks and writes a sanitized markdown report under
-scratch/security-runs/YYYY-MM-DD-{env}.md. The suite never reads server env
-files and never prints bearer token values.
+Runs deterministic HTTP abuse checks and writes a sanitized markdown report
+under scratch/security-runs/YYYY-MM-DD-{env}.md.
 
-During the PR 1 closed interval, --expect-backtests-disabled is unavailable
-because authenticated tenant requests are restored only in PR 2.
+Staging path (ordered):
+  1. cross-tenant check (static token rejected on tenant endpoints)
+  2. allowlist-denied (TEST_UID_DENIED session rejected)
+  3. email-conflict (TEST_UID_CONFLICT triggers identity_conflict 409)
+  4. rate-limit burst (LAST — may trigger 429 for subsequent calls)
+
+Production path (read-only — no /auth/* calls, no mutation):
+  1. public health/version checks
+  2. static-token /config/app 200
+  3. static-token tenant-endpoint 401
+  4. unauthenticated tenant-endpoint 401
+  5. log redaction check
+
+The suite never reads server env files and never prints bearer token values.
+
+Environment variables:
+  STAGING_APP_TOKEN   (required for staging)
+  PROD_APP_TOKEN      (required for prod)
+  TEST_UID_A          (required for staging; provisioned by setup-firebase-test-users)
+  TEST_UID_DENIED     (required for staging)
+  TEST_UID_CONFLICT   (required for staging)
 EOF
 }
 
@@ -79,7 +85,6 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/../.." && pwd)"
 
 env_name=""
-expect_backtests_disabled=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -87,10 +92,6 @@ while [[ $# -gt 0 ]]; do
             [[ $# -ge 2 ]] || fail_usage "--env requires a value"
             env_name="$2"
             shift 2
-            ;;
-        --expect-backtests-disabled)
-            expect_backtests_disabled=true
-            shift
             ;;
         -h|--help)
             usage
@@ -123,14 +124,6 @@ case "${env_name}" in
         ;;
 esac
 
-if [[ "${env_name}" == "${ENV_PROD}" && "${expect_backtests_disabled}" == "true" ]]; then
-    fail_usage "--expect-backtests-disabled is staging-only"
-fi
-
-if [[ "${expect_backtests_disabled}" == "true" ]]; then
-    fail_fast "--expect-backtests-disabled cannot validate BACKTEST_ENABLED during the PR 1 closed interval; retry after PR 2 restores authenticated tenant requests"
-fi
-
 if [[ -z "${app_token}" ]]; then
     fail_fast "${token_var_name} must be set in the shell"
 fi
@@ -142,6 +135,7 @@ tmpdir="$(mktemp -d)"
 auth_configs=()
 secret_files=()
 report_lock=""
+fixture_seeded=false
 
 cleanup() {
     local cfg
@@ -152,6 +146,9 @@ cleanup() {
         [[ -n "${cfg}" ]] && rm -f "${cfg}"
     done
     [[ -n "${report_lock}" && -d "${report_lock}" ]] && rmdir "${report_lock}" 2>/dev/null || true
+    if [[ "${fixture_seeded}" == "true" ]]; then
+        "${STAGING_ONLY_SEED_SCRIPT}" --teardown 2>/dev/null || true
+    fi
     rm -rf "${tmpdir}"
 }
 trap cleanup EXIT
@@ -166,45 +163,12 @@ if ! mkdir "${report_lock}" 2>/dev/null; then
 fi
 report_tmp="${tmpdir}/report.md"
 
-test_strategy="${ABUSE_TEST_STRATEGY:-${DEFAULT_TEST_STRATEGY}}"
-test_underlying="${ABUSE_TEST_UNDERLYING:-${DEFAULT_TEST_UNDERLYING}}"
-test_from="${ABUSE_TEST_FROM:-}"
-test_to="${ABUSE_TEST_TO:-}"
-
-default_date() {
-    local offset_days="$1"
-    python3 - "$offset_days" <<'PY'
-from datetime import datetime, timedelta, timezone
-import sys
-
-offset = int(sys.argv[1])
-print((datetime.now(timezone.utc) - timedelta(days=offset)).strftime("%Y-%m-%d"))
-PY
-}
-
-if [[ -z "${test_from}" ]]; then
-    test_from="$(default_date "${DEFAULT_TEST_FROM_OFFSET_DAYS}")"
-fi
-if [[ -z "${test_to}" ]]; then
-    test_to="$(default_date "${DEFAULT_TEST_TO_OFFSET_DAYS}")"
-fi
-
-markdown_cell() {
-    local value="$1"
-    value="${value//$'\n'/ }"
-    value="${value//|/\\/}"
-    printf '%s' "${value}"
-}
-
 {
     printf '# Security Abuse Suite Report\n\n'
     printf -- "- Started: \`%s\`\n" "${run_started_at}"
     printf -- "- Environment: \`%s\`\n" "${env_name}"
     printf -- "- Base URL: \`%s\`\n" "${base_url}"
-    printf -- "- Container: \`%s\`\n" "${container_name}"
-    printf -- "- Backtests disabled mode: \`%s\`\n" "${expect_backtests_disabled}"
-    printf -- "- Test payload: strategy \`%s\`, underlying \`%s\`, from \`%s\`, to \`%s\`\n\n" \
-        "${test_strategy}" "${test_underlying}" "${test_from}" "${test_to}"
+    printf -- "- Container: \`%s\`\n\n" "${container_name}"
     printf '| Status | Test | Detail |\n'
     printf '|---|---|---|\n'
 } > "${report_tmp}"
@@ -215,10 +179,9 @@ record_result() {
     local status="$1"
     local name="$2"
     local detail="$3"
-    printf '| %s | %s | %s |\n' \
-        "$(markdown_cell "${status}")" \
-        "$(markdown_cell "${name}")" \
-        "$(markdown_cell "${detail}")" >> "${report_tmp}"
+    local escaped_detail="${detail//$'\n'/ }"
+    escaped_detail="${escaped_detail//|/\\/}"
+    printf '| %s | %s | %s |\n' "${status}" "${name}" "${escaped_detail}" >> "${report_tmp}"
     printf '%s %s: %s\n' "${status}" "${name}" "${detail}"
     if [[ "${status}" == "FAIL" ]]; then
         failures=$((failures + 1))
@@ -235,9 +198,6 @@ auth_config() {
     auth_configs+=("${cfg}")
     printf '%s' "${cfg}"
 }
-
-selected_auth_cfg="$(auth_config "${app_token}" "selected")"
-invalid_auth_cfg="$(auth_config "invalid-abuse-suite-token" "invalid")"
 
 http_request() {
     local name="$1"
@@ -277,7 +237,7 @@ assert_status() {
     if [[ "${code}" == "${expected_status}" ]]; then
         record_result "PASS" "${test_name}" "HTTP ${expected_status}"
     else
-        record_result "FAIL" "${test_name}" "got HTTP ${code}, want ${expected_status}; body saved only in temp workspace"
+        record_result "FAIL" "${test_name}" "got HTTP ${code}, want ${expected_status}"
     fi
 }
 
@@ -294,46 +254,12 @@ assert_error_response() {
     if [[ "${code}" == "${expected_status}" && "${actual_error}" == "${expected_error}" ]]; then
         record_result "PASS" "${test_name}" "HTTP ${expected_status} with expected error JSON"
     else
-        record_result "FAIL" "${test_name}" "got HTTP ${code} error '${actual_error}', want HTTP ${expected_status} expected error JSON"
+        record_result "FAIL" "${test_name}" "got HTTP ${code} error '${actual_error}', want HTTP ${expected_status} '${expected_error}'"
     fi
 }
 
-write_backtest_payload() {
-    local output="$1"
-    local from="$2"
-    local to="$3"
-    python3 - "$output" "$test_strategy" "$test_underlying" "$from" "$to" "${DEFAULT_TEST_LOTS}" "${DEFAULT_TEST_CAPITAL}" <<'PY'
-import json
-import sys
-
-path, strategy, underlying, from_date, to_date, lots, capital = sys.argv[1:8]
-payload = {
-    "strategyId": strategy,
-    "inputs": {
-        "underlying": underlying,
-        "dateRange": {"from": from_date, "to": to_date},
-        "lots": int(lots),
-        "capital": float(capital),
-    },
-}
-with open(path, "w", encoding="utf-8") as f:
-    json.dump(payload, f, separators=(",", ":"))
-PY
-}
-
-submit_backtest() {
-    local name="$1"
-    local from="$2"
-    local to="$3"
-    local payload="${tmpdir}/${name}.json"
-    write_backtest_payload "${payload}" "${from}" "${to}"
-    http_request "${name}" \
-        -X POST \
-        -H 'Content-Type: application/json' \
-        --data-binary "@${payload}" \
-        --config "${selected_auth_cfg}" \
-        "${base_url}${BACKTESTS_PATH}"
-}
+selected_auth_cfg="$(auth_config "${app_token}" "selected")"
+invalid_auth_cfg="$(auth_config "invalid-abuse-suite-token" "invalid")"
 
 run_auth_checks() {
     assert_error_response "protected-no-auth" "${HTTP_STATUS_UNAUTHORIZED}" "${ERR_MISSING_AUTH}" \
@@ -346,72 +272,9 @@ run_auth_checks() {
     assert_status "protected-valid-token" "${HTTP_STATUS_OK}" \
         --config "${selected_auth_cfg}" \
         "${base_url}${PROTECTED_CONFIG_PATH}"
-
-    if [[ "${env_name}" == "${ENV_PROD}" ]]; then
-        if [[ -n "${STAGING_APP_TOKEN:-}" ]]; then
-            local staging_auth_cfg
-            staging_auth_cfg="$(auth_config "${STAGING_APP_TOKEN}" "staging-cross-env")"
-            assert_error_response "prod-url-staging-token" "${HTTP_STATUS_UNAUTHORIZED}" "${ERR_MISSING_AUTH}" \
-                --config "${staging_auth_cfg}" \
-                "${base_url}${PROTECTED_CONFIG_PATH}"
-        else
-            record_result "SKIP" "prod-url-staging-token" "STAGING_APP_TOKEN not set in shell"
-        fi
-    fi
 }
 
-# run_large_range_or_disabled_check: SKIP in PR 1 closed-interval — tenant endpoints return
-# 401 to the static token; PR 2 reintroduces this test via Firebase JWT.
-run_large_range_or_disabled_check() {
-    record_result "SKIP" "backtest-large-date-range" "PR 1 closed-interval — tenant endpoints return 401 to static token; PR 2 reintroduces this test via Firebase JWT"
-}
-
-is_clean_burst_response() {
-    local code="$1"
-    local body="$2"
-    local actual_error
-    case "${code}" in
-        "${HTTP_STATUS_ACCEPTED}"|"${HTTP_STATUS_TOO_MANY_REQUESTS}")
-            return 0
-            ;;
-        "${HTTP_STATUS_BAD_REQUEST}"|"${HTTP_STATUS_NOT_FOUND}"|"${HTTP_STATUS_UNPROCESSABLE_ENTITY}")
-            actual_error="$(json_error_value "${body}")"
-            case "${actual_error}" in
-                "${ERR_NO_CANDLE_DATA}"|"${ERR_NO_INSTRUMENT}"|"${ERR_CANDLE_COUNT_EXCEEDED}")
-                    return 0
-                    ;;
-            esac
-            ;;
-    esac
-    return 1
-}
-
-# run_burst_check: SKIP in PR 1 closed-interval — tenant endpoints return 401 to the static
-# token; PR 2 reintroduces this test via Firebase JWT.
-run_burst_check() {
-    record_result "SKIP" "burst-backtest-submit" "PR 1 closed-interval — tenant endpoints return 401 to static token; PR 2 reintroduces this test via Firebase JWT"
-}
-
-is_clean_poll_response() {
-    local code="$1"
-    case "${code}" in
-        "${HTTP_STATUS_OK}"|"${HTTP_STATUS_BAD_REQUEST}"|"${HTTP_STATUS_NOT_FOUND}"|"${HTTP_STATUS_TOO_MANY_REQUESTS}")
-            return 0
-            ;;
-    esac
-    return 1
-}
-
-# run_poll_check: SKIP in PR 1 closed-interval — tenant endpoints return 401 to the static
-# token; PR 2 reintroduces this test via Firebase JWT.
-run_poll_check() {
-    record_result "SKIP" "aggressive-result-poll" "PR 1 closed-interval — tenant endpoints return 401 to static token; PR 2 reintroduces this test via Firebase JWT"
-}
-
-# run_pr1_closed_interval_check: asserts that the static APP_SECRET_TOKEN is rejected (401)
-# on all tenant endpoints after PR 1 deploys. /api/v1/config/app 200 is already covered by
-# run_auth_checks. Uses BACKTESTS_PATH and HTTP_STATUS_UNAUTHORIZED constants (rule 17);
-# uses auth_config curl helper to avoid token-in-URL leakage (rule 4).
+# run_pr1_closed_interval_check: static token rejected (401) on tenant endpoints.
 run_pr1_closed_interval_check() {
     local payload_file="${tmpdir}/pr1-closed-interval-post.json"
     printf '{}' > "${payload_file}"
@@ -425,6 +288,11 @@ run_pr1_closed_interval_check() {
         -H 'Content-Type: application/json' \
         --data-binary "@${payload_file}" \
         --config "${selected_auth_cfg}" \
+        "${base_url}${BACKTESTS_PATH}"
+}
+
+run_unauthenticated_tenant_check() {
+    assert_status "unauthenticated-backtests" "${HTTP_STATUS_UNAUTHORIZED}" \
         "${base_url}${BACKTESTS_PATH}"
 }
 
@@ -446,13 +314,141 @@ run_log_redaction_check() {
     fi
 }
 
-run_auth_checks
-run_pr1_closed_interval_check
-run_large_range_or_disabled_check
-record_result "SKIP" "cross-tenant-strategy-backtest-id-lookup" "PR 1 closed-interval — no JWT path exists; PR 2 implements real cross-tenant test via Firebase JWT"
-run_burst_check
-run_poll_check
-run_log_redaction_check
+# --- Staging-specific checks ---
+
+firebase_id_token_for_uid() {
+    local uid="$1"
+    local token_file="${tmpdir}/firebase-token-${uid//[^a-zA-Z0-9_-]/}.txt"
+    docker compose -f "${COMPOSE_DIR}/docker-compose.yml" \
+        exec -T "${container_name}" \
+        sh -c "/app/firebase-token --uid=\"${uid}\"" > "${token_file}"
+    chmod 600 "${token_file}"
+    cat "${token_file}"
+}
+
+run_cross_tenant_check() {
+    # Static APP_SECRET_TOKEN must be rejected (401) on all tenant endpoints.
+    run_pr1_closed_interval_check
+}
+
+run_allowlist_denied_check() {
+    local uid_denied="${TEST_UID_DENIED:-}"
+    if [[ -z "${uid_denied}" ]]; then
+        record_result "SKIP" "allowlist-denied-session" "TEST_UID_DENIED not set in shell"
+        return
+    fi
+
+    local id_token
+    if ! id_token="$(firebase_id_token_for_uid "${uid_denied}")"; then
+        record_result "FAIL" "allowlist-denied-session" "firebase-token failed for TEST_UID_DENIED"
+        failures=$((failures + 1))
+        return
+    fi
+
+    local denied_session_payload="${tmpdir}/denied-session.json"
+    printf '{"firebaseIdToken":"%s"}' "${id_token}" > "${denied_session_payload}"
+    chmod 600 "${denied_session_payload}"
+
+    assert_status "allowlist-denied-session" "${HTTP_STATUS_UNAUTHORIZED}" \
+        -X POST \
+        -H 'Content-Type: application/json' \
+        --data-binary "@${denied_session_payload}" \
+        "${base_url}${AUTH_SESSION_PATH}"
+}
+
+run_email_conflict_check() {
+    local uid_conflict="${TEST_UID_CONFLICT:-}"
+    if [[ -z "${uid_conflict}" ]]; then
+        record_result "SKIP" "email-conflict-session" "TEST_UID_CONFLICT not set in shell"
+        return
+    fi
+
+    if [[ ! -x "${STAGING_ONLY_SEED_SCRIPT}" ]]; then
+        record_result "SKIP" "email-conflict-session" "${STAGING_ONLY_SEED_SCRIPT} not found or not executable — seed the fixture manually before running"
+        return
+    fi
+
+    "${STAGING_ONLY_SEED_SCRIPT}"
+    fixture_seeded=true
+
+    local id_token
+    if ! id_token="$(firebase_id_token_for_uid "${uid_conflict}")"; then
+        record_result "FAIL" "email-conflict-session" "firebase-token failed for TEST_UID_CONFLICT"
+        failures=$((failures + 1))
+        return
+    fi
+
+    local conflict_session_payload="${tmpdir}/conflict-session.json"
+    printf '{"firebaseIdToken":"%s"}' "${id_token}" > "${conflict_session_payload}"
+    chmod 600 "${conflict_session_payload}"
+
+    assert_error_response "email-conflict-session" "${HTTP_STATUS_CONFLICT}" "${ERR_IDENTITY_CONFLICT}" \
+        -X POST \
+        -H 'Content-Type: application/json' \
+        --data-binary "@${conflict_session_payload}" \
+        "${base_url}${AUTH_SESSION_PATH}"
+}
+
+run_rate_limit_burst_check() {
+    local uid_a="${TEST_UID_A:-}"
+    if [[ -z "${uid_a}" ]]; then
+        record_result "SKIP" "rate-limit-burst" "TEST_UID_A not set in shell"
+        return
+    fi
+
+    local id_token
+    if ! id_token="$(firebase_id_token_for_uid "${uid_a}")"; then
+        record_result "FAIL" "rate-limit-burst" "firebase-token failed for TEST_UID_A"
+        failures=$((failures + 1))
+        return
+    fi
+
+    local burst_payload="${tmpdir}/burst-session.json"
+    printf '{"firebaseIdToken":"%s"}' "${id_token}" > "${burst_payload}"
+    chmod 600 "${burst_payload}"
+
+    local got_429=false
+    local i
+    for ((i = 1; i <= BURST_REQUESTS; i++)); do
+        local code
+        code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 \
+            -X POST \
+            -H 'Content-Type: application/json' \
+            --data-binary "@${burst_payload}" \
+            "${base_url}${AUTH_SESSION_PATH}" || true)"
+        if [[ "${code}" == "${HTTP_STATUS_TOO_MANY_REQUESTS}" ]]; then
+            got_429=true
+            break
+        fi
+    done
+
+    if [[ "${got_429}" == "true" ]]; then
+        record_result "PASS" "rate-limit-burst" "received HTTP 429 after burst on /auth/session"
+    else
+        record_result "FAIL" "rate-limit-burst" "no HTTP 429 after ${BURST_REQUESTS} rapid /auth/session requests"
+    fi
+}
+
+# --- Main ---
+
+if [[ "${env_name}" == "${ENV_STAGING}" ]]; then
+    require_cmd docker
+    # trap cleanup EXIT already registered above — fixture_seeded guards the teardown.
+
+    # Staging path: ordered cross-tenant → allowlist-denied → email-conflict → rate-limit burst LAST.
+    run_auth_checks
+    run_cross_tenant_check
+    run_allowlist_denied_check
+    run_email_conflict_check
+    run_rate_limit_burst_check
+    run_log_redaction_check
+else
+    # Production path: read-only — no /auth/* calls, no mutation, no staging-only paths.
+    run_auth_checks
+    run_pr1_closed_interval_check
+    run_unauthenticated_tenant_check
+    run_log_redaction_check
+fi
 
 run_finished_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 {

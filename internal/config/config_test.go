@@ -1,7 +1,9 @@
 package config
 
 import (
+	"bufio"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -970,4 +972,54 @@ func TestValidateServerConfig_DevNoFirebaseAllPasses(t *testing.T) {
 	if err := ValidateServerConfig(cfg); err != nil {
 		t.Fatalf("expected no error for dev with no Firebase config, got %v", err)
 	}
+}
+
+// TestEnvExamples_FirebaseProjectIDsDiffer asserts that prod.env.example and
+// staging.env.example contain non-empty, distinct FIREBASE_PROJECT_ID values.
+// A shared project ID between environments would allow staging test UIDs to
+// authenticate against production Firebase, defeating the per-environment UID
+// separation. The test reads the example files relative to the module root so
+// it catches accidental copy-paste before the files reach the VPS.
+func TestEnvExamples_FirebaseProjectIDsDiffer(t *testing.T) {
+	repoRoot := filepath.Join("..", "..", "deploy", "env")
+	stagingID := readEnvExampleValue(t, filepath.Join(repoRoot, "staging.env.example"), "FIREBASE_PROJECT_ID")
+	prodID := readEnvExampleValue(t, filepath.Join(repoRoot, "prod.env.example"), "FIREBASE_PROJECT_ID")
+
+	if stagingID == "" {
+		t.Fatal("staging.env.example: FIREBASE_PROJECT_ID is empty")
+	}
+	if prodID == "" {
+		t.Fatal("prod.env.example: FIREBASE_PROJECT_ID is empty")
+	}
+	if stagingID == prodID {
+		t.Fatalf("staging and prod FIREBASE_PROJECT_ID must differ, both are %q", stagingID)
+	}
+}
+
+// readEnvExampleValue reads the first matching KEY=VALUE line from an env
+// example file and returns the value portion. It is intentionally lenient
+// about surrounding whitespace but rejects inline comments.
+func readEnvExampleValue(t *testing.T, path, key string) string {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open %s: %v", path, err)
+	}
+	defer f.Close()
+
+	prefix := key + "="
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan %s: %v", path, err)
+	}
+	return ""
 }
