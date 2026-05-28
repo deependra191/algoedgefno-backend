@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -851,5 +852,122 @@ func TestNewFromEnv_DBSSLRequired_RejectsInvalidValue(t *testing.T) {
 	_, err := newFromEnv(mapLookup(env))
 	if err == nil {
 		t.Fatal("newFromEnv() error = nil, want error for non-boolean DB_SSL_REQUIRED")
+	}
+}
+
+// --- ValidateServerConfig tests ---
+
+// validServerConfig returns a Config that passes ValidateServerConfig in staging.
+func validServerConfigStaging() *Config {
+	return &Config{
+		Env:                     EnvStaging,
+		FirebaseWebAPIKey:       "test-web-api-key",
+		FirebaseCredentialsFile: "",
+		AllowedFirebaseUIDs:     []string{"uid-staging-1"},
+	}
+}
+
+func TestValidateServerConfig_NilReturnsError(t *testing.T) {
+	if err := ValidateServerConfig(nil); err == nil {
+		t.Fatal("expected error for nil config")
+	}
+}
+
+func TestValidateServerConfig_StagingRequiresWebAPIKey(t *testing.T) {
+	cfg := validServerConfigStaging()
+	cfg.FirebaseWebAPIKey = ""
+	if err := ValidateServerConfig(cfg); err == nil {
+		t.Fatal("expected error when FirebaseWebAPIKey is empty in staging")
+	}
+}
+
+func TestValidateServerConfig_ProdRequiresWebAPIKey(t *testing.T) {
+	cfg := validServerConfigStaging()
+	cfg.Env = EnvProduction
+	cfg.FirebaseWebAPIKey = ""
+	if err := ValidateServerConfig(cfg); err == nil {
+		t.Fatal("expected error when FirebaseWebAPIKey is empty in production")
+	}
+}
+
+func TestValidateServerConfig_StagingRequiresNonEmptyAllowlist(t *testing.T) {
+	cfg := validServerConfigStaging()
+	cfg.AllowedFirebaseUIDs = nil
+	if err := ValidateServerConfig(cfg); err == nil {
+		t.Fatal("expected error for empty allowlist in staging")
+	}
+}
+
+func TestValidateServerConfig_ProdRequiresNonEmptyAllowlist(t *testing.T) {
+	cfg := validServerConfigStaging()
+	cfg.Env = EnvProduction
+	cfg.AllowedFirebaseUIDs = nil
+	if err := ValidateServerConfig(cfg); err == nil {
+		t.Fatal("expected error for empty allowlist in production")
+	}
+}
+
+func TestValidateServerConfig_DevAllowsEmptyAllowlist(t *testing.T) {
+	cfg := &Config{
+		Env:                 EnvDevelopment,
+		AllowedFirebaseUIDs: nil,
+	}
+	if err := ValidateServerConfig(cfg); err != nil {
+		t.Fatalf("expected no error for empty allowlist in dev, got %v", err)
+	}
+}
+
+func TestValidateServerConfig_TestAllowsEmptyAllowlist(t *testing.T) {
+	cfg := &Config{
+		Env:                 EnvTest,
+		AllowedFirebaseUIDs: nil,
+	}
+	if err := ValidateServerConfig(cfg); err != nil {
+		t.Fatalf("expected no error for empty allowlist in test, got %v", err)
+	}
+}
+
+func TestValidateServerConfig_CredentialsFileRequiresProjectID(t *testing.T) {
+	// Write a temp file so the readable-check passes.
+	f, err := os.CreateTemp(t.TempDir(), "creds-*.json")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	f.Close()
+
+	cfg := &Config{
+		Env:                     EnvDevelopment,
+		FirebaseCredentialsFile: f.Name(),
+		FirebaseProjectID:       "", // missing
+	}
+	if err := ValidateServerConfig(cfg); err == nil {
+		t.Fatal("expected error when FirebaseProjectID is empty but credentials file is set")
+	}
+}
+
+func TestValidateServerConfig_UnreadableCredentialsFile(t *testing.T) {
+	cfg := &Config{
+		Env:                     EnvDevelopment,
+		FirebaseCredentialsFile: "/nonexistent/path/to/creds.json",
+		FirebaseProjectID:       "my-project",
+	}
+	if err := ValidateServerConfig(cfg); err == nil {
+		t.Fatal("expected error for unreadable credentials file")
+	}
+}
+
+func TestValidateServerConfig_ValidStagingConfig(t *testing.T) {
+	cfg := validServerConfigStaging()
+	if err := ValidateServerConfig(cfg); err != nil {
+		t.Fatalf("expected no error for valid staging config, got %v", err)
+	}
+}
+
+func TestValidateServerConfig_DevNoFirebaseAllPasses(t *testing.T) {
+	cfg := &Config{
+		Env: EnvDevelopment,
+	}
+	if err := ValidateServerConfig(cfg); err != nil {
+		t.Fatalf("expected no error for dev with no Firebase config, got %v", err)
 	}
 }

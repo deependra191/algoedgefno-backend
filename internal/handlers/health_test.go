@@ -28,7 +28,7 @@ type fakeHealthRepo struct {
 	migVersionErr error
 }
 
-func (f *fakeHealthRepo) Ping(_ context.Context) error                { return f.pingErr }
+func (f *fakeHealthRepo) Ping(_ context.Context) error { return f.pingErr }
 func (f *fakeHealthRepo) QueryDBIdentity(_ context.Context) (string, error) {
 	return f.identity, f.identityErr
 }

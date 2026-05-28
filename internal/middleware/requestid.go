@@ -30,7 +30,7 @@ func RequestID() gin.HandlerFunc {
 			id = uuid.New()
 		}
 		idStr := id.String()
-		c.Set(RequestIDKey, idStr)                                                              // existing — Gin string key
+		c.Set(RequestIDKey, idStr)                                                          // existing — Gin string key
 		c.Request = c.Request.WithContext(models.WithRequestID(c.Request.Context(), idStr)) // new — Go context bridge
 		c.Header(RequestIDHeader, idStr)
 		c.Next()

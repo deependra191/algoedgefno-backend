@@ -4,34 +4,38 @@ import (
 	"encoding/json"
 	"sort"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/deependra191/algoedgefno-backend/internal/models"
+	"github.com/deependra191/algoedgefno-backend/internal/services"
 )
 
 // TestUserResponseJSONShape asserts that the wire shape of userResponse is
-// exactly {id, email, name, created_at, updated_at}. Any drift (e.g. a
-// forgotten password_hash field) is caught here before it reaches Android.
+// exactly {id, email, displayName} (photoUrl is omitempty so it may or may
+// not appear). Verifies that no credential or internal fields leak.
 func TestUserResponseJSONShape(t *testing.T) {
-	now := time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC)
 	u := &models.User{
-		ID:        uuid.MustParse("11111111-2222-3333-4444-555555555555"),
-		Email:     "a@b.c",
-		Name:      "tester",
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:          uuid.MustParse("11111111-2222-3333-4444-555555555555"),
+		Email:       "a@b.c",
+		DisplayName: "Tester",
+		PhotoURL:    "https://example.com/photo.jpg",
 	}
 
-	resp := toUserResponse(u)
-	keys := jsonKeys(t, resp)
+	r := userResponse{
+		ID:          u.ID,
+		Email:       u.Email,
+		DisplayName: u.DisplayName,
+		PhotoURL:    u.PhotoURL,
+	}
+	keys := jsonKeys(t, r)
 
-	want := []string{"created_at", "email", "id", "name", "updated_at"}
+	want := []string{"displayName", "email", "id", "photoUrl"}
 	assertKeysEqual(t, keys, want)
 
 	// Absence check: no credential field of any name should be present.
-	forbidden := []string{"password", "password_hash", "passwordHash", "hash"}
+	forbidden := []string{"password", "password_hash", "passwordHash", "hash",
+		"name", "updatedAt", "updated_at", "lastLoginAt", "last_login_at", "firebaseUID"}
 	for _, f := range forbidden {
 		for _, k := range keys {
 			if k == f {
@@ -41,25 +45,40 @@ func TestUserResponseJSONShape(t *testing.T) {
 	}
 }
 
+// TestUserResponseJSONShape_NoPhotoURL asserts that photoUrl is omitted when empty.
+func TestUserResponseJSONShape_NoPhotoURL(t *testing.T) {
+	r := userResponse{
+		ID:          uuid.MustParse("11111111-2222-3333-4444-555555555555"),
+		Email:       "a@b.c",
+		DisplayName: "Tester",
+		// PhotoURL intentionally zero-value (empty string)
+	}
+	keys := jsonKeys(t, r)
+	// photoUrl must be absent when zero (omitempty).
+	want := []string{"displayName", "email", "id"}
+	assertKeysEqual(t, keys, want)
+}
+
 // TestAuthResponseJSONShape asserts the wire shape of authResponse.
 func TestAuthResponseJSONShape(t *testing.T) {
-	now := time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC)
-	resp := authResponse{
-		Token: "tok",
-		User: toUserResponse(&models.User{
-			ID:        uuid.MustParse("11111111-2222-3333-4444-555555555555"),
-			Email:     "a@b.c",
-			Name:      "tester",
-			CreatedAt: now,
-			UpdatedAt: now,
-		}),
+	result := &services.SessionResult{
+		TokenPair: services.TokenPair{
+			AccessToken:  "access-tok",
+			RefreshToken: "refresh-tok",
+		},
+		User: &models.User{
+			ID:          uuid.MustParse("11111111-2222-3333-4444-555555555555"),
+			Email:       "a@b.c",
+			DisplayName: "Tester",
+		},
 	}
 
+	resp := toAuthResponse(result)
 	keys := jsonKeys(t, resp)
-	want := []string{"token", "user"}
+	want := []string{"accessToken", "refreshToken", "user"}
 	assertKeysEqual(t, keys, want)
 
-	// Walk the nested user object too and ensure no credential field slipped in.
+	// Walk the nested user object and ensure no credential field slipped in.
 	b, err := json.Marshal(resp)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -72,10 +91,23 @@ func TestAuthResponseJSONShape(t *testing.T) {
 	}
 	for k := range nested.User {
 		switch k {
-		case "password", "password_hash", "passwordHash", "hash":
+		case "password", "password_hash", "passwordHash", "hash", "firebaseUID",
+			"updatedAt", "updated_at", "lastLoginAt", "last_login_at":
 			t.Fatalf("forbidden key %q in nested user object", k)
 		}
 	}
+}
+
+// TestRefreshResponseJSONShape asserts that refreshResponse has exactly
+// {accessToken, refreshToken} — no user field.
+func TestRefreshResponseJSONShape(t *testing.T) {
+	resp := refreshResponse{
+		AccessToken:  "acc",
+		RefreshToken: "ref",
+	}
+	keys := jsonKeys(t, resp)
+	want := []string{"accessToken", "refreshToken"}
+	assertKeysEqual(t, keys, want)
 }
 
 // jsonKeys marshals v and returns its top-level JSON keys, sorted.

@@ -14,23 +14,28 @@ import (
 	"github.com/google/uuid"
 )
 
-// UserRepository is the storage contract for user persistence.
-type UserRepository interface {
-	// FindByEmail returns the domain user and their password hash.
-	// The hash is returned separately so it never appears on models.User.
-	// Returns ErrNotFound if no user exists with that email.
-	FindByEmail(ctx context.Context, email string) (*User, string, error)
-	// Create persists a new user with the given bcrypt password hash.
-	Create(ctx context.Context, user *User, passwordHash string) error
+// User is the domain representation of a Firebase-backed user.
+// PasswordHash and LastLoginAt are intentionally absent — they are storage
+// concerns only (tracked in entities.User) and never surfaced to services or
+// handlers.
+type User struct {
+	ID          uuid.UUID
+	FirebaseUID string
+	Email       string
+	DisplayName string
+	PhotoURL    string
+	CreatedAt   time.Time
 }
 
-// User is the domain representation of a user.
-// PasswordHash is intentionally absent — it is returned separately by
-// UserRepository.FindByEmail and never stored on the domain object.
-type User struct {
-	ID        uuid.UUID
-	Email     string
-	Name      string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+// UserRepository is the storage contract for user persistence.
+type UserRepository interface {
+	// UpsertByFirebaseUID inserts a new user row or updates the existing one
+	// that matches firebase_uid. Returns the persisted domain user on success.
+	// Returns ErrIdentityConflict when the email is already owned by a
+	// different firebase_uid (23505 on users_email_key).
+	UpsertByFirebaseUID(ctx context.Context, user *User) (*User, error)
+
+	// FindByID returns the domain user for the given UUID primary key.
+	// Returns ErrNotFound when no row exists with that id.
+	FindByID(ctx context.Context, id uuid.UUID) (*User, error)
 }

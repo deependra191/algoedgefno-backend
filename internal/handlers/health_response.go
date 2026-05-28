@@ -8,7 +8,7 @@ type readyChecks struct {
 
 // readyResponse is the success body returned by GET /ready.
 type readyResponse struct {
-	Status string     `json:"status"`
+	Status string      `json:"status"`
 	Checks readyChecks `json:"checks"`
 }
 
