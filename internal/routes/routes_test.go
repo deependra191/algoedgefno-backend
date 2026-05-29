@@ -9,7 +9,10 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/deependra191/algoedgefno-backend/internal/config"
+	"github.com/deependra191/algoedgefno-backend/internal/handlers"
 	"github.com/deependra191/algoedgefno-backend/internal/providers"
+	"github.com/deependra191/algoedgefno-backend/internal/services"
+	"github.com/deependra191/algoedgefno-backend/internal/storage"
 )
 
 func init() {
@@ -19,7 +22,7 @@ func init() {
 // newTestEngine builds a gin.Engine with routes registered against a real pool if
 // TEST_DATABASE_URL is set, or skips DB-backed tests when it is not.
 // For route-existence tests (404 probes on removed paths) we only need the route
-// table; storage is never invoked.  We use the real Register function with a live
+// table; storage is never invoked. We use the real Register function with a live
 // pool to ensure the route table produced by production code is what we test.
 func newTestEngine(t *testing.T) *gin.Engine {
 	t.Helper()
@@ -33,15 +36,21 @@ func newTestEngine(t *testing.T) *gin.Engine {
 	cfg := &config.Config{
 		AppSecretToken: "test-secret",
 		Env:            config.EnvTest,
+		JWTSecret:      "test-jwt-secret",
 	}
 
+	userRepo := storage.NewUserStore(pool)
+	tokenRepo := storage.NewRefreshTokenStore(pool)
+	authSvc := services.NewAuthService(userRepo, tokenRepo, nil, cfg.JWTSecret, nil, cfg.Env)
+	authHandler := handlers.NewAuthHandler(authSvc, cfg.Env)
+
 	r := gin.New()
-	Register(r, pool, cfg, providers.NewRegistry())
+	Register(r, pool, cfg, providers.NewRegistry(), authSvc, authHandler)
 	return r
 }
 
 // TestRemovedRoutes_LoginAndRegisterReturn404 asserts that /api/v1/auth/login and
-// /api/v1/auth/register are no longer registered after Phase D unregistered them (row 6).
+// /api/v1/auth/register are no longer registered after password auth was removed.
 func TestRemovedRoutes_LoginAndRegisterReturn404(t *testing.T) {
 	r := newTestEngine(t)
 

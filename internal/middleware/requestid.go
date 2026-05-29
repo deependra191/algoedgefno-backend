@@ -3,6 +3,8 @@ package middleware
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+
+	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
 const (
@@ -28,7 +30,8 @@ func RequestID() gin.HandlerFunc {
 			id = uuid.New()
 		}
 		idStr := id.String()
-		c.Set(RequestIDKey, idStr)
+		c.Set(RequestIDKey, idStr)                                                          // existing — Gin string key
+		c.Request = c.Request.WithContext(models.WithRequestID(c.Request.Context(), idStr)) // new — Go context bridge
 		c.Header(RequestIDHeader, idStr)
 		c.Next()
 	}

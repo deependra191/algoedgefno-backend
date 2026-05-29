@@ -5,10 +5,10 @@
 ```
 cmd/server/main.go          — entry point, wires dependencies, starts HTTP server
 internal/config/            — env config (reads .env, exposes typed Config struct)
-internal/middleware/        — HTTP middleware: auth (static token + JWT), request logging
+internal/middleware/        — HTTP middleware: Auth (APP_SECRET_TOKEN on /config/app + backend JWT validator on tenant endpoints), RequestID, Logger, rate limiter, request-body limiter
 internal/entities/          — DB row structs used as pgx scan targets (no JSON tags)
 internal/models/            — domain objects with entity mappers (no JSON tags)
-internal/storage/           — pgx queries, one file per table group (returns *entities.X)
+internal/storage/           — pgx queries, one file per table group (accepts/returns *models.X; entity↔model mappers private to storage)
 internal/providers/         — MarketDataProvider interface + registry
 internal/providers/nse/     — NSE bhavcopy EOD provider
 internal/providers/vendor/  — TrueData / Global Datafeeds stub (Phase 3)
@@ -32,12 +32,13 @@ responsibility:
 | Domain model | `internal/models/` | in-memory type for services, engine | No |
 | Response DTO | `internal/handlers/*` | wire format for Android | Yes |
 
-Entities never leave the storage layer as a serialized response. Storage
-returns `*entities.X`; services call `models.FromXEntity` to convert to a
-domain model. Handlers build a local response DTO from the domain model
-before calling `c.JSON`. This keeps a DB column rename from accidentally
-changing the Android API contract, and makes credential leakage (e.g.
-a forgotten `json:"-"` on a password hash) impossible by construction.
+Entities never leave the storage layer. Storage methods accept and return
+domain models (`*models.X`); entity↔model mappers are private functions
+inside the relevant storage file. Services and handlers never import or
+handle entity types. Handlers build a local response DTO from the domain
+model before calling `c.JSON`. This keeps a DB column rename from
+accidentally changing the Android API contract, and makes credential leakage
+(e.g. a forgotten `json:"-"` on a password hash) impossible by construction.
 
 ## Layer rules
 

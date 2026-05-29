@@ -11,14 +11,14 @@ import (
 // These are owned by us — vendor CSV codes are mapped to these during ingestion and never
 // stored directly.
 const (
-	InstrumentTypeIndex             = "INDEX"
-	InstrumentTypeEquity            = "EQ"
-	InstrumentTypeFuturesIndex      = "FUTIDX"
-	InstrumentTypeFuturesStock      = "FUTSTK"
-	InstrumentTypeFuturesIndexCont  = "FUTIDX_CONT"
-	InstrumentTypeFuturesStockCont  = "FUTSTK_CONT"
-	InstrumentTypeOptionsIndex      = "OPTIDX"
-	InstrumentTypeOptionsStock      = "OPTSTK"
+	InstrumentTypeIndex            = "INDEX"
+	InstrumentTypeEquity           = "EQ"
+	InstrumentTypeFuturesIndex     = "FUTIDX"
+	InstrumentTypeFuturesStock     = "FUTSTK"
+	InstrumentTypeFuturesIndexCont = "FUTIDX_CONT"
+	InstrumentTypeFuturesStockCont = "FUTSTK_CONT"
+	InstrumentTypeOptionsIndex     = "OPTIDX"
+	InstrumentTypeOptionsStock     = "OPTSTK"
 
 	ContinuousFuturesSuffix = "-FUTCONT"
 )

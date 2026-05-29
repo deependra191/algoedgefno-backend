@@ -10,12 +10,12 @@ import (
 
 func TestDatabaseDSN_UsesRequireSSLModeWhenEnabled(t *testing.T) {
 	cfg := &config.Config{
-		DBHost:         "postgres",
-		DBPort:         "5432",
-		DBUser:         "algoedgefno_prod_app",
-		DBPass:         "db_password",
-		DBName:         "algoedgefno_prod",
-		DBSSLRequired:  true,
+		DBHost:        "postgres",
+		DBPort:        "5432",
+		DBUser:        "algoedgefno_prod_app",
+		DBPass:        "db_password",
+		DBName:        "algoedgefno_prod",
+		DBSSLRequired: true,
 	}
 
 	got := databaseDSN(cfg, sslModeRequire)
@@ -27,12 +27,12 @@ func TestDatabaseDSN_UsesRequireSSLModeWhenEnabled(t *testing.T) {
 
 func TestDatabaseDSN_UsesDisableSSLModeWhenDisabled(t *testing.T) {
 	cfg := &config.Config{
-		DBHost:         "postgres",
-		DBPort:         "5432",
-		DBUser:         "algoedgefno_prod_app",
-		DBPass:         "db_password",
-		DBName:         "algoedgefno_prod",
-		DBSSLRequired:  false,
+		DBHost:        "postgres",
+		DBPort:        "5432",
+		DBUser:        "algoedgefno_prod_app",
+		DBPass:        "db_password",
+		DBName:        "algoedgefno_prod",
+		DBSSLRequired: false,
 	}
 
 	got := databaseDSN(cfg, sslModeDisable)

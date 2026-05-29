@@ -1,6 +1,14 @@
 # Env — never commit
 .env
 
+# Firebase/GCP credential key files — never commit (all common name variants)
+*serviceaccount*.json
+*service-account*.json
+*service_account*.json
+*firebase-adminsdk*.json
+*google-credentials*.json
+*credentials*.json
+
 # Build output
 /bin/
 *.exe

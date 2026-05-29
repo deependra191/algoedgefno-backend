@@ -39,4 +39,3 @@ type SyncRunRepository interface {
 // download covering all instruments and candles for a given day.
 // An incremental type may be added if NSE exposes delta feeds in future.
 const SyncTypeFull = "full"
-

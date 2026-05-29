@@ -1,71 +1,175 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 
-	"github.com/deependra191/algoedgefno-backend/internal/services"
 	"github.com/gin-gonic/gin"
+
+	"github.com/deependra191/algoedgefno-backend/internal/config"
+	"github.com/deependra191/algoedgefno-backend/internal/models"
+	"github.com/deependra191/algoedgefno-backend/internal/services"
 )
 
-// --- request structs ---
-
-type registerRequest struct {
-	Email    string `json:"email"    binding:"required,email"`
-	Password string `json:"password" binding:"required,min=8"`
-	Name     string `json:"name"     binding:"required"`
+// sessionRequest is the JSON body for POST /api/v1/auth/session.
+type sessionRequest struct {
+	FirebaseIdToken string `json:"firebaseIdToken" binding:"required"`
 }
 
-type loginRequest struct {
-	Email    string `json:"email"    binding:"required,email"`
-	Password string `json:"password" binding:"required,min=8"`
+// refreshRequest is the JSON body for POST /api/v1/auth/refresh.
+type refreshRequest struct {
+	RefreshToken string `json:"refreshToken" binding:"required"`
 }
 
-// --- handler ---
+// logoutRequest is the JSON body for POST /api/v1/auth/logout.
+type logoutRequest struct {
+	RefreshToken string `json:"refreshToken" binding:"required"`
+}
 
-// AuthHandler handles HTTP requests for user registration and login.
+// debugSessionRequest is the JSON body for POST /api/v1/auth/debug-session.
+type debugSessionRequest struct {
+	UID         string `json:"uid"         binding:"required"`
+	Email       string `json:"email"       binding:"required"`
+	DisplayName string `json:"displayName"`
+}
+
+// AuthHandler handles HTTP requests for Firebase-based authentication.
 type AuthHandler struct {
 	authSvc *services.AuthService
+	env     config.Environment
 }
 
-func NewAuthHandler(authSvc *services.AuthService) *AuthHandler {
-	return &AuthHandler{authSvc: authSvc}
+// NewAuthHandler constructs an AuthHandler. env is used to gate the
+// debug-session endpoint (only in development and test).
+func NewAuthHandler(authSvc *services.AuthService, env config.Environment) *AuthHandler {
+	return &AuthHandler{authSvc: authSvc, env: env}
 }
 
-func (h *AuthHandler) Register(c *gin.Context) {
-	var req registerRequest
+// Session exchanges a Firebase ID token for a backend access + refresh token
+// pair. POST /api/v1/auth/session.
+//
+// Error mapping:
+//   - bind error or oversized token → 400 invalid_request
+//   - ErrFirebaseNotConfigured      → 503 firebase_not_configured
+//   - ErrFirebaseTokenInvalid       → 401 firebase_token_invalid
+//   - ErrFirebaseEmailUnverified    → 403 firebase_email_unverified
+//   - ErrAuthNotAllowed             → 403 auth_not_allowed
+//   - ErrIdentityConflict           → 409 identity_conflict
+//   - ErrInvalidRequest             → 400 invalid_request
+//   - any other error               → 500 internal
+func (h *AuthHandler) Session(c *gin.Context) {
+	var req sessionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": errCodeInvalidRequest})
+		return
+	}
+	// Belt-and-suspenders length check: RequestBodyLimit middleware already
+	// caps the body at 8 KiB; this guards against very long tokens that
+	// somehow slip through.
+	if len(req.FirebaseIdToken) > models.MaxFirebaseIDTokenLen {
+		c.JSON(http.StatusBadRequest, gin.H{"error": errCodeInvalidRequest})
 		return
 	}
 
-	result, err := h.authSvc.Register(c.Request.Context(), services.RegisterInput{
-		Email:    req.Email,
-		Password: req.Password,
-		Name:     req.Name,
-	})
-	if err != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
-		return
+	result, err := h.authSvc.ExchangeFirebaseToken(c.Request.Context(), req.FirebaseIdToken)
+	switch {
+	case err == nil:
+		c.JSON(http.StatusOK, toAuthResponse(result))
+	case errors.Is(err, models.ErrFirebaseNotConfigured):
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": errCodeFirebaseNotConfigured})
+	case errors.Is(err, models.ErrFirebaseTokenInvalid):
+		c.JSON(http.StatusUnauthorized, gin.H{"error": errCodeFirebaseTokenInvalid})
+	case errors.Is(err, models.ErrFirebaseEmailUnverified):
+		c.JSON(http.StatusForbidden, gin.H{"error": errCodeFirebaseEmailUnverified})
+	case errors.Is(err, models.ErrAuthNotAllowed):
+		c.JSON(http.StatusForbidden, gin.H{"error": errCodeAuthNotAllowed})
+	case errors.Is(err, models.ErrIdentityConflict):
+		c.JSON(http.StatusConflict, gin.H{"error": errCodeIdentityConflict})
+	case errors.Is(err, models.ErrInvalidRequest):
+		c.JSON(http.StatusBadRequest, gin.H{"error": errCodeInvalidRequest})
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": errCodeInternal})
 	}
-
-	c.JSON(http.StatusCreated, authResponse{Token: result.Token, User: toUserResponse(result.User)})
 }
 
-func (h *AuthHandler) Login(c *gin.Context) {
-	var req loginRequest
+// Refresh exchanges a refresh token for a new access + refresh token pair.
+// POST /api/v1/auth/refresh.
+//
+// Error mapping:
+//   - bind error             → 400 invalid_request
+//   - ErrInvalidRequest      → 400 invalid_request
+//   - ErrRefreshTokenInvalid → 401 refresh_token_invalid
+//   - any other error        → 500 internal  (NOT 401 — see §H comment)
+func (h *AuthHandler) Refresh(c *gin.Context) {
+	var req refreshRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": errCodeInvalidRequest})
 		return
 	}
 
-	result, err := h.authSvc.Login(c.Request.Context(), services.LoginInput{
-		Email:    req.Email,
-		Password: req.Password,
-	})
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+	pair, err := h.authSvc.RefreshSession(c.Request.Context(), req.RefreshToken)
+	switch {
+	case err == nil:
+		c.JSON(http.StatusOK, refreshResponse{AccessToken: pair.AccessToken, RefreshToken: pair.RefreshToken})
+	case errors.Is(err, models.ErrInvalidRequest):
+		c.JSON(http.StatusBadRequest, gin.H{"error": errCodeInvalidRequest})
+	case errors.Is(err, models.ErrRefreshTokenInvalid):
+		c.JSON(http.StatusUnauthorized, gin.H{"error": errCodeRefreshTokenInvalid})
+	default:
+		// Wrapped repository / transport failure. Do NOT collapse to 401:
+		// that would log the owner out on a transient DB blip AND silence
+		// an operational incident behind a routine-looking auth failure.
+		c.JSON(http.StatusInternalServerError, gin.H{"error": errCodeInternal})
+	}
+}
+
+// Logout revokes the supplied refresh token. POST /api/v1/auth/logout.
+//
+// Idempotent — an absent or already-revoked token returns 204.
+// RevokeByHash failure returns 500 (a DB error must not silently succeed).
+//
+// Error mapping:
+//   - bind error        → 400 invalid_request
+//   - ErrInvalidRequest → 400 invalid_request
+//   - nil               → 204 No Content
+//   - any other error   → 500 internal
+func (h *AuthHandler) Logout(c *gin.Context) {
+	var req logoutRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": errCodeInvalidRequest})
 		return
 	}
 
-	c.JSON(http.StatusOK, authResponse{Token: result.Token, User: toUserResponse(result.User)})
+	err := h.authSvc.Logout(c.Request.Context(), req.RefreshToken)
+	switch {
+	case err == nil:
+		c.Status(http.StatusNoContent)
+	case errors.Is(err, models.ErrInvalidRequest):
+		c.JSON(http.StatusBadRequest, gin.H{"error": errCodeInvalidRequest})
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": errCodeInternal})
+	}
+}
+
+// DebugSession mints a session for a synthetic identity without requiring a
+// real Firebase ID token. Only available in development and test environments.
+// POST /api/v1/auth/debug-session.
+func (h *AuthHandler) DebugSession(c *gin.Context) {
+	var req debugSessionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": errCodeInvalidRequest})
+		return
+	}
+
+	result, err := h.authSvc.DebugSession(c.Request.Context(), req.UID, req.Email, req.DisplayName)
+	switch {
+	case err == nil:
+		c.JSON(http.StatusOK, toAuthResponse(result))
+	case errors.Is(err, models.ErrNotAvailable):
+		c.JSON(http.StatusNotFound, gin.H{"error": errCodeNotAvailable})
+	case errors.Is(err, models.ErrIdentityConflict):
+		c.JSON(http.StatusConflict, gin.H{"error": errCodeIdentityConflict})
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": errCodeInternal})
+	}
 }
