@@ -11,7 +11,15 @@ ARG BUILD_TIME=unknown
 COPY go.mod go.sum ./
 RUN go mod download
 
-COPY . .
+# Copy only the Go source the build needs. Deliberately NOT `COPY . .`: a broad
+# context copy can pull credential-like files (Firebase/GCP service-account
+# JSONs, etc.) into the builder layer/cache even though they never reach the
+# runtime image. cmd/ and internal/ are the only Go source trees; migrations/
+# and scripts/ are copied explicitly into the runtime stage below. If a new
+# top-level source dir is added, copy it here explicitly rather than reverting
+# to `COPY . .` (a CI lint enforces this).
+COPY cmd ./cmd
+COPY internal ./internal
 
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
       -ldflags="-s -w -X github.com/deependra191/algoedgefno-backend/internal/buildinfo.AppVersion=${APP_VERSION} -X github.com/deependra191/algoedgefno-backend/internal/buildinfo.CommitSHA=${COMMIT_SHA} -X github.com/deependra191/algoedgefno-backend/internal/buildinfo.BuildTime=${BUILD_TIME}" \
