@@ -178,11 +178,11 @@ jobs:
         run: |
           test -f scripts/staging-only/seed-conflict-fixture.sh
 
-      - name: deploy-staging.yml does not declare environment:
+      - name: "deploy-staging.yml does not declare environment:"
         run: |
           ! grep -E '^\s+environment:\s*(staging|production)' .github/workflows/deploy-staging.yml
 
-      - name: deploy-production.yml does not declare environment:
+      - name: "deploy-production.yml does not declare environment:"
         run: |
           ! grep -E '^\s+environment:\s*(staging|production)' .github/workflows/deploy-production.yml
 
