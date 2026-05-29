@@ -28,6 +28,13 @@ const (
 // JWT path: all other requests go through validator.ValidateToken, which
 // parses the HS256 token, verifies the env claim, and returns the user UUID.
 // On success the UUID is stored in the Gin context under models.UserIDKey.
+//
+// Scope note: APP_SECRET_TOKEN is scoped to /config/app — it is rejected on
+// every other route (the static-token branch only matches that path). The
+// converse is intentional: a valid backend JWT IS also accepted on /config/app
+// (the static-token compare fails and we fall through to the JWT validator), so
+// an authenticated tenant can read app config. The rule constrains where the
+// STATIC token works, not where JWTs work.
 func Auth(appSecretToken string, validator models.TokenValidator) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")

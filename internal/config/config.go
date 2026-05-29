@@ -315,6 +315,11 @@ func (cfg *Config) validateStagingIdentity() error {
 //
 // Rules:
 //   - FirebaseProjectID must be set when FirebaseCredentialsFile is non-empty.
+//   - FirebaseCredentialsFile must be set in staging and production — a missing
+//     credentials file leaves the verifier nil, which would let the server boot
+//     and pass non-identity launch smoke while every real /auth/session returns
+//     503 firebase_not_configured. Requiring it here makes that a startup
+//     failure (fail closed) instead of a first-login surprise.
 //   - FirebaseWebAPIKey must be set in non-dev/test environments.
 //   - AllowedFirebaseUIDs must be non-empty in staging and production (empty
 //     means allowlist disabled, which is only permitted in dev/test).
@@ -336,6 +341,9 @@ func ValidateServerConfig(cfg *Config) error {
 
 	switch cfg.Env {
 	case EnvProduction, EnvStaging:
+		if cfg.FirebaseCredentialsFile == "" {
+			return fmt.Errorf("%s is required in %s environment", envVarFirebaseCredentialsFile, cfg.Env)
+		}
 		if cfg.FirebaseWebAPIKey == "" {
 			return fmt.Errorf("%s is required in %s environment", envVarFirebaseWebAPIKey, cfg.Env)
 		}

@@ -7,6 +7,10 @@ readonly DEFAULT_STAGING_BASE_URL="https://staging-api.algoedgefno.com"
 readonly DEFAULT_PROD_BASE_URL="https://api.algoedgefno.com"
 readonly DEFAULT_STAGING_CONTAINER="algoedgefno-backend-staging"
 readonly DEFAULT_PROD_CONTAINER="algoedgefno-backend-prod"
+# Compose SERVICE names (not container names) — `docker compose exec` addresses
+# services. backend-staging has no explicit container_name in the compose file.
+readonly DEFAULT_STAGING_SERVICE="backend-staging"
+readonly DEFAULT_PROD_SERVICE="backend-prod"
 readonly REPORT_DIR="scratch/security-runs"
 readonly COMPOSE_DIR="${COMPOSE_DIR:-/opt/algoedgefno/compose}"
 
@@ -24,12 +28,14 @@ readonly HTTP_STATUS_OK=200
 readonly HTTP_STATUS_ACCEPTED=202
 readonly HTTP_STATUS_BAD_REQUEST=400
 readonly HTTP_STATUS_UNAUTHORIZED=401
+readonly HTTP_STATUS_FORBIDDEN=403
 readonly HTTP_STATUS_NOT_FOUND=404
 readonly HTTP_STATUS_CONFLICT=409
 readonly HTTP_STATUS_UNPROCESSABLE_ENTITY=422
 readonly HTTP_STATUS_TOO_MANY_REQUESTS=429
 
 readonly ERR_MISSING_AUTH="missing or invalid authorization header"
+readonly ERR_AUTH_NOT_ALLOWED="auth_not_allowed"
 readonly ERR_IDENTITY_CONFLICT="identity_conflict"
 readonly ERR_NO_CANDLE_DATA="no candle data available"
 readonly ERR_NO_INSTRUMENT="no instrument found for underlying"
@@ -43,8 +49,9 @@ Runs deterministic HTTP abuse checks and writes a sanitized markdown report
 under scratch/security-runs/YYYY-MM-DD-{env}.md.
 
 Staging path (ordered):
-  1. cross-tenant check (static token rejected on tenant endpoints)
-  2. allowlist-denied (TEST_UID_DENIED session rejected)
+  1. static-token boundary (static token rejected 401 on tenant endpoints;
+     true cross-user isolation is covered by tenant_isolation_test.go, not here)
+  2. allowlist-denied (TEST_UID_DENIED session rejected 403 auth_not_allowed)
   3. email-conflict (TEST_UID_CONFLICT triggers identity_conflict 409)
   4. rate-limit burst (LAST — may trigger 429 for subsequent calls)
 
@@ -107,12 +114,14 @@ case "${env_name}" in
     "${ENV_STAGING}")
         base_url="${ABUSE_STAGING_BASE_URL:-${DEFAULT_STAGING_BASE_URL}}"
         container_name="${ABUSE_STAGING_CONTAINER:-${DEFAULT_STAGING_CONTAINER}}"
+        service_name="${ABUSE_STAGING_SERVICE:-${DEFAULT_STAGING_SERVICE}}"
         token_var_name="STAGING_APP_TOKEN"
         app_token="${STAGING_APP_TOKEN:-}"
         ;;
     "${ENV_PROD}")
         base_url="${ABUSE_PROD_BASE_URL:-${DEFAULT_PROD_BASE_URL}}"
         container_name="${ABUSE_PROD_CONTAINER:-${DEFAULT_PROD_CONTAINER}}"
+        service_name="${ABUSE_PROD_SERVICE:-${DEFAULT_PROD_SERVICE}}"
         token_var_name="PROD_APP_TOKEN"
         app_token="${PROD_APP_TOKEN:-}"
         ;;
@@ -320,14 +329,19 @@ firebase_id_token_for_uid() {
     local uid="$1"
     local token_file="${tmpdir}/firebase-token-${uid//[^a-zA-Z0-9_-]/}.txt"
     docker compose -f "${COMPOSE_DIR}/docker-compose.yml" \
-        exec -T "${container_name}" \
+        exec -T "${service_name}" \
         sh -c "/app/firebase-token --uid=\"${uid}\"" > "${token_file}"
     chmod 600 "${token_file}"
     cat "${token_file}"
 }
 
 run_cross_tenant_check() {
-    # Static APP_SECRET_TOKEN must be rejected (401) on all tenant endpoints.
+    # This live check verifies only the static-token boundary: the static
+    # APP_SECRET_TOKEN must be rejected (401) on all tenant endpoints. True
+    # cross-user isolation (user A cannot read user B's resources) is proven by
+    # internal/handlers/tenant_isolation_test.go against real owned resources;
+    # it is deliberately NOT exercised here to avoid creating/cleaning tenant
+    # data on the live shared VPS.
     run_pr1_closed_interval_check
 }
 
@@ -349,7 +363,9 @@ run_allowlist_denied_check() {
     printf '{"firebaseIdToken":"%s"}' "${id_token}" > "${denied_session_payload}"
     chmod 600 "${denied_session_payload}"
 
-    assert_status "allowlist-denied-session" "${HTTP_STATUS_UNAUTHORIZED}" \
+    # A verified-but-not-allowlisted UID is rejected with 403 auth_not_allowed
+    # (see internal/handlers/auth.go), NOT 401.
+    assert_error_response "allowlist-denied-session" "${HTTP_STATUS_FORBIDDEN}" "${ERR_AUTH_NOT_ALLOWED}" \
         -X POST \
         -H 'Content-Type: application/json' \
         --data-binary "@${denied_session_payload}" \

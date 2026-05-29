@@ -50,8 +50,13 @@ jobs:
         run: |
           set -euo pipefail
           previous="${{ steps.current.outputs.previous }}"
-          [[ "$previous" == "$EXPECTED_PR1_IMAGE" ]] \
-              || { echo "rollback image is $previous, want PR 1 image $EXPECTED_PR1_IMAGE" >&2; exit 1; }
+          # BACKEND_PROD_IMAGE is a full ghcr.io/...@sha256:<digest> reference;
+          # PR1_IMAGE_DIGEST is stored as the bare sha256:<digest>. Compare the
+          # digest component so the formats line up. No '@' (e.g. a tag ref) leaves
+          # the whole string and fails closed.
+          previous_digest="${previous##*@}"
+          [[ "$previous_digest" == "$EXPECTED_PR1_IMAGE" ]] \
+              || { echo "rollback image digest is $previous_digest (from $previous), want PR 1 digest $EXPECTED_PR1_IMAGE" >&2; exit 1; }
           [[ "${{ steps.current.outputs.actual_commit }}" == "$EXPECTED_PR1_COMMIT" ]] \
               || { echo "running commit not PR 1" >&2; exit 1; }
 

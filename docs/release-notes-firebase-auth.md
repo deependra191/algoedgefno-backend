@@ -39,13 +39,20 @@ repository variables after PR 1 deploys to both environments. Set
 ## L0 provisioning runbook — staging
 
 1. PR 2 image published; record the candidate digest as `CANDIDATE_IMAGE`.
-2. Place the staging Firebase service-account JSON (root-owned, not committed);
-   set `FIREBASE_PROJECT_ID` / `FIREBASE_CREDENTIALS_FILE` / `FIREBASE_WEB_API_KEY`
-   to staging values in `/opt/algoedgefno/env/staging.env`.
+2. Place the staging Firebase service-account JSON at the host path
+   `/run/secrets/firebase-serviceaccount-staging.json` (root-owned, mode `400`,
+   not committed) — this is the bind-mount source in `deploy/docker-compose.yml`.
+   In `/opt/algoedgefno/env/staging.env` set `FIREBASE_PROJECT_ID` /
+   `FIREBASE_WEB_API_KEY` to staging values and
+   `FIREBASE_CREDENTIALS_FILE=/run/secrets/firebase-serviceaccount-staging.json`
+   (the in-container path, which equals the mount target). Staging/prod refuse to
+   start if this file is unset or unreadable (`config.ValidateServerConfig`).
 3. Install the root-owned, mode-`400`
    `/opt/algoedgefno/env/firebase-staging-fixture-project-id.guard` from the
    approved staging Firebase project ID.
-4. Update compose credential mounts for `backend-staging` only.
+4. The `backend-staging` / `backend-prod` credential mounts are already wired in
+   `deploy/docker-compose.yml` (bind-mount source `/run/secrets/firebase-serviceaccount-<env>.json`);
+   no compose edit is needed — just confirm the host file from step 2 exists.
 5. Create Firebase test users against the staging project; set
    `TEST_UID_A/B/DENIED/CONFLICT` and a non-empty `ALLOWED_FIREBASE_UIDS`.
 6. Install operator scripts on the host via `docker create`/`docker cp` from

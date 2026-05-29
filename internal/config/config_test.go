@@ -809,6 +809,38 @@ func assertStringSlice(t *testing.T, got, want []string) {
 	}
 }
 
+func TestNewFromEnv_ParsesAllowedFirebaseUIDs(t *testing.T) {
+	// ALLOWED_FIREBASE_UIDS is comma-separated; whitespace around entries is
+	// trimmed. A single space-separated string must NOT be split into entries —
+	// that would silently merge the staging test UIDs into one bogus UID.
+	tests := []struct {
+		name string
+		val  string
+		want []string
+	}{
+		{"single uid", "owner-uid", []string{"owner-uid"}},
+		{"comma separated", "uid-a,uid-b,uid-denied,uid-conflict",
+			[]string{"uid-a", "uid-b", "uid-denied", "uid-conflict"}},
+		{"comma separated with spaces", "uid-a, uid-b , uid-c",
+			[]string{"uid-a", "uid-b", "uid-c"}},
+		{"space separated stays one entry", "uid-a uid-b uid-c",
+			[]string{"uid-a uid-b uid-c"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := minDevEnv()
+			env["ALLOWED_FIREBASE_UIDS"] = tt.val
+
+			cfg, err := newFromEnv(mapLookup(env))
+			if err != nil {
+				t.Fatalf("newFromEnv() error = %v", err)
+			}
+			assertStringSlice(t, cfg.AllowedFirebaseUIDs, tt.want)
+		})
+	}
+}
+
 func TestNewFromEnv_DBSSLRequired_DefaultsToTrue(t *testing.T) {
 	cfg, err := newFromEnv(mapLookup(minDevEnv()))
 	if err != nil {
@@ -859,12 +891,21 @@ func TestNewFromEnv_DBSSLRequired_RejectsInvalidValue(t *testing.T) {
 
 // --- ValidateServerConfig tests ---
 
-// validServerConfig returns a Config that passes ValidateServerConfig in staging.
-func validServerConfigStaging() *Config {
+// validServerConfigStaging returns a Config that passes ValidateServerConfig in
+// staging. It writes a temp credentials file because staging/prod now require a
+// readable FIREBASE_CREDENTIALS_FILE (see ValidateServerConfig).
+func validServerConfigStaging(t *testing.T) *Config {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "firebase-creds-*.json")
+	if err != nil {
+		t.Fatalf("create temp creds file: %v", err)
+	}
+	f.Close()
 	return &Config{
 		Env:                     EnvStaging,
+		FirebaseProjectID:       "algoedgefno-staging",
 		FirebaseWebAPIKey:       "test-web-api-key",
-		FirebaseCredentialsFile: "",
+		FirebaseCredentialsFile: f.Name(),
 		AllowedFirebaseUIDs:     []string{"uid-staging-1"},
 	}
 }
@@ -876,7 +917,7 @@ func TestValidateServerConfig_NilReturnsError(t *testing.T) {
 }
 
 func TestValidateServerConfig_StagingRequiresWebAPIKey(t *testing.T) {
-	cfg := validServerConfigStaging()
+	cfg := validServerConfigStaging(t)
 	cfg.FirebaseWebAPIKey = ""
 	if err := ValidateServerConfig(cfg); err == nil {
 		t.Fatal("expected error when FirebaseWebAPIKey is empty in staging")
@@ -884,7 +925,7 @@ func TestValidateServerConfig_StagingRequiresWebAPIKey(t *testing.T) {
 }
 
 func TestValidateServerConfig_ProdRequiresWebAPIKey(t *testing.T) {
-	cfg := validServerConfigStaging()
+	cfg := validServerConfigStaging(t)
 	cfg.Env = EnvProduction
 	cfg.FirebaseWebAPIKey = ""
 	if err := ValidateServerConfig(cfg); err == nil {
@@ -893,7 +934,7 @@ func TestValidateServerConfig_ProdRequiresWebAPIKey(t *testing.T) {
 }
 
 func TestValidateServerConfig_StagingRequiresNonEmptyAllowlist(t *testing.T) {
-	cfg := validServerConfigStaging()
+	cfg := validServerConfigStaging(t)
 	cfg.AllowedFirebaseUIDs = nil
 	if err := ValidateServerConfig(cfg); err == nil {
 		t.Fatal("expected error for empty allowlist in staging")
@@ -901,7 +942,7 @@ func TestValidateServerConfig_StagingRequiresNonEmptyAllowlist(t *testing.T) {
 }
 
 func TestValidateServerConfig_ProdRequiresNonEmptyAllowlist(t *testing.T) {
-	cfg := validServerConfigStaging()
+	cfg := validServerConfigStaging(t)
 	cfg.Env = EnvProduction
 	cfg.AllowedFirebaseUIDs = nil
 	if err := ValidateServerConfig(cfg); err == nil {
@@ -959,9 +1000,26 @@ func TestValidateServerConfig_UnreadableCredentialsFile(t *testing.T) {
 }
 
 func TestValidateServerConfig_ValidStagingConfig(t *testing.T) {
-	cfg := validServerConfigStaging()
+	cfg := validServerConfigStaging(t)
 	if err := ValidateServerConfig(cfg); err != nil {
 		t.Fatalf("expected no error for valid staging config, got %v", err)
+	}
+}
+
+func TestValidateServerConfig_StagingRequiresCredentialsFile(t *testing.T) {
+	cfg := validServerConfigStaging(t)
+	cfg.FirebaseCredentialsFile = ""
+	if err := ValidateServerConfig(cfg); err == nil {
+		t.Fatal("expected error when FirebaseCredentialsFile is empty in staging")
+	}
+}
+
+func TestValidateServerConfig_ProdRequiresCredentialsFile(t *testing.T) {
+	cfg := validServerConfigStaging(t)
+	cfg.Env = EnvProduction
+	cfg.FirebaseCredentialsFile = ""
+	if err := ValidateServerConfig(cfg); err == nil {
+		t.Fatal("expected error when FirebaseCredentialsFile is empty in production")
 	}
 }
 
