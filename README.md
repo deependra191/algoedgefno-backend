@@ -6,16 +6,17 @@ Go backend for AlgoEdgeFno — an Android-first intraday algo trading tool for I
 
 | Layer | Choice | Why |
 |---|---|---|
-| Language | Go 1.24 | Performance, simplicity, strong concurrency primitives |
+| Language | Go 1.25 | Performance, simplicity, strong concurrency primitives |
 | Framework | Gin | Minimal overhead, mature ecosystem; fasthttp (Fiber) has incompatibility with net/http middleware |
 | Database | PostgreSQL 16 | ACID compliance required for financial data |
-| ORM | GORM | Auto-migration, clean repository pattern support |
-| Auth | golang-jwt/jwt v5 | Industry standard, maintained |
+| DB access | pgx/v5 (no ORM) | Direct SQL, full PostgreSQL/TimescaleDB feature support, no ORM overhead |
+| Auth (Android) | Firebase ID token → backend JWT/refresh | Identity via Firebase; backend mints short-lived JWT + rotating refresh |
+| Auth (/config/app) | APP_SECRET_TOKEN static bearer | Until /config/app moves to Firebase or public |
 | Config | godotenv | Simple .env loading, 12-factor compatible |
 
 ## Local setup
 
-**Prerequisites:** Go 1.24+, Docker with Compose
+**Prerequisites:** Go 1.25+, Docker with Compose
 
 ```bash
 # 1. Clone and enter
@@ -56,14 +57,23 @@ GET /health
 
 ### Auth
 
-```
-POST /api/v1/auth/register
-Body: { "email": "...", "password": "...", "name": "..." }
-→ { "token": "...", "user": { ... } }
+Android obtains a Firebase ID token, then exchanges it for a backend session
+(short-lived access JWT + rotating refresh token). Tenant endpoints require the
+backend access JWT — `APP_SECRET_TOKEN` is accepted only on `/api/v1/config/app`.
 
-POST /api/v1/auth/login
-Body: { "email": "...", "password": "..." }
-→ { "token": "...", "user": { ... } }
+```
+POST /api/v1/auth/session
+Body: { "firebaseIdToken": "<firebase-id-token>" }
+→ { "accessToken": "<jwt>", "refreshToken": "<43-char-base64url>",
+    "user": { "id": "<uuid>", "email": "...", "displayName": "...", "photoUrl": "..." } }
+
+POST /api/v1/auth/refresh
+Body: { "refreshToken": "<43-char-base64url>" }
+→ { "accessToken": "<jwt>", "refreshToken": "<43-char-base64url>" }
+
+POST /api/v1/auth/logout
+Body: { "refreshToken": "<43-char-base64url>" }
+→ 204 No Content
 ```
 
 ### App Config _(requires Authorization: Bearer <token>)_
