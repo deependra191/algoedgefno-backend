@@ -150,6 +150,12 @@ jobs:
 
           prod_block = prod_match.group(0)
 
+          # Scan executable code only — drop shell comment lines so a descriptive
+          # comment (e.g. "no staging-only paths") cannot trip the pattern check.
+          prod_code = "\n".join(
+              ln for ln in prod_block.splitlines() if not ln.lstrip().startswith("#")
+          )
+
           forbidden = [
               r'AUTH_SESSION_PATH',
               r'AUTH_LOGOUT_PATH',
@@ -160,7 +166,7 @@ jobs:
           ]
           violations = []
           for pattern in forbidden:
-              if re.search(pattern, prod_block, re.IGNORECASE):
+              if re.search(pattern, prod_code, re.IGNORECASE):
                   violations.append(pattern)
 
           if violations:
