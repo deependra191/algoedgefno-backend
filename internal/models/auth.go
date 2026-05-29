@@ -17,6 +17,12 @@ type TokenValidator interface {
 	ValidateToken(tokenStr string) (uuid.UUID, error)
 }
 
+// MaxFirebaseIDTokenLen is the maximum accepted byte length of a Firebase ID
+// token. Firebase ID tokens are ~1–4 KB JWTs; the handler rejects longer
+// bodies as 400 invalid_request and the service enforces the same cap as a
+// belt-and-suspenders guard. Shared so both layers use one source of truth.
+const MaxFirebaseIDTokenLen = 4096
+
 var (
 	// ErrIdentityConflict is returned when a firebase_uid→email mapping
 	// conflicts with an existing email row owned by a different firebase_uid.

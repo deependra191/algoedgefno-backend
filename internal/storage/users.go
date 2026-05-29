@@ -20,6 +20,10 @@ import (
 // must inspect migrations/000001_users.up.sql to confirm the name).
 const constraintUsersEmailKey = "users_email_key"
 
+// pgCodeUniqueViolation is the PostgreSQL SQLSTATE for a unique-constraint
+// violation (unique_violation), returned in pgconn.PgError.Code.
+const pgCodeUniqueViolation = "23505"
+
 var _ models.UserRepository = (*UserStore)(nil)
 
 // UserStore implements models.UserRepository using a pgxpool.Pool.
@@ -129,7 +133,7 @@ func isUniqueViolation(err error, constraints ...string) bool {
 	if !errors.As(err, &pgErr) {
 		return false
 	}
-	if pgErr.Code != "23505" {
+	if pgErr.Code != pgCodeUniqueViolation {
 		return false
 	}
 	for _, c := range constraints {

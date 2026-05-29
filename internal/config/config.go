@@ -128,7 +128,7 @@ type Config struct {
 	FirebaseWebAPIKey string
 	// AllowedFirebaseUIDs is the list of Firebase UIDs permitted to exchange
 	// tokens. Empty means "allowlist disabled" in dev/test; staging/prod
-	// require a non-empty list (enforced by ValidateServerConfig).
+	// require a non-empty list (enforced by ValidateFirebaseAuthConfig).
 	AllowedFirebaseUIDs []string
 }
 
@@ -310,7 +310,7 @@ func (cfg *Config) validateStagingIdentity() error {
 	return nil
 }
 
-// ValidateServerConfig performs Firebase-specific startup validation. It is
+// ValidateFirebaseAuthConfig performs Firebase-specific startup validation. It is
 // called only from cmd/server; cmd/sync deliberately does not call it.
 //
 // Rules:
@@ -324,7 +324,7 @@ func (cfg *Config) validateStagingIdentity() error {
 //   - AllowedFirebaseUIDs must be non-empty in staging and production (empty
 //     means allowlist disabled, which is only permitted in dev/test).
 //   - FirebaseCredentialsFile, when set, must be a readable file.
-func ValidateServerConfig(cfg *Config) error {
+func ValidateFirebaseAuthConfig(cfg *Config) error {
 	if cfg == nil {
 		return fmt.Errorf("config is required")
 	}

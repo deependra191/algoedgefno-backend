@@ -2,40 +2,15 @@ package services
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
-	"regexp"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 
 	"github.com/deependra191/algoedgefno-backend/internal/config"
 	"github.com/deependra191/algoedgefno-backend/internal/models"
-)
-
-// JWT claim and timing constants.
-const (
-	// jwtSubClaim is the JWT standard subject claim key.
-	jwtSubClaim = "sub"
-	// jwtEnvClaim is the custom environment claim added to every minted token.
-	// ValidateToken rejects tokens whose env claim does not match the service
-	// environment, preventing cross-environment token reuse.
-	jwtEnvClaim = "env"
-
-	// accessTTL is how long an access JWT remains valid.
-	accessTTL = time.Hour
-	// refreshTTL is how long a refresh token remains valid.
-	refreshTTL = 30 * 24 * time.Hour
-
-	// refreshTokenLen is the expected base64url-encoded length of a raw
-	// refresh token (32 random bytes → 43 chars in base64 RawURL encoding).
-	refreshTokenLen = 43
 )
 
 // Log constants — per §6: event is a STRUCTURED ATTRIBUTE, not the message.
@@ -43,10 +18,12 @@ const (
 	logMsgAuthAnomaly       = "auth anomaly"
 	eventIdentityConflict   = "identity_conflict"
 	reasonEmailDifferentUID = "email_collision_different_uid"
-)
 
-// refreshTokenCharset matches the base64url character set (no padding).
-var refreshTokenCharset = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+	// Structured log attribute keys (telemetry contract). The request-id key
+	// is shared via models.LogAttrRequestID; these are local to the service.
+	logAttrEvent  = "event"
+	logAttrReason = "reason"
+)
 
 // SessionResult is returned by ExchangeFirebaseToken and DebugSession.
 // It bundles the minted token pair with the upserted user.
@@ -94,43 +71,6 @@ func NewAuthService(
 	}
 }
 
-// ValidateToken implements models.TokenValidator. It parses the HS256 bearer
-// token, verifies the env claim matches this service's environment, and
-// returns the user UUID from the sub claim. Returns uuid.Nil and an error on
-// any failure.
-func (s *AuthService) ValidateToken(tokenStr string) (uuid.UUID, error) {
-	tok, err := jwt.Parse(tokenStr, func(t *jwt.Token) (any, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, errors.New("unexpected signing method")
-		}
-		return s.jwtSecret, nil
-	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
-	if err != nil || !tok.Valid {
-		return uuid.Nil, errors.New("invalid token")
-	}
-
-	claims, ok := tok.Claims.(jwt.MapClaims)
-	if !ok {
-		return uuid.Nil, errors.New("invalid token claims")
-	}
-
-	// Reject tokens issued for a different environment (cross-env reuse).
-	envClaim, _ := claims[jwtEnvClaim].(string)
-	if envClaim != string(s.env) {
-		return uuid.Nil, errors.New("token environment mismatch")
-	}
-
-	sub, ok := claims[jwtSubClaim].(string)
-	if !ok {
-		return uuid.Nil, errors.New("invalid token subject")
-	}
-	id, err := uuid.Parse(sub)
-	if err != nil {
-		return uuid.Nil, fmt.Errorf("parse token subject: %w", err)
-	}
-	return id, nil
-}
-
 // ExchangeFirebaseToken verifies the Firebase ID token, upserts the user row,
 // and mints a new session (access + refresh tokens).
 //
@@ -145,7 +85,7 @@ func (s *AuthService) ExchangeFirebaseToken(ctx context.Context, idToken string)
 	if s.fbVerifier == nil {
 		return nil, models.ErrFirebaseNotConfigured
 	}
-	if len(idToken) > 4096 {
+	if len(idToken) > models.MaxFirebaseIDTokenLen {
 		return nil, models.ErrInvalidRequest
 	}
 	claims, err := s.fbVerifier.VerifyIDToken(ctx, idToken)
@@ -295,25 +235,11 @@ func (s *AuthService) mintSession(ctx context.Context, user *models.User) (*Sess
 	}, nil
 }
 
-// mintAccessToken mints a signed HS256 JWT with sub=userID.String() and an
-// env claim matching this service's environment.
-func (s *AuthService) mintAccessToken(userID uuid.UUID) (string, error) {
-	now := time.Now().UTC()
-	claims := jwt.MapClaims{
-		jwtSubClaim: userID.String(),
-		jwtEnvClaim: string(s.env),
-		"iat":       now.Unix(),
-		"exp":       now.Add(accessTTL).Unix(),
-	}
-	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return tok.SignedString(s.jwtSecret)
-}
-
 // allowlistAllows returns true when the UID is in the allowlist, or when the
 // allowlist is empty in dev/test (allowlist disabled). In staging/prod an
-// empty allowlist is rejected at startup by ValidateServerConfig, so reaching
-// this function with an empty allowlist in those environments is not possible
-// in normal operation.
+// empty allowlist is rejected at startup by ValidateFirebaseAuthConfig, so
+// reaching this function with an empty allowlist in those environments is not
+// possible in normal operation.
 func (s *AuthService) allowlistAllows(uid string) bool {
 	if len(s.allowedUIDs) == 0 {
 		// In dev/test, empty allowlist = allowlist disabled.
@@ -332,39 +258,8 @@ func (s *AuthService) allowlistAllows(uid string) bool {
 // and reason are logged — no email, UID, or token values.
 func (s *AuthService) logIdentityConflict(ctx context.Context, reason string) {
 	slog.WarnContext(ctx, logMsgAuthAnomaly,
-		slog.String("event", eventIdentityConflict),
+		slog.String(logAttrEvent, eventIdentityConflict),
 		slog.String(models.LogAttrRequestID, models.RequestIDFrom(ctx)),
-		slog.String("reason", reason),
+		slog.String(logAttrReason, reason),
 	)
-}
-
-// sha256HexOf returns the SHA-256 hex digest of s. It is the single hash
-// path used by issue, refresh, and logout — always hashes the base64url-
-// encoded string (the exact bytes Android receives and re-sends). Hashing the
-// pre-encoding random bytes would produce a different value, causing tokens to
-// never match on lookup.
-func sha256HexOf(s string) string {
-	sum := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(sum[:])
-}
-
-// newRefreshToken generates a cryptographically-random 32-byte token,
-// base64url-encodes it (43 chars, no padding), and returns both the raw
-// encoded string (returned to Android) and its SHA-256 hex digest (stored
-// server-side).
-func newRefreshToken() (raw, hashHex string, err error) {
-	buf := make([]byte, 32)
-	if _, err = rand.Read(buf); err != nil {
-		return
-	}
-	raw = base64.RawURLEncoding.EncodeToString(buf) // 43 chars
-	hashHex = sha256HexOf(raw)
-	return
-}
-
-// isValidRefreshTokenFormat reports whether s is exactly 43 characters long
-// and contains only base64url characters (A-Za-z0-9_-). Malformed tokens are
-// rejected before any DB lookup.
-func isValidRefreshTokenFormat(s string) bool {
-	return len(s) == refreshTokenLen && refreshTokenCharset.MatchString(s)
 }

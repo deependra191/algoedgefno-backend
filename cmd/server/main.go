@@ -51,7 +51,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := config.ValidateServerConfig(cfg); err != nil {
+	if err := config.ValidateFirebaseAuthConfig(cfg); err != nil {
 		slog.Error("server config validation failed", "error", err)
 		os.Exit(1)
 	}

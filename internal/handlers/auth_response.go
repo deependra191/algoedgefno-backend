@@ -6,6 +6,21 @@ import (
 	"github.com/deependra191/algoedgefno-backend/internal/services"
 )
 
+// Auth error-response codes — the value of the {"error": "<code>"} body for
+// every auth endpoint. These are the Android error contract; Android maps them
+// to user-facing messages, so they must stay stable and centrally defined.
+const (
+	errCodeInvalidRequest          = "invalid_request"
+	errCodeFirebaseNotConfigured   = "firebase_not_configured"
+	errCodeFirebaseTokenInvalid    = "firebase_token_invalid"
+	errCodeFirebaseEmailUnverified = "firebase_email_unverified"
+	errCodeAuthNotAllowed          = "auth_not_allowed"
+	errCodeIdentityConflict        = "identity_conflict"
+	errCodeRefreshTokenInvalid     = "refresh_token_invalid"
+	errCodeNotAvailable            = "not_available"
+	errCodeInternal                = "internal"
+)
+
 // authResponse is the wire shape returned by POST /api/v1/auth/session and
 // POST /api/v1/auth/debug-session. JSON keys are the Android contract.
 type authResponse struct {

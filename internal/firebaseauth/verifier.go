@@ -12,6 +12,15 @@ import (
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
+// Firebase ID-token claim keys — external contract field names returned by the
+// Firebase Admin SDK in tok.Claims.
+const (
+	firebaseClaimEmail         = "email"
+	firebaseClaimEmailVerified = "email_verified"
+	firebaseClaimName          = "name"
+	firebaseClaimPicture       = "picture"
+)
+
 // Verifier wraps a Firebase Admin SDK auth client and implements
 // models.FirebaseVerifier. It calls VerifyIDTokenAndCheckRevoked so that
 // tokens that have been explicitly revoked via the Firebase Console or Admin
@@ -40,16 +49,16 @@ func (v *Verifier) VerifyIDToken(ctx context.Context, idToken string) (*models.F
 		EmailVerified: false,
 	}
 
-	if email, ok := tok.Claims["email"].(string); ok {
+	if email, ok := tok.Claims[firebaseClaimEmail].(string); ok {
 		claims.Email = email
 	}
-	if verified, ok := tok.Claims["email_verified"].(bool); ok {
+	if verified, ok := tok.Claims[firebaseClaimEmailVerified].(bool); ok {
 		claims.EmailVerified = verified
 	}
-	if name, ok := tok.Claims["name"].(string); ok {
+	if name, ok := tok.Claims[firebaseClaimName].(string); ok {
 		claims.DisplayName = name
 	}
-	if photo, ok := tok.Claims["picture"].(string); ok {
+	if photo, ok := tok.Claims[firebaseClaimPicture].(string); ok {
 		claims.PhotoURL = photo
 	}
 

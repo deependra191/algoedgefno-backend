@@ -60,14 +60,14 @@ func NewAuthHandler(authSvc *services.AuthService, env config.Environment) *Auth
 func (h *AuthHandler) Session(c *gin.Context) {
 	var req sessionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": errCodeInvalidRequest})
 		return
 	}
 	// Belt-and-suspenders length check: RequestBodyLimit middleware already
 	// caps the body at 8 KiB; this guards against very long tokens that
 	// somehow slip through.
-	if len(req.FirebaseIdToken) > 4096 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
+	if len(req.FirebaseIdToken) > models.MaxFirebaseIDTokenLen {
+		c.JSON(http.StatusBadRequest, gin.H{"error": errCodeInvalidRequest})
 		return
 	}
 
@@ -76,19 +76,19 @@ func (h *AuthHandler) Session(c *gin.Context) {
 	case err == nil:
 		c.JSON(http.StatusOK, toAuthResponse(result))
 	case errors.Is(err, models.ErrFirebaseNotConfigured):
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "firebase_not_configured"})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": errCodeFirebaseNotConfigured})
 	case errors.Is(err, models.ErrFirebaseTokenInvalid):
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "firebase_token_invalid"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": errCodeFirebaseTokenInvalid})
 	case errors.Is(err, models.ErrFirebaseEmailUnverified):
-		c.JSON(http.StatusForbidden, gin.H{"error": "firebase_email_unverified"})
+		c.JSON(http.StatusForbidden, gin.H{"error": errCodeFirebaseEmailUnverified})
 	case errors.Is(err, models.ErrAuthNotAllowed):
-		c.JSON(http.StatusForbidden, gin.H{"error": "auth_not_allowed"})
+		c.JSON(http.StatusForbidden, gin.H{"error": errCodeAuthNotAllowed})
 	case errors.Is(err, models.ErrIdentityConflict):
-		c.JSON(http.StatusConflict, gin.H{"error": "identity_conflict"})
+		c.JSON(http.StatusConflict, gin.H{"error": errCodeIdentityConflict})
 	case errors.Is(err, models.ErrInvalidRequest):
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": errCodeInvalidRequest})
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": errCodeInternal})
 	}
 }
 
@@ -103,7 +103,7 @@ func (h *AuthHandler) Session(c *gin.Context) {
 func (h *AuthHandler) Refresh(c *gin.Context) {
 	var req refreshRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": errCodeInvalidRequest})
 		return
 	}
 
@@ -112,14 +112,14 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 	case err == nil:
 		c.JSON(http.StatusOK, refreshResponse{AccessToken: pair.AccessToken, RefreshToken: pair.RefreshToken})
 	case errors.Is(err, models.ErrInvalidRequest):
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": errCodeInvalidRequest})
 	case errors.Is(err, models.ErrRefreshTokenInvalid):
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "refresh_token_invalid"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": errCodeRefreshTokenInvalid})
 	default:
 		// Wrapped repository / transport failure. Do NOT collapse to 401:
 		// that would log the owner out on a transient DB blip AND silence
 		// an operational incident behind a routine-looking auth failure.
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": errCodeInternal})
 	}
 }
 
@@ -136,7 +136,7 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 func (h *AuthHandler) Logout(c *gin.Context) {
 	var req logoutRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": errCodeInvalidRequest})
 		return
 	}
 
@@ -145,9 +145,9 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	case err == nil:
 		c.Status(http.StatusNoContent)
 	case errors.Is(err, models.ErrInvalidRequest):
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": errCodeInvalidRequest})
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": errCodeInternal})
 	}
 }
 
@@ -157,7 +157,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 func (h *AuthHandler) DebugSession(c *gin.Context) {
 	var req debugSessionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": errCodeInvalidRequest})
 		return
 	}
 
@@ -166,10 +166,10 @@ func (h *AuthHandler) DebugSession(c *gin.Context) {
 	case err == nil:
 		c.JSON(http.StatusOK, toAuthResponse(result))
 	case errors.Is(err, models.ErrNotAvailable):
-		c.JSON(http.StatusNotFound, gin.H{"error": "not_available"})
+		c.JSON(http.StatusNotFound, gin.H{"error": errCodeNotAvailable})
 	case errors.Is(err, models.ErrIdentityConflict):
-		c.JSON(http.StatusConflict, gin.H{"error": "identity_conflict"})
+		c.JSON(http.StatusConflict, gin.H{"error": errCodeIdentityConflict})
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": errCodeInternal})
 	}
 }
