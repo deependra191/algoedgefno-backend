@@ -1,6 +1,9 @@
 package config
 
 import (
+	"bufio"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -806,6 +809,38 @@ func assertStringSlice(t *testing.T, got, want []string) {
 	}
 }
 
+func TestNewFromEnv_ParsesAllowedFirebaseUIDs(t *testing.T) {
+	// ALLOWED_FIREBASE_UIDS is comma-separated; whitespace around entries is
+	// trimmed. A single space-separated string must NOT be split into entries —
+	// that would silently merge the staging test UIDs into one bogus UID.
+	tests := []struct {
+		name string
+		val  string
+		want []string
+	}{
+		{"single uid", "owner-uid", []string{"owner-uid"}},
+		{"comma separated", "uid-a,uid-b,uid-denied,uid-conflict",
+			[]string{"uid-a", "uid-b", "uid-denied", "uid-conflict"}},
+		{"comma separated with spaces", "uid-a, uid-b , uid-c",
+			[]string{"uid-a", "uid-b", "uid-c"}},
+		{"space separated stays one entry", "uid-a uid-b uid-c",
+			[]string{"uid-a uid-b uid-c"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := minDevEnv()
+			env["ALLOWED_FIREBASE_UIDS"] = tt.val
+
+			cfg, err := newFromEnv(mapLookup(env))
+			if err != nil {
+				t.Fatalf("newFromEnv() error = %v", err)
+			}
+			assertStringSlice(t, cfg.AllowedFirebaseUIDs, tt.want)
+		})
+	}
+}
+
 func TestNewFromEnv_DBSSLRequired_DefaultsToTrue(t *testing.T) {
 	cfg, err := newFromEnv(mapLookup(minDevEnv()))
 	if err != nil {
@@ -852,4 +887,197 @@ func TestNewFromEnv_DBSSLRequired_RejectsInvalidValue(t *testing.T) {
 	if err == nil {
 		t.Fatal("newFromEnv() error = nil, want error for non-boolean DB_SSL_REQUIRED")
 	}
+}
+
+// --- ValidateFirebaseAuthConfig tests ---
+
+// validServerConfigStaging returns a Config that passes ValidateFirebaseAuthConfig in
+// staging. It writes a temp credentials file because staging/prod now require a
+// readable FIREBASE_CREDENTIALS_FILE (see ValidateFirebaseAuthConfig).
+func validServerConfigStaging(t *testing.T) *Config {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "firebase-creds-*.json")
+	if err != nil {
+		t.Fatalf("create temp creds file: %v", err)
+	}
+	f.Close()
+	return &Config{
+		Env:                     EnvStaging,
+		FirebaseProjectID:       "algoedgefno-staging",
+		FirebaseWebAPIKey:       "test-web-api-key",
+		FirebaseCredentialsFile: f.Name(),
+		AllowedFirebaseUIDs:     []string{"uid-staging-1"},
+	}
+}
+
+func TestValidateFirebaseAuthConfig_NilReturnsError(t *testing.T) {
+	if err := ValidateFirebaseAuthConfig(nil); err == nil {
+		t.Fatal("expected error for nil config")
+	}
+}
+
+func TestValidateFirebaseAuthConfig_StagingRequiresWebAPIKey(t *testing.T) {
+	cfg := validServerConfigStaging(t)
+	cfg.FirebaseWebAPIKey = ""
+	if err := ValidateFirebaseAuthConfig(cfg); err == nil {
+		t.Fatal("expected error when FirebaseWebAPIKey is empty in staging")
+	}
+}
+
+func TestValidateFirebaseAuthConfig_ProdRequiresWebAPIKey(t *testing.T) {
+	cfg := validServerConfigStaging(t)
+	cfg.Env = EnvProduction
+	cfg.FirebaseWebAPIKey = ""
+	if err := ValidateFirebaseAuthConfig(cfg); err == nil {
+		t.Fatal("expected error when FirebaseWebAPIKey is empty in production")
+	}
+}
+
+func TestValidateFirebaseAuthConfig_StagingRequiresNonEmptyAllowlist(t *testing.T) {
+	cfg := validServerConfigStaging(t)
+	cfg.AllowedFirebaseUIDs = nil
+	if err := ValidateFirebaseAuthConfig(cfg); err == nil {
+		t.Fatal("expected error for empty allowlist in staging")
+	}
+}
+
+func TestValidateFirebaseAuthConfig_ProdRequiresNonEmptyAllowlist(t *testing.T) {
+	cfg := validServerConfigStaging(t)
+	cfg.Env = EnvProduction
+	cfg.AllowedFirebaseUIDs = nil
+	if err := ValidateFirebaseAuthConfig(cfg); err == nil {
+		t.Fatal("expected error for empty allowlist in production")
+	}
+}
+
+func TestValidateFirebaseAuthConfig_DevAllowsEmptyAllowlist(t *testing.T) {
+	cfg := &Config{
+		Env:                 EnvDevelopment,
+		AllowedFirebaseUIDs: nil,
+	}
+	if err := ValidateFirebaseAuthConfig(cfg); err != nil {
+		t.Fatalf("expected no error for empty allowlist in dev, got %v", err)
+	}
+}
+
+func TestValidateFirebaseAuthConfig_TestAllowsEmptyAllowlist(t *testing.T) {
+	cfg := &Config{
+		Env:                 EnvTest,
+		AllowedFirebaseUIDs: nil,
+	}
+	if err := ValidateFirebaseAuthConfig(cfg); err != nil {
+		t.Fatalf("expected no error for empty allowlist in test, got %v", err)
+	}
+}
+
+func TestValidateFirebaseAuthConfig_CredentialsFileRequiresProjectID(t *testing.T) {
+	// Write a temp file so the readable-check passes.
+	f, err := os.CreateTemp(t.TempDir(), "creds-*.json")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	f.Close()
+
+	cfg := &Config{
+		Env:                     EnvDevelopment,
+		FirebaseCredentialsFile: f.Name(),
+		FirebaseProjectID:       "", // missing
+	}
+	if err := ValidateFirebaseAuthConfig(cfg); err == nil {
+		t.Fatal("expected error when FirebaseProjectID is empty but credentials file is set")
+	}
+}
+
+func TestValidateFirebaseAuthConfig_UnreadableCredentialsFile(t *testing.T) {
+	cfg := &Config{
+		Env:                     EnvDevelopment,
+		FirebaseCredentialsFile: "/nonexistent/path/to/creds.json",
+		FirebaseProjectID:       "my-project",
+	}
+	if err := ValidateFirebaseAuthConfig(cfg); err == nil {
+		t.Fatal("expected error for unreadable credentials file")
+	}
+}
+
+func TestValidateFirebaseAuthConfig_ValidStagingConfig(t *testing.T) {
+	cfg := validServerConfigStaging(t)
+	if err := ValidateFirebaseAuthConfig(cfg); err != nil {
+		t.Fatalf("expected no error for valid staging config, got %v", err)
+	}
+}
+
+func TestValidateFirebaseAuthConfig_StagingRequiresCredentialsFile(t *testing.T) {
+	cfg := validServerConfigStaging(t)
+	cfg.FirebaseCredentialsFile = ""
+	if err := ValidateFirebaseAuthConfig(cfg); err == nil {
+		t.Fatal("expected error when FirebaseCredentialsFile is empty in staging")
+	}
+}
+
+func TestValidateFirebaseAuthConfig_ProdRequiresCredentialsFile(t *testing.T) {
+	cfg := validServerConfigStaging(t)
+	cfg.Env = EnvProduction
+	cfg.FirebaseCredentialsFile = ""
+	if err := ValidateFirebaseAuthConfig(cfg); err == nil {
+		t.Fatal("expected error when FirebaseCredentialsFile is empty in production")
+	}
+}
+
+func TestValidateFirebaseAuthConfig_DevNoFirebaseAllPasses(t *testing.T) {
+	cfg := &Config{
+		Env: EnvDevelopment,
+	}
+	if err := ValidateFirebaseAuthConfig(cfg); err != nil {
+		t.Fatalf("expected no error for dev with no Firebase config, got %v", err)
+	}
+}
+
+// TestEnvExamples_FirebaseProjectIDsDiffer asserts that prod.env.example and
+// staging.env.example contain non-empty, distinct FIREBASE_PROJECT_ID values.
+// A shared project ID between environments would allow staging test UIDs to
+// authenticate against production Firebase, defeating the per-environment UID
+// separation. The test reads the example files relative to the module root so
+// it catches accidental copy-paste before the files reach the VPS.
+func TestEnvExamples_FirebaseProjectIDsDiffer(t *testing.T) {
+	repoRoot := filepath.Join("..", "..", "deploy", "env")
+	stagingID := readEnvExampleValue(t, filepath.Join(repoRoot, "staging.env.example"), "FIREBASE_PROJECT_ID")
+	prodID := readEnvExampleValue(t, filepath.Join(repoRoot, "prod.env.example"), "FIREBASE_PROJECT_ID")
+
+	if stagingID == "" {
+		t.Fatal("staging.env.example: FIREBASE_PROJECT_ID is empty")
+	}
+	if prodID == "" {
+		t.Fatal("prod.env.example: FIREBASE_PROJECT_ID is empty")
+	}
+	if stagingID == prodID {
+		t.Fatalf("staging and prod FIREBASE_PROJECT_ID must differ, both are %q", stagingID)
+	}
+}
+
+// readEnvExampleValue reads the first matching KEY=VALUE line from an env
+// example file and returns the value portion. It is intentionally lenient
+// about surrounding whitespace but rejects inline comments.
+func readEnvExampleValue(t *testing.T, path, key string) string {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open %s: %v", path, err)
+	}
+	defer f.Close()
+
+	prefix := key + "="
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan %s: %v", path, err)
+	}
+	return ""
 }

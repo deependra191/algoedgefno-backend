@@ -114,4 +114,3 @@ func (s *StrategyStore) Delete(ctx context.Context, id uuid.UUID) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM strategies WHERE id = $1`, id)
 	return err
 }
-

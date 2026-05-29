@@ -40,6 +40,12 @@ const (
 	envVarSyncEnabled        = "SYNC_ENABLED"
 	envVarDBSSLRequired      = "DB_SSL_REQUIRED"
 
+	// Firebase / auth env var keys.
+	envVarFirebaseProjectID       = "FIREBASE_PROJECT_ID"
+	envVarFirebaseCredentialsFile = "FIREBASE_CREDENTIALS_FILE"
+	envVarFirebaseWebAPIKey       = "FIREBASE_WEB_API_KEY"
+	envVarAllowedFirebaseUIDs     = "ALLOWED_FIREBASE_UIDS"
+
 	// Operational defaults — safe to use as config fallbacks.
 	defaultPort           = "8080"
 	defaultDBHost         = "localhost"
@@ -110,6 +116,20 @@ type Config struct {
 	// (e.g. local dev, single-VPS Docker bridge). DATABASE_URL (if set) wins:
 	// its embedded sslmode is used verbatim, and DBSSLRequired is ignored.
 	DBSSLRequired bool
+
+	// Firebase Auth fields.
+	// FirebaseProjectID is the GCP project ID (required in non-dev/test when
+	// FirebaseCredentialsFile is set).
+	FirebaseProjectID string
+	// FirebaseCredentialsFile is the path to the service-account JSON file.
+	// When empty, the Firebase verifier is not initialised (allowed in dev/test).
+	FirebaseCredentialsFile string
+	// FirebaseWebAPIKey is the Firebase Web API key (required in non-dev/test).
+	FirebaseWebAPIKey string
+	// AllowedFirebaseUIDs is the list of Firebase UIDs permitted to exchange
+	// tokens. Empty means "allowlist disabled" in dev/test; staging/prod
+	// require a non-empty list (enforced by ValidateFirebaseAuthConfig).
+	AllowedFirebaseUIDs []string
 }
 
 // Load reads environment-backed configuration, including a local .env file when present.
@@ -215,6 +235,11 @@ func newFromEnv(lookup func(string) (string, bool)) (*Config, error) {
 		BacktestMaxCandles: backtestMaxCandles,
 		SyncEnabled:        syncEnabled,
 		DBSSLRequired:      dbSSLRequired,
+
+		FirebaseProjectID:       getEnvFrom(lookup, envVarFirebaseProjectID, ""),
+		FirebaseCredentialsFile: getEnvFrom(lookup, envVarFirebaseCredentialsFile, ""),
+		FirebaseWebAPIKey:       getEnvFrom(lookup, envVarFirebaseWebAPIKey, ""),
+		AllowedFirebaseUIDs:     getCSVEnvFrom(lookup, envVarAllowedFirebaseUIDs),
 	}
 
 	if cfg.DatabaseURL != "" {
@@ -282,6 +307,51 @@ func (cfg *Config) validateStagingIdentity() error {
 	if !containsAnyMarker(cfg.DBUser, stagingIdentityMarkers()) {
 		return fmt.Errorf("staging DB_USER must contain a staging marker (staging or stage)")
 	}
+	return nil
+}
+
+// ValidateFirebaseAuthConfig performs Firebase-specific startup validation. It is
+// called only from cmd/server; cmd/sync deliberately does not call it.
+//
+// Rules:
+//   - FirebaseProjectID must be set when FirebaseCredentialsFile is non-empty.
+//   - FirebaseCredentialsFile must be set in staging and production — a missing
+//     credentials file leaves the verifier nil, which would let the server boot
+//     and pass non-identity launch smoke while every real /auth/session returns
+//     503 firebase_not_configured. Requiring it here makes that a startup
+//     failure (fail closed) instead of a first-login surprise.
+//   - FirebaseWebAPIKey must be set in non-dev/test environments.
+//   - AllowedFirebaseUIDs must be non-empty in staging and production (empty
+//     means allowlist disabled, which is only permitted in dev/test).
+//   - FirebaseCredentialsFile, when set, must be a readable file.
+func ValidateFirebaseAuthConfig(cfg *Config) error {
+	if cfg == nil {
+		return fmt.Errorf("config is required")
+	}
+
+	if cfg.FirebaseCredentialsFile != "" {
+		if cfg.FirebaseProjectID == "" {
+			return fmt.Errorf("%s is required when %s is set",
+				envVarFirebaseProjectID, envVarFirebaseCredentialsFile)
+		}
+		if _, err := os.Open(cfg.FirebaseCredentialsFile); err != nil {
+			return fmt.Errorf("%s is not readable: %w", envVarFirebaseCredentialsFile, err)
+		}
+	}
+
+	switch cfg.Env {
+	case EnvProduction, EnvStaging:
+		if cfg.FirebaseCredentialsFile == "" {
+			return fmt.Errorf("%s is required in %s environment", envVarFirebaseCredentialsFile, cfg.Env)
+		}
+		if cfg.FirebaseWebAPIKey == "" {
+			return fmt.Errorf("%s is required in %s environment", envVarFirebaseWebAPIKey, cfg.Env)
+		}
+		if len(cfg.AllowedFirebaseUIDs) == 0 {
+			return fmt.Errorf("%s must be non-empty in %s environment", envVarAllowedFirebaseUIDs, cfg.Env)
+		}
+	}
+
 	return nil
 }
 

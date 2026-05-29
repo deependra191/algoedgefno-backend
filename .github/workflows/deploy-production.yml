@@ -2,6 +2,13 @@ name: Deploy production
 
 on:
   workflow_dispatch:
+    inputs:
+      smoke_mode:
+        description: "launch | standard"
+        required: true
+        type: choice
+        options: [launch, standard]
+        default: launch
 
 permissions: {}
 
@@ -10,11 +17,60 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy-production:
-    name: Promote staging image to production VPS
+  preflight_pr1_rollback_target:
+    name: Assert PR 1 is the current rollback target
     runs-on: [self-hosted, algoedgefno-staging]
     if: github.ref == 'refs/heads/main'
-    environment: production
+    env:
+      BASE_URL: ${{ vars.PROD_BASE_URL }}
+    steps:
+      - name: Read current image and version from VPS state
+        id: current
+        run: |
+          set -euo pipefail
+          COMPOSE_ENV="/opt/algoedgefno/compose/.env"
+          [[ -r "$COMPOSE_ENV" ]] || { echo "$COMPOSE_ENV unreadable" >&2; exit 1; }
+
+          previous="$(grep -E '^BACKEND_PROD_IMAGE=' "$COMPOSE_ENV" | tail -1 | cut -d= -f2-)"
+
+          version_json="$(curl -fsS "${BASE_URL}/version")"
+          actual_commit="$(printf '%s' "$version_json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("commit_sha",""))')"
+          actual_migration="$(printf '%s' "$version_json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("migration_version",""))')"
+
+          echo "previous=$previous"                       >> "$GITHUB_OUTPUT"
+          echo "actual_commit=$actual_commit"             >> "$GITHUB_OUTPUT"
+          echo "actual_migration=$actual_migration"       >> "$GITHUB_OUTPUT"
+
+      - name: Assert PR 1 is still the rollback target
+        env:
+          EXPECTED_PR1_IMAGE: ${{ vars.PR1_IMAGE_DIGEST }}
+          EXPECTED_PR1_COMMIT: ${{ vars.PR1_COMMIT_SHA }}
+          EXPECTED_PR1_MIGRATION: ${{ vars.PR1_MIGRATION_VERSION }}
+          EXPECTED_CANDIDATE_MIGRATION: ${{ vars.PR2_CANDIDATE_MIGRATION_VERSION }}
+        run: |
+          set -euo pipefail
+          previous="${{ steps.current.outputs.previous }}"
+          # BACKEND_PROD_IMAGE is a full ghcr.io/...@sha256:<digest> reference;
+          # PR1_IMAGE_DIGEST is stored as the bare sha256:<digest>. Compare the
+          # digest component so the formats line up. No '@' (e.g. a tag ref) leaves
+          # the whole string and fails closed.
+          previous_digest="${previous##*@}"
+          [[ "$previous_digest" == "$EXPECTED_PR1_IMAGE" ]] \
+              || { echo "rollback image digest is $previous_digest (from $previous), want PR 1 digest $EXPECTED_PR1_IMAGE" >&2; exit 1; }
+          [[ "${{ steps.current.outputs.actual_commit }}" == "$EXPECTED_PR1_COMMIT" ]] \
+              || { echo "running commit not PR 1" >&2; exit 1; }
+
+          m="${{ steps.current.outputs.actual_migration }}"
+          if [[ "$m" != "$EXPECTED_PR1_MIGRATION" && "$m" != "$EXPECTED_CANDIDATE_MIGRATION" ]]; then
+              echo "migration version $m is neither PR 1 ($EXPECTED_PR1_MIGRATION) nor candidate ($EXPECTED_CANDIDATE_MIGRATION)" >&2
+              exit 1
+          fi
+
+  deploy-production:
+    name: Promote staging image to production VPS
+    needs: preflight_pr1_rollback_target
+    runs-on: [self-hosted, algoedgefno-staging]
+    if: github.ref == 'refs/heads/main'
     timeout-minutes: 20
     env:
       PROD_BASE_URL: ${{ vars.PROD_BASE_URL }}
@@ -26,11 +82,11 @@ jobs:
           set -euo pipefail
 
           if [[ -z "${PROD_BASE_URL}" ]]; then
-            echo "PROD_BASE_URL must be configured on the production GitHub environment" >&2
+            echo "PROD_BASE_URL must be configured as a repository variable" >&2
             exit 1
           fi
           if [[ -z "${STAGING_BASE_URL}" ]]; then
-            echo "STAGING_BASE_URL must also be configured on the production GitHub environment because prod promotion verifies the currently deployed staging image first" >&2
+            echo "STAGING_BASE_URL must also be configured as a repository variable because prod promotion verifies the currently deployed staging image first" >&2
             exit 1
           fi
           if [[ ! "${PROD_BASE_URL}" =~ ^https://(api\.[A-Za-z0-9.-]+|api-[A-Za-z0-9.-]+|[A-Za-z0-9.-]+\.api\.[A-Za-z0-9.-]+)(:[0-9]{1,5})?$ ]]; then
@@ -58,7 +114,9 @@ jobs:
           deploy_log="$(mktemp)"
           trap 'rm -f "${deploy_log}"' EXIT
 
-          sudo -n /usr/local/sbin/algoedgefno-deploy-prod "${PROD_BASE_URL}" "${STAGING_BASE_URL}" | tee "${deploy_log}"
+          sudo -n /usr/local/sbin/algoedgefno-deploy-prod \
+            --smoke-mode=${{ inputs.smoke_mode }} \
+            "${PROD_BASE_URL}" "${STAGING_BASE_URL}" | tee "${deploy_log}"
 
           promoted_image="$(grep '^PROMOTED_IMAGE=' "${deploy_log}" | tail -1 | cut -d= -f2- || true)"
           promoted_commit="$(grep '^PROMOTED_COMMIT=' "${deploy_log}" | tail -1 | cut -d= -f2- || true)"
@@ -93,6 +151,7 @@ jobs:
             echo "- Promoted commit: \`${PROMOTED_COMMIT}\`"
             echo "- Migration version: \`${PROMOTED_MIGRATION}\`"
             echo "- Previous prod image: \`${PREVIOUS_PROD_IMAGE}\`"
+            echo "- Smoke mode: \`${{ inputs.smoke_mode }}\`"
             echo "- Promotion path: current \`BACKEND_STAGING_IMAGE\` pinned on the VPS"
             echo "- Result: production smoke checks passed"
           } >> "${GITHUB_STEP_SUMMARY}"

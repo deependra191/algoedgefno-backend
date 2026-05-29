@@ -11,13 +11,22 @@ allow:
   deepScan: false
 
 excludeFiles:
-  # External test packages (package middleware_test, package logging_test)
-  # legitimately import the package they test. go-arch-lint reports this as
-  # a component self-import. Exclude these specific test files only — other
-  # rules (vendor allowance, cross-component imports) remain enforced via
-  # the rest of the project structure.
+  # External test packages legitimately import the package they test.
+  # go-arch-lint reports this as a component self-import. Exclude these
+  # specific test files only — other rules remain enforced.
   - ".*/internal/middleware/.*_test\\.go$"
   - ".*/internal/logging/.*_test\\.go$"
+  - ".*/internal/firebasefixture/.*_test\\.go$"
+  # tenant_isolation_test.go is an integration test in package handlers that
+  # wires up routes/storage/providers — it is the composition root for the
+  # test and must import those packages. Exclude it from arch-lint; the
+  # runtime import graph is enforced by the rest of the component rules.
+  - ".*/internal/handlers/tenant_isolation_test\\.go$"
+  # Worktree directories used by Claude Code and Codex agents — not part of
+  # the project being linted.
+  - ".*\\.claire/.*"
+  - ".*\\.claude/.*"
+  - ".*\\.codex/.*"
 
 components:
   models:
@@ -54,10 +63,20 @@ components:
     in: internal/logging
   strategies:
     in: internal/strategies
+  firebaseauth:
+    in: internal/firebaseauth
+  firebasefixture:
+    in: internal/firebasefixture
   cmd_server:
     in: cmd/server
   cmd_sync:
     in: cmd/sync
+  cmd_firebase_token:
+    in: cmd/firebase-token
+  cmd_setup_firebase_test_users:
+    in: cmd/setup-firebase-test-users
+  cmd_teardown_firebase_test_users:
+    in: cmd/teardown-firebase-test-users
 
 deps:
   models:
@@ -112,7 +131,6 @@ deps:
   middleware:
     mayDependOn:
       - models
-      - services
     anyVendorDeps: true
 
   config:
@@ -155,10 +173,28 @@ deps:
       - models
     anyVendorDeps: true
 
+  firebaseauth:
+    mayDependOn:
+      - models
+    anyVendorDeps: true
+
+
   cmd_server:
     anyProjectDeps: true
     anyVendorDeps: true
 
   cmd_sync:
+    anyProjectDeps: true
+    anyVendorDeps: true
+
+  cmd_firebase_token:
+    anyProjectDeps: true
+    anyVendorDeps: true
+
+  cmd_setup_firebase_test_users:
+    anyProjectDeps: true
+    anyVendorDeps: true
+
+  cmd_teardown_firebase_test_users:
     anyProjectDeps: true
     anyVendorDeps: true

@@ -32,6 +32,24 @@ export ABUSE_STAGING_CONTAINER=algoedgefno-backend-staging
 export ABUSE_PROD_CONTAINER=algoedgefno-backend-prod
 ```
 
+## Environment split (PR 2)
+
+The suite runs two materially different paths:
+
+- **`--env staging` — mutating.** Mints Firebase ID tokens (via the in-container
+  `firebase-token` binary), exchanges them at `/auth/session`, exercises
+  tenant-authenticated abuse checks (burst submit, aggressive poll, large date
+  range, cross-tenant lookup), seeds the identity-conflict fixture, and ends
+  with the burst checks last. A `trap` cleans up any session/refresh artifacts
+  on exit.
+- **`--env prod` — read-only.** Asserts only non-mutating invariants:
+  unauthenticated/invalid-token `401`, the static-token split (200 on
+  `/config/app`, 401 on tenant endpoints), and log redaction. It NEVER calls
+  `/auth/session`, `/auth/refresh`, `/auth/logout`, never runs `firebase-token`,
+  and never touches the staging-only conflict fixture. Production **smoke**
+  (post-launch only) is the single documented intentional production mutation —
+  the abuse suite is not.
+
 ## Normal Run
 
 Run staging first and confirm zero failures:
@@ -40,10 +58,7 @@ Run staging first and confirm zero failures:
 scripts/security/abuse-suite.sh --env staging
 ```
 
-Then run production. During the PR 1 closed interval, both environments assert
-that the static app token works only for config delivery and is rejected for
-tenant backtest endpoints. Tenant-authenticated abuse checks are restored in
-PR 2.
+Then run the read-only production path:
 
 ```bash
 scripts/security/abuse-suite.sh --env prod
@@ -57,19 +72,30 @@ scratch/security-runs/YYYY-MM-DD-{env}.md
 
 The report is an operational artifact and is not source-controlled.
 
+## Identity-conflict fixture (staging only)
+
+The cross-provider identity-conflict check needs a pre-seeded conflicting
+identity. It is created by a host script, never by the suite mutating prod:
+
+```bash
+scripts/staging-only/seed-conflict-fixture.sh
+```
+
+The script is authorized by a root-owned, mode-`400` guard file
+(`/opt/algoedgefno/env/firebase-staging-fixture-project-id.guard`) carrying the
+approved staging Firebase project ID; it refuses to run unless the guard matches
+the running staging project. It is referenced only by `abuse-suite.sh --env
+staging`. `--env prod` never touches it.
+
 ## Kill-Switch Check
 
-During the PR 1 closed interval, kill-switch validation is unavailable. Static
-app tokens cannot reach tenant backtest endpoints, so an HTTP assertion cannot
-distinguish `BACKTEST_ENABLED=false` from the authentication lockdown. To
-prevent a false-positive report, this command fails fast:
+From PR 2, kill-switch validation runs against an authenticated tenant request
+(Firebase-derived backend JWT), so a `503` can be distinguished from an auth
+lockdown. Run on staging:
 
 ```bash
 scripts/security/abuse-suite.sh --env staging --expect-backtests-disabled
 ```
-
-PR 2 must restore this check using authenticated tenant requests before an
-operator treats a `503` response as kill-switch evidence.
 
 ## Independent Log Check
 
@@ -93,13 +119,40 @@ scripts/security/check-log-redaction.sh --env staging --secret-file /path/to/sec
 
 ## Expected Coverage
 
+Both environments:
 - Protected endpoint without auth returns `401`.
 - Protected endpoint with invalid token returns `401`.
 - Production URL with staging token returns `401` when `STAGING_APP_TOKEN` is
   available during the prod run.
-- Static-token requests to tenant backtest endpoints return `401` during the PR
-  1 closed interval.
-- Large-range, burst-submit, aggressive-poll, cross-tenant, and kill-switch
-  checks are unavailable until PR 2 restores authenticated tenant requests.
-- Recent logs contain no bearer tokens, JWT markers, app secret markers, DB
-  passwords, or full DSNs.
+- Static-token split: `APP_SECRET_TOKEN` → `200` on `/api/v1/config/app`, `401`
+  on tenant endpoints (permanent from PR 2).
+- Recent logs contain no bearer tokens, JWT markers, Firebase ID tokens, refresh
+  tokens, app secret markers, DB passwords, or full DSNs.
+
+Staging only (mutating, burst last):
+- Large-range, burst-submit, aggressive-poll, and cross-tenant lookup checks run
+  against a Firebase-derived backend JWT.
+- Identity-conflict check against the staging-only seeded fixture.
+- Kill-switch check via `--expect-backtests-disabled`.
+
+## Logging redaction policy
+
+The suite and `check-log-redaction.sh` assert the redaction contract: the
+`Authorization` header is logged as `Bearer [REDACTED]`; request/response bodies
+for `/auth/session`, `/auth/refresh`, `/auth/logout`, and `/auth/debug-session`
+are not logged; and JSON fields `accessToken`, `refreshToken`, `firebaseIdToken`
+are redacted defensively wherever they appear. Reports show pattern labels and
+counts only — never matching log lines or secret values.
+
+## Partial-outcome note (§12)
+
+`/auth/session` performs two writes in sequence: the `users` upsert, then the
+`refresh_tokens` insert. This is intentionally **non-atomic** (storage owns
+transactions; the service composes storage calls). If the upsert succeeds and
+the refresh-token insert fails, the user row persists with an updated
+`last_login_at` but no session is issued and the handler returns `500 internal`;
+Android retries and the idempotent upsert (`DO UPDATE` on `firebase_uid`) plus a
+fresh token insert recovers. `last_login_at` therefore means "last successful
+Firebase verification that reached the user-upsert step", not "last successful
+session issuance". Acceptable for v1 (single owner, allowlist-only); revisit if
+multi-tenant ships. Full rationale: plan §12.

@@ -147,4 +147,3 @@ func (s *InstrumentStore) List(ctx context.Context, filter models.InstrumentFilt
 	}
 	return result, rows.Err()
 }
-

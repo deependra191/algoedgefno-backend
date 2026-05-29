@@ -158,4 +158,3 @@ func (s *CandleStore) Query(ctx context.Context, f models.CandleFilter) ([]model
 	}
 	return result, rows.Err()
 }
-

@@ -12,9 +12,9 @@ Candle data will reach millions of rows across instruments and intervals. Timesc
 
 GORM abstracts away SQL in ways that are incompatible with TimescaleDB-specific DDL (hypertable creation, compression policies). Explicit SQL via pgx keeps queries readable, debuggable, and fully compatible with PostgreSQL extensions.
 
-## Static bearer token for v1, JWT kept for future
+## Firebase Auth for v1 Android, APP_SECRET_TOKEN scoped to /config/app
 
-This is a single-user personal tool — no login flow is needed. A static `APP_SECRET_TOKEN` in `.env` is sufficient for v1. JWT middleware is kept in the codebase but not enforced, so multi-user support can be added without a rewrite.
+This is a single-owner tool, so Firebase handles identity rather than a custom login/password flow. Android obtains a Firebase ID token and exchanges it at `/api/v1/auth/session` for a backend session: a short-lived access JWT plus a rotating refresh token, both minted by the backend after it verifies the Firebase token. Tenant endpoints require the backend access JWT. The static `APP_SECRET_TOKEN` is accepted only on `/api/v1/config/app` and is scheduled for removal once that endpoint moves to Firebase or becomes public. JWT (golang-jwt/jwt v5) is now actively used to mint those backend session tokens — it is no longer a "kept for future" dependency.
 
 ## MarketDataProvider interface with Capability declarations
 
@@ -24,9 +24,9 @@ Provider-specific code must never leak into handlers or services. The Capability
 
 Auto-migrate in code hides schema changes from version control and makes rollbacks impossible. Numbered SQL files in `migrations/` are explicit, reviewable, and reversible. golang-migrate/migrate handles execution.
 
-## No user accounts in v1
+## Single Firebase-bound owner identity in v1
 
-Single-user personal tool. No registration, no password storage, no bcrypt. Simplifies auth, removes attack surface. Multi-user is a future concern.
+v1 has a single Firebase-bound owner identity. Registration is implicit on first Firebase sign-in via `/auth/session`; no password storage, no bcrypt. Tenant data is scoped by `users.id` (the Firebase UID is the external binding). An allowlist (`ALLOWED_FIREBASE_UIDS`) gates which Firebase UIDs can sign in. Multi-user remains a future expansion of the allowlist, not a re-architecture.
 
 ## Data phases: NSE EOD → Angel One dump → vendor trial
 

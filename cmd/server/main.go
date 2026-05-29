@@ -1,18 +1,27 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
 	"os"
+
+	firebase "firebase.google.com/go/v4"
+	"google.golang.org/api/option"
 
 	"github.com/deependra191/algoedgefno-backend/internal/buildinfo"
 	"github.com/deependra191/algoedgefno-backend/internal/config"
 	"github.com/deependra191/algoedgefno-backend/internal/database"
+	"github.com/deependra191/algoedgefno-backend/internal/firebaseauth"
+	"github.com/deependra191/algoedgefno-backend/internal/handlers"
 	"github.com/deependra191/algoedgefno-backend/internal/logging"
 	"github.com/deependra191/algoedgefno-backend/internal/middleware"
+	"github.com/deependra191/algoedgefno-backend/internal/models"
 	"github.com/deependra191/algoedgefno-backend/internal/providers"
 	"github.com/deependra191/algoedgefno-backend/internal/providers/nse"
 	"github.com/deependra191/algoedgefno-backend/internal/providers/vendor"
 	"github.com/deependra191/algoedgefno-backend/internal/routes"
+	"github.com/deependra191/algoedgefno-backend/internal/services"
 	"github.com/deependra191/algoedgefno-backend/internal/storage"
 	"github.com/gin-gonic/gin"
 )
@@ -42,11 +51,62 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := config.ValidateFirebaseAuthConfig(cfg); err != nil {
+		slog.Error("server config validation failed", "error", err)
+		os.Exit(1)
+	}
+
+	// cleanup-expired-refresh-tokens subcommand — build a minimal pool,
+	// delete expired rows, log the count, then exit.
+	if len(os.Args) > 1 && os.Args[1] == "cleanup-expired-refresh-tokens" {
+		pool := database.Connect(cfg)
+		defer pool.Close()
+		tokenRepo := storage.NewRefreshTokenStore(pool)
+		n, err := tokenRepo.DeleteExpired(context.Background())
+		if err != nil {
+			slog.Error("cleanup expired refresh tokens failed", "error", err)
+			os.Exit(1)
+		}
+		slog.Info("cleanup expired refresh tokens complete", "rows_deleted", n)
+		return
+	}
+
+	ctx := context.Background()
+
+	// Build the Firebase verifier. When FIREBASE_CREDENTIALS_FILE is unset
+	// (dev/test without credentials), verifier stays nil and only
+	// ExchangeFirebaseToken is gated — Refresh/Logout work without it.
+	var verifier models.FirebaseVerifier
+	if cfg.FirebaseCredentialsFile != "" {
+		fbApp, err := firebase.NewApp(ctx,
+			&firebase.Config{ProjectID: cfg.FirebaseProjectID},
+			option.WithCredentialsFile(cfg.FirebaseCredentialsFile),
+		)
+		if err != nil {
+			slog.Error("firebase NewApp failed", "error", err)
+			os.Exit(1)
+		}
+		fbClient, err := fbApp.Auth(ctx)
+		if err != nil {
+			slog.Error("firebase Auth client failed", "error", fmt.Errorf("firebase Auth client: %w", err))
+			os.Exit(1)
+		}
+		verifier = firebaseauth.NewVerifier(fbClient)
+	}
+
 	pool := database.Connect(cfg)
 	defer pool.Close()
 
 	instrumentStore := storage.NewInstrumentStore(pool)
 	candleStore := storage.NewCandleStore(pool)
+	userRepo := storage.NewUserStore(pool)
+	tokenRepo := storage.NewRefreshTokenStore(pool)
+
+	authSvc := services.NewAuthService(
+		userRepo, tokenRepo, verifier,
+		cfg.JWTSecret, cfg.AllowedFirebaseUIDs, cfg.Env,
+	)
+	authHandler := handlers.NewAuthHandler(authSvc, cfg.Env)
 
 	registry := providers.NewRegistry()
 	registry.Register(nse.NewEODProvider(instrumentStore, candleStore,
@@ -76,7 +136,7 @@ func main() {
 	// the native Android app. Add explicit browser/admin CORS in a separate PR
 	// when there is an actual browser client.
 
-	routes.Register(r, pool, cfg, registry)
+	routes.Register(r, pool, cfg, registry, authSvc, authHandler)
 
 	slog.Info("server starting", "port", cfg.Port)
 	if err := r.Run(":" + cfg.Port); err != nil {

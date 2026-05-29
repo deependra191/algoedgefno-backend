@@ -3,8 +3,36 @@ set -euo pipefail
 
 PATH="/usr/sbin:/usr/bin:/sbin:/bin"
 
+SMOKE_MODE=""
+
+# Parse flags before positional arguments.
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --smoke-mode=*)
+            SMOKE_MODE="${1#--smoke-mode=}"
+            shift
+            ;;
+        --smoke-mode)
+            [[ $# -ge 2 ]] || { printf 'usage: %s [--smoke-mode=<launch|standard>] <prod-base-url> <staging-base-url>\n' "$0" >&2; exit 2; }
+            SMOKE_MODE="$2"
+            shift 2
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            printf 'unknown flag: %s\n' "$1" >&2
+            exit 2
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
 if [[ $# -ne 2 ]]; then
-    printf 'usage: %s <prod-base-url> <staging-base-url>\n' "$0" >&2
+    printf 'usage: %s [--smoke-mode=<launch|standard>] <prod-base-url> <staging-base-url>\n' "$0" >&2
     exit 2
 fi
 
@@ -18,7 +46,8 @@ COMPOSE_DIR="/opt/algoedgefno/compose"
 ENV_FILE="${COMPOSE_DIR}/.env"
 PROD_CONTAINER="algoedgefno-backend-prod"
 STAGING_CONTAINER="algoedgefno-backend-staging"
-SMOKE_SCRIPT="/opt/algoedgefno/scripts/smoke-prod.sh"
+SMOKE_SCRIPT_LAUNCH="/opt/algoedgefno/scripts/smoke-prod-launch.sh"
+SMOKE_SCRIPT_STANDARD="/opt/algoedgefno/scripts/smoke-prod.sh"
 ENV_BACKUP_PREFIX="${ENV_FILE}.bak.preflight."
 
 fail() {
@@ -121,7 +150,8 @@ require_cmd mktemp
 require_cmd python3
 
 [[ -f "${ENV_FILE}" ]] || fail "${ENV_FILE} is missing"
-[[ -x "${SMOKE_SCRIPT}" ]] || fail "${SMOKE_SCRIPT} must exist and be executable"
+[[ -x "${SMOKE_SCRIPT_LAUNCH}" ]] || fail "${SMOKE_SCRIPT_LAUNCH} must exist and be executable"
+[[ -x "${SMOKE_SCRIPT_STANDARD}" ]] || fail "${SMOKE_SCRIPT_STANDARD} must exist and be executable"
 
 configured_prod_host="$(env_file_value PROD_API_HOST || true)"
 configured_staging_host="$(env_file_value STAGING_API_HOST || true)"
@@ -259,9 +289,25 @@ if ! docker compose up -d backend-prod; then
     rollback_and_fail "failed to restart backend-prod"
 fi
 
-if ! EXPECTED_IMAGE="${deploy_image}" \
-    SMOKE_BASE_URL="${PROD_BASE_URL}" \
-        "${SMOKE_SCRIPT}" "${expected_commit}" "${expected_migration}"; then
+run_smoke() {
+    case "${SMOKE_MODE:-}" in
+        launch)
+            EXPECTED_IMAGE="${deploy_image}" \
+            SMOKE_BASE_URL="${PROD_BASE_URL}" \
+                "${SMOKE_SCRIPT_LAUNCH}" "${expected_commit}" "${expected_migration}"
+            ;;
+        standard)
+            EXPECTED_IMAGE="${deploy_image}" \
+            SMOKE_BASE_URL="${PROD_BASE_URL}" \
+                "${SMOKE_SCRIPT_STANDARD}" "${expected_commit}" "${expected_migration}"
+            ;;
+        *)
+            fail "unknown smoke_mode: ${SMOKE_MODE}"
+            ;;
+    esac
+}
+
+if ! run_smoke; then
     rollback_and_fail "production smoke failed"
 fi
 

@@ -376,14 +376,14 @@ Expected results:
 ## Staging deploy automation
 
 The `Publish backend image` GitHub Actions workflow runs on pushes to `main`.
-It publishes the backend image to GHCR, exports the immutable digest-qualified
-image reference, then deploys that exact digest to staging on the self-hosted VPS
-runner. If the staging deploy job fails, the GHCR image remains published and
+It publishes the backend image to GHCR and exports the immutable digest-qualified
+image reference, then **stops** — from PR 2 it no longer auto-deploys to staging
+(the `deploy-staging` job was removed). The GHCR image remains published and
 visible in the workflow summary; production remains untouched.
 
-The separate `Deploy staging` workflow is manual-only fallback for redeploying a
-specific digest. Both staging deploy paths run on the self-hosted runner and
-deploy staging only. They run staging migrations through the root-owned wrapper
+Deployment is performed only by the manual-only `Deploy staging` workflow with an
+explicit digest. It runs on the self-hosted runner and deploys staging only. It
+runs staging migrations through the root-owned wrapper
 before restarting staging, do not restart production services, and do not expose
 app, database, JWT, or bearer-token secret files to GitHub Actions. They do not
 use `rsync`, `scp`, or inbound SSH from GitHub-hosted runners, and they do not
@@ -391,12 +391,16 @@ overwrite server env files from the repository.
 Do not configure `APP_SECRET_TOKEN`, database passwords, JWT secrets, GHCR tokens,
 VPS passwords, or SSH private keys in this workflow.
 
-Configure a GitHub environment named `staging`. If the repository plan exposes
-required reviewers, enable them for this environment. Restrict the `staging`
-environment deployment branches to the protected `dev` and `main` branches
-only. The workflow also has a `dev`/`main` branch guard as defense in depth, but
-the GitHub environment branch restriction is the control that keeps modified
-workflow files from other refs off the VPS runner.
+**Branch and runner control (replaces the prior `environment:`-based
+section).** This repository is on GitHub Free + private. Environment
+vars/secrets, deployment branch policies, and required reviewers are
+unavailable. The deploy workflows therefore do NOT declare `environment:`
+at all. Branch restriction is enforced solely by explicit
+`if: github.ref == 'refs/heads/main'` on every self-hosted-runner job
+(deploy AND preflight). `STAGING_BASE_URL` / `PROD_BASE_URL` are sourced
+from **repository variables**. Operator discipline — "provision before
+manual dispatch" — is the hold mechanism, supported by the publish
+workflow no longer auto-deploying.
 
 Register a self-hosted GitHub Actions runner on the VPS for this repository and
 give it the custom label `algoedgefno-staging`. The runner may be started only
@@ -447,12 +451,10 @@ sudo ./svc.sh status
 
 The service should run as `github-runner`, not as `root`.
 
-Configure the `staging` GitHub environment with this variable:
+Configure these GitHub **repository variables** (not environment-scoped — GitHub
+Free + private repos do not support environment-scoped vars):
 
 - `STAGING_BASE_URL` — staging API base URL, for example `https://staging-api.<domain>`.
-
-Configure the `production` GitHub environment with this variable:
-
 - `PROD_BASE_URL` — production API base URL, for example `https://api.<domain>`.
 
 The runner VPS user must have exactly two passwordless sudo capabilities:
@@ -492,26 +494,26 @@ Keep `/opt/algoedgefno/compose/.env` non-secret. It must define both
 `BACKEND_PROD_IMAGE` is missing, and it never modifies the production image
 reference.
 
-Normal operator flow:
+**Normal operator flow after PR 2.** When a `dev → main` integration PR
+merges, `publish-backend-image.yml` builds and pushes the image, then
+**stops**. To deploy:
 
-1. Merge `dev` to `main`.
-2. Confirm `Publish backend image` publishes a GHCR image and automatically
-   starts the staging deploy job with the digest-qualified image it just built.
-3. Verify the workflow smoke checks for `/health`, `/ready`, `/version`, auth
-   behavior, container image, and clean migration state. The wrapper also fails
-   if `/version` does not report `environment=staging` or the expected migration
-   version from the image.
-4. Later, promote the exact same digest to production through a separate future
-   workflow or a manual production step. Do not rebuild or republish the backend
-   image between staging verification and production promotion.
+1. Operator captures the candidate image digest from the publish workflow
+   run summary.
+2. Operator performs Phase L0 staging-side provisioning on the shared VPS.
+3. Operator manually dispatches `deploy-staging.yml` with
+   `inputs.image = <digest>`.
+4. After staging soaks, operator manually dispatches `deploy-production.yml`.
+   `deploy-prod.sh` mechanically promotes the staging-running digest to
+   production.
 
-Manual fallback flow:
-
-1. Copy the digest-qualified image from the `Publish backend image` workflow
-summary, for example
-`ghcr.io/deependra191/algoedgefno-backend@sha256:<digest>`.
-2. Run `Deploy staging` from the `dev` or `main` branch with that exact image.
-3. Verify the same smoke checks as the automatic staging deploy.
+**Manual fallback / recovery.** Manual dispatches of `deploy-staging.yml`
+and `deploy-production.yml` MUST be triggered from the `main` branch. The
+workflows enforce this with `if: github.ref == 'refs/heads/main'` on every
+self-hosted-runner job. A manual dispatch from `dev` would skip the guarded
+jobs and produce a green workflow run that did not actually deploy anything —
+silently failing open. If a recovery deploy is needed from a non-`main` ref,
+the operator must first land that change on `main`.
 
 ## Production deploy automation
 
@@ -520,8 +522,9 @@ from `main`. It does not accept or require a manual digest by default. Instead,
 it promotes the image already pinned in `BACKEND_STAGING_IMAGE` on the VPS,
 which should be the exact digest that previously passed staging smoke checks.
 
-The workflow targets the `production` GitHub environment, runs on the same
-self-hosted runner label, and calls the root-owned
+The workflow runs on the same self-hosted runner label, is guarded by
+`if: github.ref == 'refs/heads/main'` on every job (it declares no
+`environment:`), and calls the root-owned
 `/usr/local/sbin/algoedgefno-deploy-prod` wrapper. The wrapper validates the
 configured staging and prod hosts, confirms staging is healthy and serving the
 pinned staging digest, derives the expected migration version from that image,
@@ -532,7 +535,7 @@ image/env only; it does not run down migrations, so production migrations must
 remain backward-compatible with the previous deployed image or have a documented
 manual DB recovery path.
 
-Restrict the `production` GitHub environment to the protected `main` branch.
+Branch restriction for production is enforced by `if: github.ref == 'refs/heads/main'` on every job in `deploy-production.yml` (no GitHub `environment:` is used).
 
 Backlog cleanup after the self-hosted runner deployment succeeds:
 
@@ -542,3 +545,38 @@ Backlog cleanup after the self-hosted runner deployment succeeds:
 - Remove any temporary GitHub Actions CIDR SSH firewall rules.
 - Remove the temporary `algoedgefno-deploy` user and SSH key only after no
   active workflow depends on them.
+
+## PR 2 deployment notes (Firebase auth)
+
+**Per-environment rollback precondition.** PR 2 deploys are gated by
+`preflight_pr1_rollback_target`. The preflight reads
+`/opt/algoedgefno/compose/.env` and `/version`, and asserts: image equals the
+PR 1 image, commit equals the PR 1 commit, and the migration version is either
+PR 1 (16) or the candidate (18).
+
+- **PR 2 → PR 1 rollback:** PERMITTED.
+- **Pre-PR-1 rollback:** PROHIBITED as soon as PR 2 has been deployed to any
+  environment.
+- **Migration 018 down:** PROHIBITED while any `refresh_tokens` row exists,
+  including revoked rows.
+
+**Production smoke residue.** For **post-launch** deploys, each smoke run
+updates `last_login_at` for `PROD_SMOKE_UID` and inserts+revokes one
+`refresh_tokens` row per run. Cleanup: the nightly
+`cleanup-expired-refresh-tokens` cron. For the **launch** deploy, the mutating
+smoke is disabled (`smoke_mode=launch`); the owner's §10 Step-5 sign-in creates
+the FIRST production `users` row.
+
+**Production runtime image is staging-promoted unchanged.** The runtime image
+**bundles** operator scripts at `/app/scripts/` — the image digest is the trust
+anchor. Host-installed scripts come from `docker create`/`docker cp` of the
+candidate digest, never a `git clone` on the VPS.
+
+**Auto-deploy from publish workflow removed.** `publish-backend-image.yml` only
+publishes the image. Deployment is strictly via `deploy-staging.yml` and
+`deploy-production.yml`, both `workflow_dispatch`-only.
+
+**GitHub plan upgrade (future option, not required).** GitHub Team would add
+environment-scoped vars/secrets and deployment branch policies for this private
+repository. It does **not** add required-reviewer deployment protection for a
+private repository.

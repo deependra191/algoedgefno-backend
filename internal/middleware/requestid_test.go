@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/deependra191/algoedgefno-backend/internal/middleware"
+	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
 
 func init() {
@@ -100,5 +101,44 @@ func TestRequestID_ContextAndResponseMatch(t *testing.T) {
 	headerID := w.Header().Get(middleware.RequestIDHeader)
 	if contextID != headerID {
 		t.Errorf("context ID %q != response header %q", contextID, headerID)
+	}
+}
+
+// TestRequestID_PlacesIDOnBothGinKeyAndRequestContext verifies that after
+// RequestID() runs, the Gin context key and the Go request context both carry
+// the same UUID, and the X-Request-ID response header matches both.
+func TestRequestID_PlacesIDOnBothGinKeyAndRequestContext(t *testing.T) {
+	want := uuid.New().String()
+
+	var ginKeyID string
+	var goCtxID string
+
+	r := gin.New()
+	r.Use(middleware.RequestID())
+	r.GET("/", func(c *gin.Context) {
+		id, _ := c.Get(middleware.RequestIDKey)
+		ginKeyID = id.(string)
+		goCtxID = models.RequestIDFrom(c.Request.Context())
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set(middleware.RequestIDHeader, want)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	headerID := w.Header().Get(middleware.RequestIDHeader)
+
+	if ginKeyID != want {
+		t.Errorf("Gin context key: got %q want %q", ginKeyID, want)
+	}
+	if goCtxID != want {
+		t.Errorf("Go request context: got %q want %q", goCtxID, want)
+	}
+	if headerID != want {
+		t.Errorf("X-Request-ID response header: got %q want %q", headerID, want)
+	}
+	if ginKeyID != goCtxID {
+		t.Errorf("Gin key %q != Go context %q — bridge not working", ginKeyID, goCtxID)
 	}
 }

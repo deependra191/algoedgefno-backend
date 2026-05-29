@@ -4,6 +4,16 @@
 .env.*
 !.env.example
 
+# Firebase/GCP credential key files — never enter the build context.
+# Defense-in-depth: even with explicit COPYs in the Dockerfile, keep every
+# common credential-JSON filename variant out of the context entirely.
+*serviceaccount*.json
+*service-account*.json
+*service_account*.json
+*firebase-adminsdk*.json
+*google-credentials*.json
+*credentials*.json
+
 bin/
 *.exe
 
