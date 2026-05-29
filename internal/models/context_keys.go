@@ -14,12 +14,19 @@ const UserIDKey = "userID"
 // models so the only access is via the exported helpers below.
 type requestIDCtxKey struct{}
 
-// LogAttrRequestID is the slog attribute name for the request ID. This is
-// the SINGLE canonical definition. The existing constant in
-// internal/middleware/logger.go is REMOVED in PR 2; middleware references
-// models.LogAttrRequestID instead. Arch-lint already permits middleware →
-// models.
-const LogAttrRequestID = "request_id"
+// Structured-log attribute KEYS — the canonical telemetry schema, defined once
+// and shared across layers (the keys you grep for across all logs). Attribute
+// VALUES (e.g. a specific event name like "identity_conflict") are
+// domain-specific and stay local to the package that emits them.
+//
+// LogAttrRequestID is the SINGLE canonical definition for the request-ID key;
+// the former constant in internal/middleware/logger.go was REMOVED in PR 2 in
+// favour of this one. Arch-lint already permits middleware → models.
+const (
+	LogAttrRequestID = "request_id"
+	LogAttrEvent     = "event"
+	LogAttrReason    = "reason"
+)
 
 // WithRequestID returns ctx augmented with rid. Middleware calls this; the
 // returned context is what flows into services.

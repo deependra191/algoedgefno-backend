@@ -14,15 +14,12 @@ import (
 )
 
 // Log constants — per §6: event is a STRUCTURED ATTRIBUTE, not the message.
+// These are attribute VALUES owned by this emitter; the attribute KEYS are the
+// shared telemetry schema in models (LogAttrEvent/LogAttrReason/LogAttrRequestID).
 const (
 	logMsgAuthAnomaly       = "auth anomaly"
 	eventIdentityConflict   = "identity_conflict"
 	reasonEmailDifferentUID = "email_collision_different_uid"
-
-	// Structured log attribute keys (telemetry contract). The request-id key
-	// is shared via models.LogAttrRequestID; these are local to the service.
-	logAttrEvent  = "event"
-	logAttrReason = "reason"
 )
 
 // SessionResult is returned by ExchangeFirebaseToken and DebugSession.
@@ -258,8 +255,8 @@ func (s *AuthService) allowlistAllows(uid string) bool {
 // and reason are logged — no email, UID, or token values.
 func (s *AuthService) logIdentityConflict(ctx context.Context, reason string) {
 	slog.WarnContext(ctx, logMsgAuthAnomaly,
-		slog.String(logAttrEvent, eventIdentityConflict),
+		slog.String(models.LogAttrEvent, eventIdentityConflict),
 		slog.String(models.LogAttrRequestID, models.RequestIDFrom(ctx)),
-		slog.String(logAttrReason, reason),
+		slog.String(models.LogAttrReason, reason),
 	)
 }
