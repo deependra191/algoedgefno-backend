@@ -24,15 +24,18 @@ rotation, the allowlist, and the deployment/CI machinery.
 
 | Key | Value |
 |---|---|
-| `PR1_IMAGE_DIGEST` | `sha256:70a7f15382bba2204678d6ab44cc1fd5d4220002ec91a5d148e12b1cf9b1ccaf` |
+| `PR1_IMAGE_DIGEST` (no longer used by the preflight; slated for removal) | `sha256:70a7f15382bba2204678d6ab44cc1fd5d4220002ec91a5d148e12b1cf9b1ccaf` |
 | `PR1_COMMIT_SHA` | `e9adcc05eda6e767c1a008e5fe931139df894442` |
 | `PR1_MIGRATION_VERSION` | `16` |
 | `PR2_CANDIDATE_MIGRATION_VERSION` | `18` |
 | `CANDIDATE_IMAGE` (PR 2 digest after `publish-backend-image.yml` runs) | _capture from publish run summary: `sha256:__________`_ |
 
-Set `PR1_IMAGE_DIGEST`, `PR1_COMMIT_SHA`, `PR1_MIGRATION_VERSION=16` as GitHub
-repository variables after PR 1 deploys to both environments. Set
-`PR2_CANDIDATE_MIGRATION_VERSION=18` when the PR 2 release is cut.
+Set `PR1_COMMIT_SHA`, `PR1_MIGRATION_VERSION=16` as GitHub repository variables
+after PR 1 deploys to both environments. Set
+`PR2_CANDIDATE_MIGRATION_VERSION=18` when the PR 2 release is cut. The preflight
+verifies the running service via `/version` (asserting `commit_sha` ==
+`PR1_COMMIT_SHA` and `migration_version` is in the accepted set), so
+`PR1_IMAGE_DIGEST` is no longer used and is slated for removal.
 
 ---
 
@@ -57,7 +60,7 @@ repository variables after PR 1 deploys to both environments. Set
    `TEST_UID_A/B/DENIED/CONFLICT` and a non-empty `ALLOWED_FIREBASE_UIDS`.
 6. Install operator scripts on the host via `docker create`/`docker cp` from
    `CANDIDATE_IMAGE` (no git clone on the VPS).
-7. Approve → preflight (`PR1` image, migration 16) → dispatch `deploy-staging.yml`
+7. Approve → preflight (running `/version`: PR 1 `commit_sha`, migration 16) → dispatch `deploy-staging.yml`
    with `inputs.image = CANDIDATE_IMAGE` from `main`.
 
 ## L0 provisioning runbook — production
@@ -77,7 +80,7 @@ Fill in as each step completes:
 - [ ] **Step 2** — `ALLOWED_FIREBASE_UIDS=<owner-uid>` written to
       `/opt/algoedgefno/env/prod.env` before dispatch (no backend restart yet).
 - [ ] **Step 3** — `deploy-production.yml` dispatched with `smoke_mode=launch`;
-      preflight passed (PR 1 image, migration 16); 017+018 applied; backend-prod
+      preflight passed (running `/version`: PR 1 `commit_sha`, migration 16); 017+018 applied; backend-prod
       started on PR 2 image; `smoke-prod-launch.sh` green.
 - [ ] **Step 5** — owner completes `/auth/session`; first `users` row created;
       captured `users.id`: `__________`

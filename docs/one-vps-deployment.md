@@ -549,10 +549,30 @@ Backlog cleanup after the self-hosted runner deployment succeeds:
 ## PR 2 deployment notes (Firebase auth)
 
 **Per-environment rollback precondition.** PR 2 deploys are gated by
-`preflight_pr1_rollback_target`. The preflight reads
-`/opt/algoedgefno/compose/.env` and `/version`, and asserts: image equals the
-PR 1 image, commit equals the PR 1 commit, and the migration version is either
-PR 1 (16) or the candidate (18).
+`preflight_pr1_rollback_target`. The preflight verifies the **running** service
+over HTTP via the `/version` endpoint — it does **not** read
+`/opt/algoedgefno/compose/.env`. It reads `commit_sha` and `migration_version`
+from the `/version` JSON and asserts: `commit_sha` equals the PR 1 commit
+(repo variable `PR1_COMMIT_SHA`), and `migration_version` is in the accepted
+set — either PR 1 (`PR1_MIGRATION_VERSION`, currently 16) or the candidate
+(`PR2_CANDIDATE_MIGRATION_VERSION`, currently 18). `commit_sha` uniquely
+identifies the PR 1 image, so verifying it against the running service replaces
+the older image-digest pin comparison. The runner needs only HTTP access; the
+compose `.env` stays `root:root` mode 600.
+
+The repository variable `PR1_IMAGE_DIGEST` is no longer used by the preflight
+and is slated for removal.
+
+**Name drift invariant.** The preflight verifies the **running image** via
+`/version`, while the rollback/promotion image pins live in the root-only
+compose `.env` (`BACKEND_STAGING_IMAGE` / `BACKEND_PROD_IMAGE`). The accepted
+operator-state invariant is that the root-owned deploy wrapper is the **sole
+writer** of the compose `.env` image pin and the **sole (re)starter** of the
+container. Because nothing else writes the pin or restarts the container, the
+running image and the `.env` rollback pin do not drift in normal operation — so
+checking the running service is equivalent to checking the pin. The deploy
+workflow preflight comments in `deploy-staging.yml` and `deploy-production.yml`
+forward-reference this section for the rationale.
 
 - **PR 2 → PR 1 rollback:** PERMITTED.
 - **Pre-PR-1 rollback:** PROHIBITED as soon as PR 2 has been deployed to any
