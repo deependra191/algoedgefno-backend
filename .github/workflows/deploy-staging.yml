@@ -31,39 +31,28 @@ jobs:
     env:
       BASE_URL: ${{ vars.STAGING_BASE_URL }}
     steps:
-      - name: Read current image and version from VPS state
+      - name: Read running version from the live service
         id: current
         run: |
           set -euo pipefail
-          COMPOSE_ENV="/opt/algoedgefno/compose/.env"
-          [[ -r "$COMPOSE_ENV" ]] || { echo "$COMPOSE_ENV unreadable" >&2; exit 1; }
-
-          previous="$(grep -E '^BACKEND_STAGING_IMAGE=' "$COMPOSE_ENV" | tail -1 | cut -d= -f2-)"
-
           version_json="$(curl -fsS "${BASE_URL}/version")"
           actual_commit="$(printf '%s' "$version_json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("commit_sha",""))')"
           actual_migration="$(printf '%s' "$version_json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("migration_version",""))')"
 
-          echo "previous=$previous"                       >> "$GITHUB_OUTPUT"
           echo "actual_commit=$actual_commit"             >> "$GITHUB_OUTPUT"
           echo "actual_migration=$actual_migration"       >> "$GITHUB_OUTPUT"
 
       - name: Assert PR 1 is still the rollback target
         env:
-          EXPECTED_PR1_IMAGE: ${{ vars.PR1_IMAGE_DIGEST }}
           EXPECTED_PR1_COMMIT: ${{ vars.PR1_COMMIT_SHA }}
           EXPECTED_PR1_MIGRATION: ${{ vars.PR1_MIGRATION_VERSION }}
           EXPECTED_CANDIDATE_MIGRATION: ${{ vars.PR2_CANDIDATE_MIGRATION_VERSION }}
         run: |
           set -euo pipefail
-          previous="${{ steps.current.outputs.previous }}"
-          # BACKEND_STAGING_IMAGE is a full ghcr.io/...@sha256:<digest> reference;
-          # PR1_IMAGE_DIGEST is stored as the bare sha256:<digest>. Compare the
-          # digest component so the formats line up. No '@' (e.g. a tag ref) leaves
-          # the whole string and fails closed.
-          previous_digest="${previous##*@}"
-          [[ "$previous_digest" == "$EXPECTED_PR1_IMAGE" ]] \
-              || { echo "rollback image digest is $previous_digest (from $previous), want PR 1 digest $EXPECTED_PR1_IMAGE" >&2; exit 1; }
+          # Verify the rollback-target baseline against the RUNNING service
+          # (/version), not the compose .env. This keeps .env at root:root 600 —
+          # the unprivileged runner needs only HTTP access. commit_sha uniquely
+          # identifies the PR 1 image.
           [[ "${{ steps.current.outputs.actual_commit }}" == "$EXPECTED_PR1_COMMIT" ]] \
               || { echo "running commit not PR 1" >&2; exit 1; }
 
