@@ -24,8 +24,13 @@ Run through this fully before every production deploy. Do not skip items.
 - [ ] **No `TEST_UID_*` in `prod.env`.** The staging-only fixture at `/opt/algoedgefno/scripts/staging-only/seed-conflict-fixture.sh` is referenced only by `abuse-suite.sh --env staging` (staging and prod share one VPS)
 
 **GitHub repo vars (set by operator after PR 1 deploys to both envs):**
-- [ ] `PR1_IMAGE_DIGEST`, `PR1_COMMIT_SHA`, `PR1_MIGRATION_VERSION=16` set
+- [ ] `PR1_COMMIT_SHA`, `PR1_MIGRATION_VERSION=16` set — the preflight reads the
+  running service's `/version` (`commit_sha`, `migration_version`) and asserts
+  `commit_sha == PR1_COMMIT_SHA` and `migration_version` is in the accepted set
 - [ ] `PR2_CANDIDATE_MIGRATION_VERSION=18` set when the PR 2 release is cut
+- [ ] `PR1_IMAGE_DIGEST` is **no longer used** by the preflight (it verifies the
+  running service via `/version` instead of an image-digest pin) and is slated
+  for removal — do not rely on it
 
 **How to generate strong tokens:**
 ```bash
@@ -141,7 +146,7 @@ The publish workflow no longer auto-deploys, so a `workflow_dispatch` is the onl
 - [ ] Firebase Console → "One account per email" is ENABLED in the PRODUCTION Firebase project
 - [ ] §10 Step 1: owner signs in to Firebase on the production Android client (Firebase only, no backend). Operator captures the resulting Firebase UID from the Console
 - [ ] §10 Step 2: operator writes `ALLOWED_FIREBASE_UIDS=<owner-uid>` into `/opt/algoedgefno/env/prod.env` BEFORE dispatching `deploy-production.yml`; records the UID in `docs/release-notes-firebase-auth.md`. NO backend restart yet — backend-prod is still on PR 1
-- [ ] §10 Step 3: dispatch `deploy-production.yml` with `smoke_mode=launch`. preflight passes (PR 1 image, migration 16); deploy applies 017+018; backend-prod starts for the first time on the PR 2 image; `ValidateServerConfig` accepts the non-empty allowlist; `smoke-prod-launch.sh` returns green
+- [ ] §10 Step 3: dispatch `deploy-production.yml` with `smoke_mode=launch`. preflight passes (running `/version` reports the PR 1 `commit_sha` and migration 16); deploy applies 017+018; backend-prod starts for the first time on the PR 2 image; `ValidateServerConfig` accepts the non-empty allowlist; `smoke-prod-launch.sh` returns green
 - [ ] §10 Step 5: owner completes `/auth/session` via the Android client. DB query confirms exactly one users row with the owner's UID. Capture `users.id` in `docs/release-notes-firebase-auth.md`
 - [ ] §10 Step 6: owner links the second provider via the Android `linkWithCredential` flow. Second `/auth/session` succeeds; same `users.id` returned (DO UPDATE branch); no new row. If `403 auth_not_allowed` appears, HALT and fix upstream (Firebase Console or Android client) — do NOT allowlist the divergent UID
 - [ ] Android-side Firebase auth contract is documented in a TRACKED location (Android repo committed file, or reviewed Android PR) and linked from `docs/release-notes-firebase-auth.md`
