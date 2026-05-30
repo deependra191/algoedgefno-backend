@@ -52,7 +52,11 @@ jobs:
           # Verify the rollback-target baseline against the RUNNING service
           # (/version), not the compose .env. This keeps .env at root:root 600 —
           # the unprivileged runner needs only HTTP access. commit_sha uniquely
-          # identifies the PR 1 image.
+          # identifies the PR 1 image. Accepted operator-state invariant: the
+          # root wrapper is the sole writer of the compose .env image pin and the
+          # sole (re)starter of the container, so the running image and the .env
+          # rollback pin do not drift in normal operation
+          # (see docs/one-vps-deployment.md).
           [[ "${{ steps.current.outputs.actual_commit }}" == "$EXPECTED_PR1_COMMIT" ]] \
               || { echo "running commit not PR 1" >&2; exit 1; }
 
