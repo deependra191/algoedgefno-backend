@@ -49,6 +49,8 @@ STAGING_CONTAINER="algoedgefno-backend-staging"
 SMOKE_SCRIPT_LAUNCH="/opt/algoedgefno/scripts/smoke-prod-launch.sh"
 SMOKE_SCRIPT_STANDARD="/opt/algoedgefno/scripts/smoke-prod.sh"
 ENV_BACKUP_PREFIX="${ENV_FILE}.bak.preflight."
+READINESS_TIMEOUT_SECONDS=60
+READINESS_INTERVAL_SECONDS=1
 
 fail() {
     printf 'FAIL %s\n' "$1" >&2
@@ -74,6 +76,32 @@ status_code() {
         fail "${name}: got HTTP ${code}, want ${want}"
     fi
     pass "${name}: HTTP ${want}"
+}
+
+# wait_for_status polls url until it returns want, or READINESS_TIMEOUT_SECONDS
+# elapses. It tolerates the brief window where a freshly restarted container is
+# "Started" but not yet listening (the reverse proxy returns 502 during init).
+# Returns non-zero on timeout so callers can fail or roll back.
+wait_for_status() {
+    local name="$1"
+    local want="$2"
+    local url="$3"
+    local code=""
+    local elapsed=0
+
+    while true; do
+        code="$(curl -sS -o /dev/null -w '%{http_code}' "${url}" || true)"
+        if [[ "${code}" == "${want}" ]]; then
+            pass "${name}: HTTP ${want}"
+            return 0
+        fi
+        if [[ "${elapsed}" -ge "${READINESS_TIMEOUT_SECONDS}" ]]; then
+            printf 'FAIL %s: got HTTP %s, want %s after %ss\n' "${name}" "${code}" "${want}" "${READINESS_TIMEOUT_SECONDS}" >&2
+            return 1
+        fi
+        sleep "${READINESS_INTERVAL_SECONDS}"
+        elapsed=$((elapsed + READINESS_INTERVAL_SECONDS))
+    done
 }
 
 json_field() {
@@ -228,8 +256,8 @@ if [[ ! "${expected_image_migration}" =~ ${MIGRATION_VERSION_PATTERN} ]]; then
 fi
 pass "image migration version: ${expected_image_migration}"
 
-status_code staging-health 200 "${STAGING_BASE_URL}/health"
-status_code staging-ready 200 "${STAGING_BASE_URL}/ready"
+wait_for_status staging-health 200 "${STAGING_BASE_URL}/health" || fail "staging-health: not ready within ${READINESS_TIMEOUT_SECONDS}s"
+wait_for_status staging-ready 200 "${STAGING_BASE_URL}/ready" || fail "staging-ready: not ready within ${READINESS_TIMEOUT_SECONDS}s"
 
 version_code="$(curl -fsS -o "${version_body}" -w '%{http_code}' "${STAGING_BASE_URL}/version" || true)"
 if [[ "${version_code}" != "200" ]]; then
