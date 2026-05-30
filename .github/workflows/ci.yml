@@ -94,13 +94,22 @@ jobs:
           grep -q 'preflight_pr1_rollback_target' .github/workflows/deploy-production.yml
           grep -q 'EXPECTED_CANDIDATE_MIGRATION' .github/workflows/deploy-production.yml
 
-      - name: preflight reads /opt/algoedgefno/compose/.env (staging workflow)
+      - name: preflight verifies running service via /version (staging + production)
         run: |
-          grep -q '/opt/algoedgefno/compose/.env' .github/workflows/deploy-staging.yml
+          grep -q '/version' .github/workflows/deploy-staging.yml
+          grep -q '/version' .github/workflows/deploy-production.yml
 
-      - name: preflight reads /opt/algoedgefno/compose/.env (production workflow)
+      - name: preflight no longer reads compose/.env, previous output, or PR1_IMAGE_DIGEST
         run: |
-          grep -q '/opt/algoedgefno/compose/.env' .github/workflows/deploy-production.yml
+          for wf in deploy-staging.yml deploy-production.yml; do
+            f=".github/workflows/$wf"
+            for forbidden in '/opt/algoedgefno/compose/.env' 'steps.current.outputs.previous' 'PR1_IMAGE_DIGEST'; do
+              if grep -qF "$forbidden" "$f"; then
+                echo "$wf must not reference $forbidden under the /version-only preflight" >&2
+                exit 1
+              fi
+            done
+          done
 
       - name: deploy-production.yml has no inputs.image
         run: |
