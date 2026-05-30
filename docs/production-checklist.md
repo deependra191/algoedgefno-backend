@@ -67,6 +67,7 @@ The publish workflow no longer auto-deploys, so a `workflow_dispatch` is the onl
 - [ ] `DB_PASSWORD` is strong, unique to production, and stored only in the server-only production env file
 - [ ] `DB_NAME` is a production-only database name and includes a production marker such as `prod` or `production`
 - [ ] `environment_identity` returns `production`
+- [ ] The `algoedgefno_prod_app` role has `SELECT/INSERT/UPDATE/DELETE` on ALL `public` tables (including any table added by the latest migration, e.g. `refresh_tokens`), AND `ALTER DEFAULT PRIVILEGES FOR ROLE <migration-admin-role>` is in place so future migration tables are auto-granted — see §10 Step 4 and `docs/one-vps-deployment.md`. Skipping this makes the first prod `/auth/session` return HTTP 500 (`permission denied for table refresh_tokens`)
 - [ ] DB is not exposed on a public port — only accessible from the app server
 
 ---
@@ -147,6 +148,19 @@ The publish workflow no longer auto-deploys, so a `workflow_dispatch` is the onl
 - [ ] §10 Step 1: owner signs in to Firebase on the production Android client (Firebase only, no backend). Operator captures the resulting Firebase UID from the Console
 - [ ] §10 Step 2: operator writes `ALLOWED_FIREBASE_UIDS=<owner-uid>` into `/opt/algoedgefno/env/prod.env` BEFORE dispatching `deploy-production.yml`; records the UID in `docs/release-notes-firebase-auth.md`. NO backend restart yet — backend-prod is still on PR 1
 - [ ] §10 Step 3: dispatch `deploy-production.yml` with `smoke_mode=launch`. preflight passes (running `/version` reports the PR 1 `commit_sha` and migration 16); deploy applies 017+018; backend-prod starts for the first time on the PR 2 image; `ValidateServerConfig` accepts the non-empty allowlist; `smoke-prod-launch.sh` returns green
+- [ ] §10 Step 4 (DB role grant — MANDATORY, runs BETWEEN Step 3 and Step 5): immediately after Step 3 applies migrations 017+018 (which create the new `refresh_tokens` table as the admin role) and BEFORE the owner's first `/auth/session` in Step 5, apply the production app-role grant against `algoedgefno_prod` so the app role can use the newly created tables. **Skipping this makes the first production `/auth/session` return HTTP 500** (`permission denied for table refresh_tokens`: the `users` upsert succeeds on the pre-existing, already-granted table, then the `refresh_tokens` INSERT is denied). Run inside `docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_prod'`:
+  ```sql
+  -- One-time backfill for tables that already exist (covers refresh_tokens from migration 018).
+  GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO algoedgefno_prod_app;
+  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO algoedgefno_prod_app;
+  -- Durable: auto-grant the app role on every table the admin role creates in future migrations.
+  -- <postgres-admin-role> MUST be the migration role (migrate-prod.env DB_USER = container POSTGRES_USER).
+  ALTER DEFAULT PRIVILEGES FOR ROLE <postgres-admin-role> IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO algoedgefno_prod_app;
+  ALTER DEFAULT PRIVILEGES FOR ROLE <postgres-admin-role> IN SCHEMA public
+  GRANT USAGE, SELECT ON SEQUENCES TO algoedgefno_prod_app;
+  ```
+  If default privileges were already set at provisioning time (per `docs/one-vps-deployment.md`), re-running this backfill is idempotent and harmless. Verify with `docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_prod -c "\dp refresh_tokens"'` and confirm `algoedgefno_prod_app` has `arwd` (SELECT/INSERT/UPDATE/DELETE) access privileges.
 - [ ] §10 Step 5: owner completes `/auth/session` via the Android client. DB query confirms exactly one users row with the owner's UID. Capture `users.id` in `docs/release-notes-firebase-auth.md`
 - [ ] §10 Step 6: owner links the second provider via the Android `linkWithCredential` flow. Second `/auth/session` succeeds; same `users.id` returned (DO UPDATE branch); no new row. If `403 auth_not_allowed` appears, HALT and fix upstream (Firebase Console or Android client) — do NOT allowlist the divergent UID
 - [ ] Android-side Firebase auth contract is documented in a TRACKED location (Android repo committed file, or reviewed Android PR) and linked from `docs/release-notes-firebase-auth.md`

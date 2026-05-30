@@ -206,17 +206,58 @@ docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_prod
 Inside `psql`:
 
 ```sql
+-- One-time backfill: cover every table that ALREADY exists in this database.
 GRANT CONNECT ON DATABASE algoedgefno_prod TO algoedgefno_prod_app;
 GRANT USAGE ON SCHEMA public TO algoedgefno_prod_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO algoedgefno_prod_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO algoedgefno_prod_app;
 
+-- Durable: auto-grant the app role on every table the admin role creates LATER
+-- (i.e. every future migration). Without this, a new table added by a later
+-- migration (as happened with refresh_tokens in migration 018) has ZERO
+-- privileges for the app role, and the first runtime query against it fails
+-- with `permission denied for table <name>` -- surfacing as a generic 500.
 ALTER DEFAULT PRIVILEGES FOR ROLE <postgres-admin-role> IN SCHEMA public
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO algoedgefno_prod_app;
 
 ALTER DEFAULT PRIVILEGES FOR ROLE <postgres-admin-role> IN SCHEMA public
 GRANT USAGE, SELECT ON SEQUENCES TO algoedgefno_prod_app;
 ```
+
+**Why these statements matter -- read before substituting the placeholder:**
+
+- **`<postgres-admin-role>` MUST be the role migrations run as** -- the
+  container `POSTGRES_USER` (the same `DB_USER` set in `migrate-prod.env`).
+  `ALTER DEFAULT PRIVILEGES FOR ROLE <role>` only affects objects created **by
+  that role**, and only **going forward** from when the statement runs. If you
+  substitute the app role here, or any role other than the migration role, the
+  default privileges silently apply to nothing and future migration tables stay
+  ungranted. Set this at provisioning time, before the migration that creates a
+  given table runs.
+- **The default-privileges grant is not retroactive.** Any table created by the
+  admin role *before* the `ALTER DEFAULT PRIVILEGES` statement ran is not
+  covered by it -- only by the one-time `GRANT ... ON ALL TABLES ...` backfill.
+  Therefore, as a safety net, **re-run the one-time `GRANT ... ON ALL TABLES IN
+  SCHEMA public ...` (and the `ALL SEQUENCES` grant) after any deploy that
+  introduces new tables**, in case default privileges were not in place when
+  that table was created. Re-running the backfill is idempotent and harmless.
+- **No sequence grants are strictly needed today** -- every table uses UUID
+  primary keys, so there are no `SERIAL`/`bigserial` columns or sequences in any
+  current migration. The `ON ALL SEQUENCES` / `ON SEQUENCES` lines above are
+  harmless no-ops today and are included so provisioning stays correct if a
+  future migration introduces a sequence. If one is ever added, the
+  `GRANT USAGE, SELECT ON ALL SEQUENCES ...` backfill and the
+  `ALTER DEFAULT PRIVILEGES ... GRANT USAGE, SELECT ON SEQUENCES ...` durable
+  grant shown above are exactly what that sequence needs.
+
+> **Why this lives here and not in a numbered migration:** numbered migrations
+> in this repo are env-agnostic SQL applied identically across environments
+> (CLAUDE.md rule 10), and no migration contains any `GRANT`/`ROLE`/`ALTER
+> DEFAULT PRIVILEGES` statement. The app and admin **role names differ per
+> environment** (`algoedgefno_prod_app` vs `algoedgefno_staging_app`, and the
+> admin role is whatever the operator chose for `POSTGRES_USER`), so a shared
+> migration cannot hardcode them. Role grants therefore belong to env-specific
+> provisioning, documented here.
 
 Set the production identity row after the first migration creates `environment_identity`:
 
@@ -235,17 +276,29 @@ docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_stag
 Inside `psql`:
 
 ```sql
+-- One-time backfill: cover every table that ALREADY exists in this database.
 GRANT CONNECT ON DATABASE algoedgefno_staging TO algoedgefno_staging_app;
 GRANT USAGE ON SCHEMA public TO algoedgefno_staging_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO algoedgefno_staging_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO algoedgefno_staging_app;
 
+-- Durable: auto-grant the app role on every table the admin role creates LATER.
 ALTER DEFAULT PRIVILEGES FOR ROLE <postgres-admin-role> IN SCHEMA public
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO algoedgefno_staging_app;
 
 ALTER DEFAULT PRIVILEGES FOR ROLE <postgres-admin-role> IN SCHEMA public
 GRANT USAGE, SELECT ON SEQUENCES TO algoedgefno_staging_app;
 ```
+
+The same three caveats from the production block apply verbatim:
+`<postgres-admin-role>` is the migration role (`migrate-staging.env` `DB_USER` =
+container `POSTGRES_USER`), `ALTER DEFAULT PRIVILEGES` is not retroactive, and the
+one-time `GRANT ... ON ALL TABLES ...` backfill must be re-run after any staging
+deploy that introduces new tables. Skipping the re-run was the staging
+`refresh_tokens` incident: migration 018 created the table, the app role had no
+privilege on it, and the first `/auth/session` returned HTTP 500
+(`permission denied for table refresh_tokens` after the `users` upsert
+succeeded).
 
 Then set the staging identity row:
 
