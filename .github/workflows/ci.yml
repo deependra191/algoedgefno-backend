@@ -94,13 +94,10 @@ jobs:
           grep -q 'preflight_pr1_rollback_target' .github/workflows/deploy-production.yml
           grep -q 'EXPECTED_CANDIDATE_MIGRATION' .github/workflows/deploy-production.yml
 
-      - name: preflight reads /opt/algoedgefno/compose/.env (staging workflow)
+      - name: preflight verifies running service via /version (staging + production)
         run: |
-          grep -q '/opt/algoedgefno/compose/.env' .github/workflows/deploy-staging.yml
-
-      - name: preflight reads /opt/algoedgefno/compose/.env (production workflow)
-        run: |
-          grep -q '/opt/algoedgefno/compose/.env' .github/workflows/deploy-production.yml
+          grep -q '/version' .github/workflows/deploy-staging.yml
+          grep -q '/version' .github/workflows/deploy-production.yml
 
       - name: deploy-production.yml has no inputs.image
         run: |
