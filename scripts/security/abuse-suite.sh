@@ -35,6 +35,7 @@ readonly HTTP_STATUS_UNPROCESSABLE_ENTITY=422
 readonly HTTP_STATUS_TOO_MANY_REQUESTS=429
 
 readonly ERR_MISSING_AUTH="missing or invalid authorization header"
+readonly ERR_INVALID_OR_EXPIRED_TOKEN="invalid or expired token"
 readonly ERR_AUTH_NOT_ALLOWED="auth_not_allowed"
 readonly ERR_IDENTITY_CONFLICT="identity_conflict"
 readonly ERR_NO_CANDLE_DATA="no candle data available"
@@ -274,7 +275,7 @@ run_auth_checks() {
     assert_error_response "protected-no-auth" "${HTTP_STATUS_UNAUTHORIZED}" "${ERR_MISSING_AUTH}" \
         "${base_url}${PROTECTED_CONFIG_PATH}"
 
-    assert_error_response "protected-invalid-token" "${HTTP_STATUS_UNAUTHORIZED}" "${ERR_MISSING_AUTH}" \
+    assert_error_response "protected-invalid-token" "${HTTP_STATUS_UNAUTHORIZED}" "${ERR_INVALID_OR_EXPIRED_TOKEN}" \
         --config "${invalid_auth_cfg}" \
         "${base_url}${PROTECTED_CONFIG_PATH}"
 
