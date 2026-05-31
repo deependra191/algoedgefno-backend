@@ -76,6 +76,12 @@ sudo chown root:root /usr/local/sbin/algoedgefno-deploy-staging /usr/local/sbin/
 sudo chmod 755 /usr/local/sbin/algoedgefno-deploy-staging /usr/local/sbin/algoedgefno-deploy-prod
 ```
 
+> **Wrapper re-copy on script change.** The `/usr/local/sbin/algoedgefno-deploy-*`
+> wrappers are copies of the repo `deploy/scripts/*.sh`. Editing those scripts in
+> the repo does **not** change the live wrappers. After any change, re-copy each
+> script to its `/usr/local/sbin/` path (and re-apply the `chown root:root` +
+> `chmod 755` above) before the next deploy, or the deploy still runs the old logic.
+
 ## Image references
 
 Use digest-qualified image references from the `Publish backend image` workflow
@@ -206,17 +212,58 @@ docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_prod
 Inside `psql`:
 
 ```sql
+-- One-time backfill: cover every table that ALREADY exists in this database.
 GRANT CONNECT ON DATABASE algoedgefno_prod TO algoedgefno_prod_app;
 GRANT USAGE ON SCHEMA public TO algoedgefno_prod_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO algoedgefno_prod_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO algoedgefno_prod_app;
 
+-- Durable: auto-grant the app role on every table the admin role creates LATER
+-- (i.e. every future migration). Without this, a new table added by a later
+-- migration (as happened with refresh_tokens in migration 018) has ZERO
+-- privileges for the app role, and the first runtime query against it fails
+-- with `permission denied for table <name>` -- surfacing as a generic 500.
 ALTER DEFAULT PRIVILEGES FOR ROLE <postgres-admin-role> IN SCHEMA public
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO algoedgefno_prod_app;
 
 ALTER DEFAULT PRIVILEGES FOR ROLE <postgres-admin-role> IN SCHEMA public
 GRANT USAGE, SELECT ON SEQUENCES TO algoedgefno_prod_app;
 ```
+
+**Why these statements matter -- read before substituting the placeholder:**
+
+- **`<postgres-admin-role>` MUST be the role migrations run as** -- the
+  container `POSTGRES_USER` (the same `DB_USER` set in `migrate-prod.env`).
+  `ALTER DEFAULT PRIVILEGES FOR ROLE <role>` only affects objects created **by
+  that role**, and only **going forward** from when the statement runs. If you
+  substitute the app role here, or any role other than the migration role, the
+  default privileges silently apply to nothing and future migration tables stay
+  ungranted. Set this at provisioning time, before the migration that creates a
+  given table runs.
+- **The default-privileges grant is not retroactive.** Any table created by the
+  admin role *before* the `ALTER DEFAULT PRIVILEGES` statement ran is not
+  covered by it -- only by the one-time `GRANT ... ON ALL TABLES ...` backfill.
+  Therefore, as a safety net, **re-run the one-time `GRANT ... ON ALL TABLES IN
+  SCHEMA public ...` (and the `ALL SEQUENCES` grant) after any deploy that
+  introduces new tables**, in case default privileges were not in place when
+  that table was created. Re-running the backfill is idempotent and harmless.
+- **No sequence grants are strictly needed today** -- every table uses UUID
+  primary keys, so there are no `SERIAL`/`bigserial` columns or sequences in any
+  current migration. The `ON ALL SEQUENCES` / `ON SEQUENCES` lines above are
+  harmless no-ops today and are included so provisioning stays correct if a
+  future migration introduces a sequence. If one is ever added, the
+  `GRANT USAGE, SELECT ON ALL SEQUENCES ...` backfill and the
+  `ALTER DEFAULT PRIVILEGES ... GRANT USAGE, SELECT ON SEQUENCES ...` durable
+  grant shown above are exactly what that sequence needs.
+
+> **Why this lives here and not in a numbered migration:** numbered migrations
+> in this repo are env-agnostic SQL applied identically across environments
+> (CLAUDE.md rule 10), and no migration contains any `GRANT`/`ROLE`/`ALTER
+> DEFAULT PRIVILEGES` statement. The app and admin **role names differ per
+> environment** (`algoedgefno_prod_app` vs `algoedgefno_staging_app`, and the
+> admin role is whatever the operator chose for `POSTGRES_USER`), so a shared
+> migration cannot hardcode them. Role grants therefore belong to env-specific
+> provisioning, documented here.
 
 Set the production identity row after the first migration creates `environment_identity`:
 
@@ -235,17 +282,29 @@ docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_stag
 Inside `psql`:
 
 ```sql
+-- One-time backfill: cover every table that ALREADY exists in this database.
 GRANT CONNECT ON DATABASE algoedgefno_staging TO algoedgefno_staging_app;
 GRANT USAGE ON SCHEMA public TO algoedgefno_staging_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO algoedgefno_staging_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO algoedgefno_staging_app;
 
+-- Durable: auto-grant the app role on every table the admin role creates LATER.
 ALTER DEFAULT PRIVILEGES FOR ROLE <postgres-admin-role> IN SCHEMA public
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO algoedgefno_staging_app;
 
 ALTER DEFAULT PRIVILEGES FOR ROLE <postgres-admin-role> IN SCHEMA public
 GRANT USAGE, SELECT ON SEQUENCES TO algoedgefno_staging_app;
 ```
+
+The same three caveats from the production block apply verbatim:
+`<postgres-admin-role>` is the migration role (`migrate-staging.env` `DB_USER` =
+container `POSTGRES_USER`), `ALTER DEFAULT PRIVILEGES` is not retroactive, and the
+one-time `GRANT ... ON ALL TABLES ...` backfill must be re-run after any staging
+deploy that introduces new tables. Skipping the re-run was the staging
+`refresh_tokens` incident: migration 018 created the table, the app role had no
+privilege on it, and the first `/auth/session` returned HTTP 500
+(`permission denied for table refresh_tokens` after the `users` upsert
+succeeded).
 
 Then set the staging identity row:
 
@@ -549,10 +608,30 @@ Backlog cleanup after the self-hosted runner deployment succeeds:
 ## PR 2 deployment notes (Firebase auth)
 
 **Per-environment rollback precondition.** PR 2 deploys are gated by
-`preflight_pr1_rollback_target`. The preflight reads
-`/opt/algoedgefno/compose/.env` and `/version`, and asserts: image equals the
-PR 1 image, commit equals the PR 1 commit, and the migration version is either
-PR 1 (16) or the candidate (18).
+`preflight_pr1_rollback_target`. The preflight verifies the **running** service
+over HTTP via the `/version` endpoint — it does **not** read
+`/opt/algoedgefno/compose/.env`. It reads `commit_sha` and `migration_version`
+from the `/version` JSON and asserts: `commit_sha` equals the PR 1 commit
+(repo variable `PR1_COMMIT_SHA`), and `migration_version` is in the accepted
+set — either PR 1 (`PR1_MIGRATION_VERSION`, currently 16) or the candidate
+(`PR2_CANDIDATE_MIGRATION_VERSION`, currently 18). `commit_sha` uniquely
+identifies the PR 1 image, so verifying it against the running service replaces
+the older image-digest pin comparison. The runner needs only HTTP access; the
+compose `.env` stays `root:root` mode 600.
+
+The repository variable `PR1_IMAGE_DIGEST` is no longer used by the preflight
+and is slated for removal.
+
+**Name drift invariant.** The preflight verifies the **running image** via
+`/version`, while the rollback/promotion image pins live in the root-only
+compose `.env` (`BACKEND_STAGING_IMAGE` / `BACKEND_PROD_IMAGE`). The accepted
+operator-state invariant is that the root-owned deploy wrapper is the **sole
+writer** of the compose `.env` image pin and the **sole (re)starter** of the
+container. Because nothing else writes the pin or restarts the container, the
+running image and the `.env` rollback pin do not drift in normal operation — so
+checking the running service is equivalent to checking the pin. The deploy
+workflow preflight comments in `deploy-staging.yml` and `deploy-production.yml`
+forward-reference this section for the rationale.
 
 - **PR 2 → PR 1 rollback:** PERMITTED.
 - **Pre-PR-1 rollback:** PROHIBITED as soon as PR 2 has been deployed to any

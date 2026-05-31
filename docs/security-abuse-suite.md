@@ -8,9 +8,16 @@ restart containers, or read server-side env files.
 
 - Run from a shell that has `curl`, `python3`, and either Docker log access or
   `journalctl` access on the VPS.
-- Export the target token in the operator shell:
+- Export the target token in the operator shell. The scripts deliberately do
+  NOT read server-side env files, so you extract it yourself (see "Staging
+  setup" below):
   - `STAGING_APP_TOKEN` for `--env staging`
   - `PROD_APP_TOKEN` for `--env prod`
+- For `--env staging` you must ALSO export the Firebase test UIDs the suite
+  uses: `TEST_UID_A`, `TEST_UID_DENIED`, `TEST_UID_CONFLICT` (the same values
+  provisioned by `setup-firebase-test-users` in Phase L0). A missing
+  `STAGING_APP_TOKEN` fails the run immediately; a missing `TEST_UID_*` makes
+  the dependent check **SKIP** — which is not a pass.
 - Do not pass tokens on the command line. The scripts write bearer headers to
   chmod-600 temporary curl config files and remove them on exit.
 
@@ -30,6 +37,32 @@ export ABUSE_STAGING_BASE_URL=https://staging-api.algoedgefno.com
 export ABUSE_PROD_BASE_URL=https://api.algoedgefno.com
 export ABUSE_STAGING_CONTAINER=algoedgefno-backend-staging
 export ABUSE_PROD_CONTAINER=algoedgefno-backend-prod
+```
+
+### Staging setup — extract token and test UIDs on the VPS
+
+`STAGING_APP_TOKEN` is the staging `APP_SECRET_TOKEN`. Extract it from the
+compose env file (root-owned, mode 600) and strip any surrounding quotes — a
+quoted value makes the `config-app-with-token` check return `401` instead of
+`200`:
+
+```bash
+export STAGING_APP_TOKEN="$(sudo sed -n 's/^APP_SECRET_TOKEN=//p' \
+  /opt/algoedgefno/env/staging.env | tail -1 | sed -e 's/^["'\'']//' -e 's/["'\'']$//')"
+
+# Firebase test UIDs — use the values provisioned in Phase L0; the ones below
+# are the staging convention. TEST_UID_DENIED is deliberately absent from
+# ALLOWED_FIREBASE_UIDS so the allowlist-denied check gets 403.
+export TEST_UID_A='staging-test-uid-a'
+export TEST_UID_DENIED='staging-test-uid-denied'
+export TEST_UID_CONFLICT='staging-test-uid-conflict'
+
+# Verify the token is set and unquoted, without printing it:
+case "$STAGING_APP_TOKEN" in
+  \"*|*\"|\'*|*\') echo "token has surrounding quotes — re-extract" ;;
+  "")             echo "token empty — extraction failed" ;;
+  *)              echo "token looks clean" ;;
+esac
 ```
 
 ## Environment split (PR 2)
@@ -120,8 +153,11 @@ scripts/security/check-log-redaction.sh --env staging --secret-file /path/to/sec
 ## Expected Coverage
 
 Both environments:
-- Protected endpoint without auth returns `401`.
-- Protected endpoint with invalid token returns `401`.
+- Protected endpoint without auth returns `401` (`missing or invalid authorization header`).
+- Protected endpoint with a present-but-invalid bearer returns `401`
+  (`invalid or expired token`) — a distinct error body from the missing-header
+  case above. The two messages are separate constants in
+  `internal/middleware/auth.go`; the suite asserts each precisely.
 - Production URL with staging token returns `401` when `STAGING_APP_TOKEN` is
   available during the prod run.
 - Static-token split: `APP_SECRET_TOKEN` → `200` on `/api/v1/config/app`, `401`
