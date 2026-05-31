@@ -20,6 +20,27 @@ rotation, the allowlist, and the deployment/CI machinery.
 
 ---
 
+## Staging rollout fixes (PR 2)
+
+Issues found and fixed while bringing PR 2 up on staging (2026-05-30 / 05-31).
+Each row links to the authoritative runbook and the PR; details are not
+duplicated here.
+
+| Issue | Root cause | Authoritative doc | PR |
+|---|---|---|---|
+| `/auth/session` → `500` on first login | The new `refresh_tokens` table (migration 018) had no grant for the runtime app role — migrations run as the admin/owner role and nothing auto-grants later-created tables | [`one-vps-deployment.md`](one-vps-deployment.md) (role provisioning: `GRANT … ON ALL TABLES` + `ALTER DEFAULT PRIVILEGES`), [`production-checklist.md`](production-checklist.md) §10 Step 4 | #106 |
+| Deploy preflight read the root-only compose `.env` | Preflight now verifies the running service over HTTP via `/version` (commit + migration) instead | [`one-vps-deployment.md`](one-vps-deployment.md) (preflight + name-drift invariant) | #105 |
+| Deploy intermittently rolled back on a `502` health check | A single immediate `curl /health` after `compose up` lost the ~0.5–2 s container-init race (reverse proxy returns 502); the prod deploy had no post-restart readiness gate at all | both deploy scripts now poll readiness (`wait_for_status`, 60 s @ 1 s); wrapper-re-copy note in [`one-vps-deployment.md`](one-vps-deployment.md) | #107 |
+| Abuse suite `protected-invalid-token` failed | It expected the missing-header `401` body, but a present-but-invalid bearer returns `invalid or expired token` (a distinct constant in `internal/middleware/auth.go`) | [`security-abuse-suite.md`](security-abuse-suite.md) (Expected Coverage) | #108 |
+| Abuse-suite run failed on a missing `STAGING_APP_TOKEN` | The run setup — extracting the token from `staging.env` (unquoted) and the required `TEST_UID_*` exports — was undocumented | [`security-abuse-suite.md`](security-abuse-suite.md) (Staging setup) | #108 |
+
+> **After #107 and #108 merge:** the live VPS wrappers under `/usr/local/sbin/`
+> and the scripts under `/opt/algoedgefno/scripts/` are copies installed from the
+> candidate image — re-provision them from the new image (or re-copy) so the
+> running copies carry these fixes.
+
+---
+
 ## Reference values
 
 | Key | Value |
