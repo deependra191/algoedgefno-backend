@@ -44,6 +44,8 @@ MIGRATION_VERSION_PATTERN='^[0-9]+$'
 COMPOSE_DIR="/opt/algoedgefno/compose"
 ENV_FILE="${COMPOSE_DIR}/.env"
 ENV_BACKUP_PREFIX="${ENV_FILE}.bak.preflight."
+READINESS_TIMEOUT_SECONDS=60
+READINESS_INTERVAL_SECONDS=1
 SMOKE_SCRIPT_LAUNCH="/opt/algoedgefno/scripts/smoke-staging.sh"
 SMOKE_SCRIPT_STANDARD="/opt/algoedgefno/scripts/smoke-staging.sh"
 
@@ -73,6 +75,32 @@ status_code() {
         return 1
     fi
     pass "${name}: HTTP ${want}"
+}
+
+# wait_for_status polls url until it returns want, or READINESS_TIMEOUT_SECONDS
+# elapses. It tolerates the brief window where a freshly restarted container is
+# "Started" but not yet listening (the reverse proxy returns 502 during init).
+# Returns non-zero on timeout so post-deploy callers can roll back.
+wait_for_status() {
+    local name="$1"
+    local want="$2"
+    local url="$3"
+    local code=""
+    local elapsed=0
+
+    while true; do
+        code="$(curl -sS -o /dev/null -w '%{http_code}' "${url}" || true)"
+        if [[ "${code}" == "${want}" ]]; then
+            pass "${name}: HTTP ${want}"
+            return 0
+        fi
+        if [[ "${elapsed}" -ge "${READINESS_TIMEOUT_SECONDS}" ]]; then
+            printf 'FAIL %s: got HTTP %s, want %s after %ss\n' "${name}" "${code}" "${want}" "${READINESS_TIMEOUT_SECONDS}" >&2
+            return 1
+        fi
+        sleep "${READINESS_INTERVAL_SECONDS}"
+        elapsed=$((elapsed + READINESS_INTERVAL_SECONDS))
+    done
 }
 
 json_field() {
@@ -225,10 +253,10 @@ if ! docker compose --profile staging up -d backend-staging; then
     rollback_and_fail "failed to restart backend-staging"
 fi
 
-if ! status_code health 200 "${STAGING_BASE_URL}/health"; then
+if ! wait_for_status health 200 "${STAGING_BASE_URL}/health"; then
     rollback_and_fail "staging health check failed"
 fi
-if ! status_code ready 200 "${STAGING_BASE_URL}/ready"; then
+if ! wait_for_status ready 200 "${STAGING_BASE_URL}/ready"; then
     rollback_and_fail "staging ready check failed"
 fi
 

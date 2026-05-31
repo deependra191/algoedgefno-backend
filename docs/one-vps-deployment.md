@@ -76,6 +76,12 @@ sudo chown root:root /usr/local/sbin/algoedgefno-deploy-staging /usr/local/sbin/
 sudo chmod 755 /usr/local/sbin/algoedgefno-deploy-staging /usr/local/sbin/algoedgefno-deploy-prod
 ```
 
+> **Wrapper re-copy on script change.** The `/usr/local/sbin/algoedgefno-deploy-*`
+> wrappers are copies of the repo `deploy/scripts/*.sh`. Editing those scripts in
+> the repo does **not** change the live wrappers. After any change, re-copy each
+> script to its `/usr/local/sbin/` path (and re-apply the `chown root:root` +
+> `chmod 755` above) before the next deploy, or the deploy still runs the old logic.
+
 ## Image references
 
 Use digest-qualified image references from the `Publish backend image` workflow
