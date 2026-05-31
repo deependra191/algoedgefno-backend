@@ -317,6 +317,17 @@ if ! docker compose up -d backend-prod; then
     rollback_and_fail "failed to restart backend-prod"
 fi
 
+# Wait for the freshly restarted prod service to become ready before smoke runs.
+# The reverse proxy returns 502 during the brief container init window, and the
+# smoke script's first /health check is a single immediate curl that would lose
+# that race (mirrors the staging deploy's post-restart readiness gate).
+if ! wait_for_status prod-health 200 "${PROD_BASE_URL}/health"; then
+    rollback_and_fail "production health check failed"
+fi
+if ! wait_for_status prod-ready 200 "${PROD_BASE_URL}/ready"; then
+    rollback_and_fail "production ready check failed"
+fi
+
 run_smoke() {
     case "${SMOKE_MODE:-}" in
         launch)
