@@ -24,51 +24,8 @@ env:
   IMAGE_PREFIX: "ghcr.io/deependra191/algoedgefno-backend@sha256:"
 
 jobs:
-  preflight_pr1_rollback_target:
-    name: Assert PR 1 is the current rollback target
-    runs-on: [self-hosted, algoedgefno-staging]
-    if: github.ref == 'refs/heads/main'
-    env:
-      BASE_URL: ${{ vars.STAGING_BASE_URL }}
-    steps:
-      - name: Read running version from the live service
-        id: current
-        run: |
-          set -euo pipefail
-          version_json="$(curl -fsS "${BASE_URL}/version")"
-          actual_commit="$(printf '%s' "$version_json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("commit_sha",""))')"
-          actual_migration="$(printf '%s' "$version_json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("migration_version",""))')"
-
-          echo "actual_commit=$actual_commit"             >> "$GITHUB_OUTPUT"
-          echo "actual_migration=$actual_migration"       >> "$GITHUB_OUTPUT"
-
-      - name: Assert PR 1 is still the rollback target
-        env:
-          EXPECTED_PR1_COMMIT: ${{ vars.PR1_COMMIT_SHA }}
-          EXPECTED_PR1_MIGRATION: ${{ vars.PR1_MIGRATION_VERSION }}
-          EXPECTED_CANDIDATE_MIGRATION: ${{ vars.PR2_CANDIDATE_MIGRATION_VERSION }}
-        run: |
-          set -euo pipefail
-          # Verify the rollback-target baseline against the RUNNING service
-          # (/version), not the compose .env. This keeps .env at root:root 600 —
-          # the unprivileged runner needs only HTTP access. commit_sha uniquely
-          # identifies the PR 1 image. Accepted operator-state invariant: the
-          # root wrapper is the sole writer of the compose .env image pin and the
-          # sole (re)starter of the container, so the running image and the .env
-          # rollback pin do not drift in normal operation
-          # (see docs/one-vps-deployment.md).
-          [[ "${{ steps.current.outputs.actual_commit }}" == "$EXPECTED_PR1_COMMIT" ]] \
-              || { echo "running commit not PR 1" >&2; exit 1; }
-
-          m="${{ steps.current.outputs.actual_migration }}"
-          if [[ "$m" != "$EXPECTED_PR1_MIGRATION" && "$m" != "$EXPECTED_CANDIDATE_MIGRATION" ]]; then
-              echo "migration version $m is neither PR 1 ($EXPECTED_PR1_MIGRATION) nor candidate ($EXPECTED_CANDIDATE_MIGRATION)" >&2
-              exit 1
-          fi
-
   deploy-staging:
     name: Deploy image to staging VPS
-    needs: preflight_pr1_rollback_target
     runs-on: [self-hosted, algoedgefno-staging]
     if: github.ref == 'refs/heads/main'
     timeout-minutes: 15

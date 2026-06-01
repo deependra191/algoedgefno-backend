@@ -4,6 +4,7 @@ set -euo pipefail
 PATH="/usr/sbin:/usr/bin:/sbin:/bin"
 
 SMOKE_MODE=""
+readonly MIN_TENANT_SCOPED_MIGRATION_VERSION=16
 
 # Parse flags before positional arguments.
 while [[ $# -gt 0 ]]; do
@@ -155,6 +156,15 @@ printf "%s\n" "${max}"
 '
 }
 
+require_min_tenant_scoped_migration() {
+    local image_migration="$1"
+
+    if (( 10#${image_migration} < 10#${MIN_TENANT_SCOPED_MIGRATION_VERSION} )); then
+        fail "image migration version ${image_migration} is below minimum tenant-scoped migration ${MIN_TENANT_SCOPED_MIGRATION_VERSION}"
+    fi
+    pass "image migration version ${image_migration} is >= minimum tenant-scoped migration ${MIN_TENANT_SCOPED_MIGRATION_VERSION}"
+}
+
 if [[ ! "${PROD_BASE_URL}" =~ ${HTTPS_HOST_PATTERN} ]]; then
     fail "prod base URL must be an https host without a path"
 fi
@@ -255,6 +265,7 @@ if [[ ! "${expected_image_migration}" =~ ${MIGRATION_VERSION_PATTERN} ]]; then
     fail "image migration version must be a non-negative integer, got ${expected_image_migration}"
 fi
 pass "image migration version: ${expected_image_migration}"
+require_min_tenant_scoped_migration "${expected_image_migration}"
 
 wait_for_status staging-health 200 "${STAGING_BASE_URL}/health" || fail "staging-health: not ready within ${READINESS_TIMEOUT_SECONDS}s"
 wait_for_status staging-ready 200 "${STAGING_BASE_URL}/ready" || fail "staging-ready: not ready within ${READINESS_TIMEOUT_SECONDS}s"

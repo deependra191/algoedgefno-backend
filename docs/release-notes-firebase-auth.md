@@ -29,7 +29,7 @@ duplicated here.
 | Issue | Root cause | Authoritative doc | PR |
 |---|---|---|---|
 | `/auth/session` → `500` on first login | The new `refresh_tokens` table (migration 018) had no grant for the runtime app role — migrations run as the admin/owner role and nothing auto-grants later-created tables | [`one-vps-deployment.md`](one-vps-deployment.md) (role provisioning: `GRANT … ON ALL TABLES` + `ALTER DEFAULT PRIVILEGES`), [`production-checklist.md`](production-checklist.md) §10 Step 4 | #106 |
-| Deploy preflight read the root-only compose `.env` | Preflight now verifies the running service over HTTP via `/version` (commit + migration) instead | [`one-vps-deployment.md`](one-vps-deployment.md) (preflight + name-drift invariant) | #105 |
+| Deploy preflight read the root-only compose `.env` | The launch preflight was moved to `/version`; after launch, deploy workflows use the durable minimum-safe migration guard instead | [`one-vps-deployment.md`](one-vps-deployment.md) (post-launch deployment notes) | #105 |
 | Deploy intermittently rolled back on a `502` health check | A single immediate `curl /health` after `compose up` lost the ~0.5–2 s container-init race (reverse proxy returns 502); the prod deploy had no post-restart readiness gate at all | both deploy scripts now poll readiness (`wait_for_status`, 60 s @ 1 s); wrapper-re-copy note in [`one-vps-deployment.md`](one-vps-deployment.md) | #107 |
 | Abuse suite `protected-invalid-token` failed | It expected the missing-header `401` body, but a present-but-invalid bearer returns `invalid or expired token` (a distinct constant in `internal/middleware/auth.go`) | [`security-abuse-suite.md`](security-abuse-suite.md) (Expected Coverage) | #108 |
 | Abuse-suite run failed on a missing `STAGING_APP_TOKEN` | The run setup — extracting the token from `staging.env` (unquoted) and the required `TEST_UID_*` exports — was undocumented | [`security-abuse-suite.md`](security-abuse-suite.md) (Staging setup) | #108 |
@@ -38,6 +38,10 @@ duplicated here.
 > and the scripts under `/opt/algoedgefno/scripts/` are copies installed from the
 > candidate image — re-provision them from the new image (or re-copy) so the
 > running copies carry these fixes.
+> The same re-copy rule applies to the post-launch deploy semantics PR: the
+> live `/usr/local/sbin/algoedgefno-deploy-*` wrappers must be refreshed before
+> the next deploy so they contain the root-owned
+> `MIN_TENANT_SCOPED_MIGRATION_VERSION=16` boundary.
 
 ---
 
@@ -45,18 +49,18 @@ duplicated here.
 
 | Key | Value |
 |---|---|
-| `PR1_IMAGE_DIGEST` (no longer used by the preflight; slated for removal) | `sha256:70a7f15382bba2204678d6ab44cc1fd5d4220002ec91a5d148e12b1cf9b1ccaf` |
+| `PR1_IMAGE_DIGEST` (historical; not read by post-launch deploy workflows) | `sha256:70a7f15382bba2204678d6ab44cc1fd5d4220002ec91a5d148e12b1cf9b1ccaf` |
 | `PR1_COMMIT_SHA` | `e9adcc05eda6e767c1a008e5fe931139df894442` |
 | `PR1_MIGRATION_VERSION` | `16` |
 | `PR2_CANDIDATE_MIGRATION_VERSION` | `18` |
+| `MIN_TENANT_SCOPED_MIGRATION_VERSION` | `16` in the root-owned deploy wrappers |
 | `CANDIDATE_IMAGE` (PR 2 digest after `publish-backend-image.yml` runs) | _capture from publish run summary: `sha256:__________`_ |
 
-Set `PR1_COMMIT_SHA`, `PR1_MIGRATION_VERSION=16` as GitHub repository variables
-after PR 1 deploys to both environments. Set
-`PR2_CANDIDATE_MIGRATION_VERSION=18` when the PR 2 release is cut. The preflight
-verifies the running service via `/version` (asserting `commit_sha` ==
-`PR1_COMMIT_SHA` and `migration_version` is in the accepted set), so
-`PR1_IMAGE_DIGEST` is no longer used and is slated for removal.
+Post-launch deploy workflows do not read the PR1/PR2 rollout variables. The
+root-owned wrappers derive the candidate image migration from the
+digest-qualified image and reject images below
+`MIN_TENANT_SCOPED_MIGRATION_VERSION=16`. The PR1 and PR2 values above are
+retained as historical rollout evidence only.
 
 ---
 
@@ -84,7 +88,8 @@ verifies the running service via `/version` (asserting `commit_sha` ==
    `TEST_UID_A/B/DENIED/CONFLICT` and a non-empty `ALLOWED_FIREBASE_UIDS`.
 6. Install operator scripts on the host via `docker create`/`docker cp` from
    `CANDIDATE_IMAGE` (no git clone on the VPS).
-7. Approve → preflight (running `/version`: PR 1 `commit_sha`, migration 16) → dispatch `deploy-staging.yml`
+7. Approve → dispatch `deploy-staging.yml`; the wrapper rejects images below
+   `MIN_TENANT_SCOPED_MIGRATION_VERSION=16`
    with `inputs.image = CANDIDATE_IMAGE` from `main`.
 
 ## L0 provisioning runbook — production
@@ -110,7 +115,7 @@ Fill in as each step completes:
 - [x] **Step 2** — `ALLOWED_FIREBASE_UIDS=<owner-uid>` written to
       `/opt/algoedgefno/env/prod.env` before dispatch (no backend restart yet).
 - [x] **Step 3** — `deploy-production.yml` dispatched with `smoke_mode=launch`;
-      preflight passed (running `/version`: PR 1 `commit_sha`, migration 16); 017+018 applied; backend-prod
+      minimum-safe migration guard passed; 017+018 applied; backend-prod
       started on PR 2 image; `smoke-prod-launch.sh` green.
 - [x] **Step 5** — owner completes `/auth/session`; first `users` row created;
       captured `users.id`: `bf7f4c56-8ca4-4d2e-ad89-e409bc4bba17`

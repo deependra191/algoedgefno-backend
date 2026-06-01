@@ -24,14 +24,15 @@ Run through this fully before every production deploy. Do not skip items.
 - [ ] Launch bootstrap distinction is understood: the owner UID is captured from a production Firebase-only Android sign-in before PR2 deploy; no backend `users` row is manually inserted. Firebase Console **Add user** is used only later for `PROD_SMOKE_UID` if §10.1 is retained.
 - [ ] **No `TEST_UID_*` in `prod.env`.** The staging-only fixture at `/opt/algoedgefno/scripts/staging-only/seed-conflict-fixture.sh` is referenced only by `abuse-suite.sh --env staging` (staging and prod share one VPS)
 
-**GitHub repo vars (set by operator after PR 1 deploys to both envs):**
-- [ ] `PR1_COMMIT_SHA`, `PR1_MIGRATION_VERSION=16` set — the preflight reads the
-  running service's `/version` (`commit_sha`, `migration_version`) and asserts
-  `commit_sha == PR1_COMMIT_SHA` and `migration_version` is in the accepted set
-- [ ] `PR2_CANDIDATE_MIGRATION_VERSION=18` set when the PR 2 release is cut
-- [ ] `PR1_IMAGE_DIGEST` is **no longer used** by the preflight (it verifies the
-  running service via `/version` instead of an image-digest pin) and is slated
-  for removal — do not rely on it
+**GitHub repo vars (active post-launch deploy semantics):**
+- [ ] The root-owned deploy wrappers contain
+  `MIN_TENANT_SCOPED_MIGRATION_VERSION=16`. They derive the candidate image
+  migration version from the digest-qualified image and reject images below this
+  minimum. This permanently blocks pre-tenant-scoped images without requiring
+  the currently running service to still be PR 1.
+- [ ] `PR1_COMMIT_SHA`, `PR1_MIGRATION_VERSION`, `PR1_IMAGE_DIGEST`, and
+  `PR2_CANDIDATE_MIGRATION_VERSION` are historical rollout references only.
+  Post-launch deploy workflows do not read them.
 
 **How to generate strong tokens:**
 ```bash
@@ -54,7 +55,7 @@ The publish workflow no longer auto-deploys, so a `workflow_dispatch` is the onl
 - [ ] Candidate-image preflight: `/app/firebase-token`, `/app/setup-firebase-test-users`, `/app/teardown-firebase-test-users`, `/app/scripts/smoke-deploy.sh`, `/app/scripts/smoke-staging.sh`, `/app/scripts/smoke-prod.sh`, `/app/scripts/security/abuse-suite.sh`, `/app/scripts/security/check-log-redaction.sh`, and `/app/scripts/staging-only/seed-conflict-fixture.sh` are all present and executable (image-digest trust anchor)
 - [ ] Operator smoke + security-gate scripts installed on host via `docker create`/`docker cp` from the candidate image digest — **no git clone on the VPS**
 - [ ] Staging only: Firebase test users created against the staging project
-- [ ] Operator approves → preflight runs → deploy proceeds
+- [ ] Operator approves → dispatch runs → wrapper validates the image and deploy proceeds
 - [ ] Repeat for production (no test fixtures; mechanically promote the staging digest; no pre-provisioning of the backend `users` row; owner Firebase UID is captured from production Firebase Auth before dispatch)
 - [ ] Migration 017's inline pre-condition is the authoritative gate for "zero users rows pre-Firebase". The migrate compose service runs `/app/migrate` only. The operator MAY use any administrative SQL access from the VPS shell (e.g. `docker compose exec postgres psql -U <postgres-admin-user> -d algoedgefno_{staging,prod} -c "SELECT COUNT(*) FROM users;"`) as an optional pre-dispatch heads-up. Skipping it is acceptable; the migration's inline guard fails closed regardless. Do NOT introduce a shell-script gate that uses the migrate compose profile or the application role.
 
@@ -86,7 +87,7 @@ The publish workflow no longer auto-deploys, so a `workflow_dispatch` is the onl
 - [ ] `BACKEND_PROD_IMAGE` is the digest-qualified GHCR image reference that already passed staging, not `latest`
 - [ ] `BACKEND_STAGING_IMAGE` is separate from `BACKEND_PROD_IMAGE` so staging candidate deploys cannot implicitly change production
 - [ ] Deploy runner, if enabled, runs as a limited non-root user with only the `/usr/local/sbin/algoedgefno-deploy-staging *` and `/usr/local/sbin/algoedgefno-deploy-prod *` sudo capabilities
-- [ ] **Branch restriction is enforced by `if: github.ref == 'refs/heads/main'` on every self-hosted-runner job (deploy AND preflight), NOT by GitHub `environment:` declarations.** GitHub Free + private repo does not support environment-scoped vars/secrets, deployment branch policies, or required reviewers, so the deploy workflows declare no `environment:` at all. The hold is operator discipline: provisioning runs BEFORE a manual `workflow_dispatch`, and `publish-backend-image.yml` no longer auto-deploys.
+- [ ] **Branch restriction is enforced by `if: github.ref == 'refs/heads/main'` on every self-hosted-runner deploy job, NOT by GitHub `environment:` declarations.** GitHub Free + private repo does not support environment-scoped vars/secrets, deployment branch policies, or required reviewers, so the deploy workflows declare no `environment:` at all. The hold is operator discipline: provisioning runs BEFORE a manual `workflow_dispatch`, and `publish-backend-image.yml` no longer auto-deploys.
 - [ ] `STAGING_BASE_URL` / `PROD_BASE_URL` are sourced from GitHub **repository variables** (not environment-scoped)
 - [ ] Only `Publish backend image`, `Deploy staging`, and `Deploy production` use the `algoedgefno-staging` self-hosted runner label
 - [ ] Root Docker auth on the VPS can pull the private GHCR backend package with read-only package credentials
@@ -148,7 +149,7 @@ The publish workflow no longer auto-deploys, so a `workflow_dispatch` is the onl
 - [ ] Firebase Console → "One account per email" is ENABLED in the PRODUCTION Firebase project
 - [ ] §10 Step 1: owner signs in to Firebase on the production Android client (Firebase only, no successful backend `/auth/session` required). Operator captures the resulting Firebase UID from Firebase Console → Authentication → Users. This is not Firebase Console "Add user" and does not create a backend `users` row.
 - [ ] §10 Step 2: operator writes `ALLOWED_FIREBASE_UIDS=<owner-uid>` into `/opt/algoedgefno/env/prod.env` BEFORE dispatching `deploy-production.yml`; records the UID in `docs/release-notes-firebase-auth.md`. NO backend restart yet — backend-prod is still on PR 1
-- [ ] §10 Step 3: dispatch `deploy-production.yml` with `smoke_mode=launch`. preflight passes (running `/version` reports the PR 1 `commit_sha` and migration 16); deploy applies 017+018; backend-prod starts for the first time on the PR 2 image; `ValidateServerConfig` accepts the non-empty allowlist; `smoke-prod-launch.sh` returns green
+- [ ] §10 Step 3: dispatch `deploy-production.yml` with `smoke_mode=launch`. The wrapper verifies the staging-promoted image migration is at least `MIN_TENANT_SCOPED_MIGRATION_VERSION=16`; deploy applies 017+018; backend-prod starts for the first time on the PR 2 image; `ValidateServerConfig` accepts the non-empty allowlist; `smoke-prod-launch.sh` returns green
 - [ ] §10 Step 4 (DB role grant — MANDATORY, runs BETWEEN Step 3 and Step 5): immediately after Step 3 applies migrations 017+018 (which create the new `refresh_tokens` table as the admin role) and BEFORE the owner's first `/auth/session` in Step 5, apply the production app-role grant against `algoedgefno_prod` so the app role can use the newly created tables. **Skipping this makes the first production `/auth/session` return HTTP 500** (`permission denied for table refresh_tokens`: the `users` upsert succeeds on the pre-existing, already-granted table, then the `refresh_tokens` INSERT is denied). Run inside `docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_prod'`:
   ```sql
   -- One-time backfill for tables that already exist (covers refresh_tokens from migration 018).
@@ -179,9 +180,9 @@ The publish workflow no longer auto-deploys, so a `workflow_dispatch` is the onl
 - [ ] POST `/api/v1/auth/debug-session` → `404`
 - [ ] Production read-only abuse suite passes; it does not invoke session/refresh/logout or data mutations
 
-**Rollback procedure (PR 2):**
-- [ ] PR 2 → PR 1 rollback is PERMITTED at any time after PR 2 deploys
-- [ ] Pre-PR-1 rollback is PROHIBITED once PR 2 has been deployed to any environment (preflight enforces)
+**Rollback procedure (post-launch):**
+- [ ] Wrapper rollback restores the previous digest-qualified `BACKEND_*_IMAGE` pin and restarts the app container only
+- [ ] Pre-tenant-scoped images are PROHIBITED once PR 2 has been deployed to any environment (`MIN_TENANT_SCOPED_MIGRATION_VERSION=16` enforces)
 - [ ] Migration 018 down is PROHIBITED while any `refresh_tokens` row exists (including revoked rows)
 - [ ] Migration 017 dirty-state recovery: see plan §15
 
