@@ -4,6 +4,7 @@ set -euo pipefail
 PATH="/usr/sbin:/usr/bin:/sbin:/bin"
 
 SMOKE_MODE=""
+readonly MIN_TENANT_SCOPED_MIGRATION_VERSION=16
 
 # Parse flags before positional arguments.
 while [[ $# -gt 0 ]]; do
@@ -154,6 +155,15 @@ printf "%s\n" "${max}"
 '
 }
 
+require_min_tenant_scoped_migration() {
+    local image_migration="$1"
+
+    if (( 10#${image_migration} < 10#${MIN_TENANT_SCOPED_MIGRATION_VERSION} )); then
+        fail "image migration version ${image_migration} is below minimum tenant-scoped migration ${MIN_TENANT_SCOPED_MIGRATION_VERSION}"
+    fi
+    pass "image migration version ${image_migration} is >= minimum tenant-scoped migration ${MIN_TENANT_SCOPED_MIGRATION_VERSION}"
+}
+
 if [[ ! "${DEPLOY_IMAGE}" =~ ${IMAGE_PATTERN} ]]; then
     fail "image must be ghcr.io/deependra191/algoedgefno-backend@sha256:<64 lowercase hex chars>"
 fi
@@ -224,6 +234,7 @@ if [[ ! "${expected_migration}" =~ ${MIGRATION_VERSION_PATTERN} ]]; then
     fail "image migration version must be a non-negative integer, got ${expected_migration}"
 fi
 pass "image migration version: ${expected_migration}"
+require_min_tenant_scoped_migration "${expected_migration}"
 
 env_backup="$(mktemp "${ENV_BACKUP_PREFIX}XXXXXX")"
 cp "${ENV_FILE}" "${env_backup}"

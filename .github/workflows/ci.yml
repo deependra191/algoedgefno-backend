@@ -84,28 +84,30 @@ jobs:
               .github/workflows/deploy-staging.yml \
               .github/workflows/deploy-production.yml
 
-      - name: deploy-staging.yml includes preflight_pr1_rollback_target with IN-set migration check
+      - name: deploy-staging.yml has no PR1 rollback-target preflight
         run: |
-          grep -q 'preflight_pr1_rollback_target' .github/workflows/deploy-staging.yml
-          grep -q 'EXPECTED_CANDIDATE_MIGRATION' .github/workflows/deploy-staging.yml
+          ! grep -q 'preflight_pr1_rollback_target' .github/workflows/deploy-staging.yml
+          ! grep -q 'EXPECTED_CANDIDATE_MIGRATION' .github/workflows/deploy-staging.yml
 
-      - name: deploy-production.yml includes preflight_pr1_rollback_target with IN-set migration check
+      - name: deploy-production.yml has no PR1 rollback-target preflight
         run: |
-          grep -q 'preflight_pr1_rollback_target' .github/workflows/deploy-production.yml
-          grep -q 'EXPECTED_CANDIDATE_MIGRATION' .github/workflows/deploy-production.yml
+          ! grep -q 'preflight_pr1_rollback_target' .github/workflows/deploy-production.yml
+          ! grep -q 'EXPECTED_CANDIDATE_MIGRATION' .github/workflows/deploy-production.yml
 
-      - name: preflight verifies running service via /version (staging + production)
+      - name: deploy scripts enforce minimum tenant-scoped migration
         run: |
-          grep -q '/version' .github/workflows/deploy-staging.yml
-          grep -q '/version' .github/workflows/deploy-production.yml
+          for script in deploy/scripts/algoedgefno-deploy-staging.sh deploy/scripts/algoedgefno-deploy-prod.sh; do
+            grep -q 'readonly MIN_TENANT_SCOPED_MIGRATION_VERSION=16' "$script"
+            grep -q 'below minimum tenant-scoped migration' "$script"
+          done
 
-      - name: preflight no longer reads compose/.env, previous output, or PR1_IMAGE_DIGEST
+      - name: deploy workflows do not reference obsolete PR1 preflight state
         run: |
           for wf in deploy-staging.yml deploy-production.yml; do
             f=".github/workflows/$wf"
-            for forbidden in '/opt/algoedgefno/compose/.env' 'steps.current.outputs.previous' 'PR1_IMAGE_DIGEST'; do
+            for forbidden in 'PR1_COMMIT_SHA' 'PR1_MIGRATION_VERSION' 'PR1_IMAGE_DIGEST' 'PR2_CANDIDATE_MIGRATION_VERSION'; do
               if grep -qF "$forbidden" "$f"; then
-                echo "$wf must not reference $forbidden under the /version-only preflight" >&2
+                echo "$wf must not reference obsolete PR1 preflight variable $forbidden" >&2
                 exit 1
               fi
             done
