@@ -1,6 +1,6 @@
 # One-VPS deployment runbook
 
-This runbook is for the temporary private-staging and early-production setup on one Hetzner CPX22-class VPS. Staging image deployment is automated from the main image publish workflow, and production image promotion can be triggered manually through a separate workflow that promotes the image already pinned on staging. Do not paste real secrets into Git, issue comments, screenshots, or chat.
+This runbook is for the temporary private-staging and early-production setup on one Hetzner CPX22-class VPS. Image publishing is automatic from `main`, but staging deployment and production promotion are both manual workflow dispatches. Production promotion deploys the image already pinned on staging. Do not paste real secrets into Git, issue comments, screenshots, or chat.
 
 ## Scope
 
@@ -472,7 +472,7 @@ vars/secrets, deployment branch policies, and required reviewers are
 unavailable. The deploy workflows therefore do NOT declare `environment:`
 at all. Branch restriction is enforced solely by explicit
 `if: github.ref == 'refs/heads/main'` on every self-hosted-runner job
-(deploy AND preflight). `STAGING_BASE_URL` / `PROD_BASE_URL` are sourced
+(deploy jobs). `STAGING_BASE_URL` / `PROD_BASE_URL` are sourced
 from **repository variables**. Operator discipline — "provision before
 manual dispatch" — is the hold mechanism, supported by the publish
 workflow no longer auto-deploying.
@@ -547,13 +547,16 @@ the exact digest before changing config, updates only `BACKEND_STAGING_IMAGE`,
 runs `migrate-staging` with the migration env file, restarts only
 `backend-staging`, confirms the staging URL host matches `STAGING_API_HOST` from
 `/opt/algoedgefno/compose/.env`, asserts `/version` reports
-`environment=staging`, and runs the full staging smoke checks including commit,
-image, clean migration state, auth behavior, CORS, and log-shape checks.
+`environment=staging`, rejects images below
+`MIN_TENANT_SCOPED_MIGRATION_VERSION`, and runs the full staging smoke checks
+including commit, image, clean migration state, auth behavior, CORS, and
+log-shape checks.
 
 The production wrapper promotes the image already pinned in
 `BACKEND_STAGING_IMAGE`, confirms staging is healthy and actually running that
 digest, derives the expected migration version from the image, requires staging
-to report that migration version, updates only `BACKEND_PROD_IMAGE`, runs
+to report that migration version, rejects images below
+`MIN_TENANT_SCOPED_MIGRATION_VERSION`, updates only `BACKEND_PROD_IMAGE`, runs
 `migrate-prod` with the migration env file, restarts only `backend-prod`, and
 then runs the production smoke checks before confirming the running prod
 container image.
@@ -621,37 +624,35 @@ Backlog cleanup after the self-hosted runner deployment succeeds:
 - Remove the temporary `algoedgefno-deploy` user and SSH key only after no
   active workflow depends on them.
 
-## PR 2 deployment notes (Firebase auth)
+## Post-launch deployment notes (Firebase auth)
 
-**Per-environment rollback precondition.** PR 2 deploys are gated by
-`preflight_pr1_rollback_target`. The preflight verifies the **running** service
-over HTTP via the `/version` endpoint — it does **not** read
-`/opt/algoedgefno/compose/.env`. It reads `commit_sha` and `migration_version`
-from the `/version` JSON and asserts: `commit_sha` equals the PR 1 commit
-(repo variable `PR1_COMMIT_SHA`), and `migration_version` is in the accepted
-set — either PR 1 (`PR1_MIGRATION_VERSION`, currently 16) or the candidate
-(`PR2_CANDIDATE_MIGRATION_VERSION`, currently 18). `commit_sha` uniquely
-identifies the PR 1 image, so verifying it against the running service replaces
-the older image-digest pin comparison. The runner needs only HTTP access; the
-compose `.env` stays `root:root` mode 600.
+**Minimum-safe migration guard.** After the PR 2 launch succeeds, deploys are no
+longer gated on "PR 1 is still the running rollback target". The active durable
+guard is the root-owned wrapper constant
+`MIN_TENANT_SCOPED_MIGRATION_VERSION=16`. The wrappers derive the candidate
+image migration version from `/app/migrations/*.up.sql` inside the
+digest-qualified image and reject any image below the minimum before migrations
+or container restarts.
 
-The repository variable `PR1_IMAGE_DIGEST` is no longer used by the preflight
-and is slated for removal.
+This keeps the important safety property — pre-tenant-scoped images cannot be
+deployed after Firebase auth has reached an environment — without requiring the
+currently running service to remain PR 1 forever. Historical variables such as
+`PR1_COMMIT_SHA`, `PR1_MIGRATION_VERSION`, `PR1_IMAGE_DIGEST`, and
+`PR2_CANDIDATE_MIGRATION_VERSION` are rollout evidence only; post-launch deploy
+workflows do not read them.
 
-**Name drift invariant.** The preflight verifies the **running image** via
-`/version`, while the rollback/promotion image pins live in the root-only
-compose `.env` (`BACKEND_STAGING_IMAGE` / `BACKEND_PROD_IMAGE`). The accepted
-operator-state invariant is that the root-owned deploy wrapper is the **sole
-writer** of the compose `.env` image pin and the **sole (re)starter** of the
-container. Because nothing else writes the pin or restarts the container, the
-running image and the `.env` rollback pin do not drift in normal operation — so
-checking the running service is equivalent to checking the pin. The deploy
-workflow preflight comments in `deploy-staging.yml` and `deploy-production.yml`
-forward-reference this section for the rationale.
+**Rollback scope.** The root-owned deploy wrappers remain the sole writers of
+the compose `.env` image pins (`BACKEND_STAGING_IMAGE` / `BACKEND_PROD_IMAGE`)
+and the sole deployment-time restarters of backend containers. Wrapper rollback
+restores the previous digest-qualified app image pin and restarts the app
+container only. It does not run down migrations, so production migrations must
+remain backward-compatible with the previous deployed image or have a documented
+manual database recovery path.
 
-- **PR 2 → PR 1 rollback:** PERMITTED.
-- **Pre-PR-1 rollback:** PROHIBITED as soon as PR 2 has been deployed to any
-  environment.
+- **Rollback to the previous deployed image:** PERMITTED when that image's
+  migration version is at least `MIN_TENANT_SCOPED_MIGRATION_VERSION`.
+- **Pre-tenant-scoped rollback:** PROHIBITED as soon as PR 2 has been deployed
+  to any environment.
 - **Migration 018 down:** PROHIBITED while any `refresh_tokens` row exists,
   including revoked rows.
 
