@@ -65,9 +65,19 @@ jobs:
 
       # --- CI lint: workflow and script invariants (§14) ---
 
-      - name: publish-backend-image.yml has no deploy-staging job
+      - name: publish-backend-image.yml auto-deploys staging after publish
         run: |
-          ! grep -E '^\s*deploy-staging:' .github/workflows/publish-backend-image.yml
+          grep -q 'auto-deploy-staging:' .github/workflows/publish-backend-image.yml
+          grep -q 'group: vps-deploy' .github/workflows/publish-backend-image.yml
+          grep -q 'cancel-in-progress: false' .github/workflows/publish-backend-image.yml
+          grep -q 'needs: publish' .github/workflows/publish-backend-image.yml
+          grep -q "if: github.ref == 'refs/heads/main'" .github/workflows/publish-backend-image.yml
+          grep -q '/usr/local/sbin/algoedgefno-deploy-staging' .github/workflows/publish-backend-image.yml
+          grep -q '\-\-smoke-mode="\${STAGING_SMOKE_MODE}"' .github/workflows/publish-backend-image.yml
+
+      - name: publish-backend-image.yml does not deploy production
+        run: |
+          ! grep -E 'algoedgefno-deploy-prod|backend-prod|migrate-prod|BACKEND_PROD_IMAGE|PROD_BASE_URL' .github/workflows/publish-backend-image.yml
 
       - name: deploy-staging.yml is workflow_dispatch only (no auto-trigger)
         run: |
@@ -83,6 +93,34 @@ jobs:
               .github/workflows/publish-backend-image.yml \
               .github/workflows/deploy-staging.yml \
               .github/workflows/deploy-production.yml
+
+      - name: every self-hosted-runner job in publish-backend-image.yml has explicit if github.ref guard
+        run: |
+          python3 - .github/workflows/publish-backend-image.yml <<'PY'
+          import sys, re
+
+          with open(sys.argv[1], encoding="utf-8") as f:
+              content = f.read()
+
+          jobs_section = re.search(r'^jobs:(.*)', content, re.DOTALL | re.MULTILINE)
+          if not jobs_section:
+              print("FAIL: no jobs section found", file=sys.stderr)
+              sys.exit(1)
+
+          job_blocks = re.split(r'\n  [a-zA-Z_][a-zA-Z0-9_-]*:\n', '\n' + jobs_section.group(1))
+          violations = []
+          job_names = re.findall(r'\n  ([a-zA-Z_][a-zA-Z0-9_-]*):\n', '\n' + jobs_section.group(1))
+
+          for name, block in zip(job_names, job_blocks[1:]):
+              if 'self-hosted' in block and "github.ref == 'refs/heads/main'" not in block:
+                  violations.append(name)
+
+          if violations:
+              print(f"FAIL: self-hosted jobs without if: github.ref guard: {violations}", file=sys.stderr)
+              sys.exit(1)
+
+          print("PASS: all self-hosted jobs have if: github.ref guard")
+          PY
 
       - name: deploy-staging.yml has no PR1 rollback-target preflight
         run: |
