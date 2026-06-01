@@ -9,9 +9,10 @@ rotation, the allowlist, and the deployment/CI machinery.
 > required-reviewer environment gates, environment-scoped vars/secrets, or
 > deployment branch policies. The deploy workflows declare no `environment:`;
 > branch restriction is `if: github.ref == 'refs/heads/main'` on every
-> self-hosted job. The deployment hold is **operator discipline**: provision
-> before manually dispatching the workflow. The publish workflow no longer
-> auto-deploys.
+> self-hosted job. The deployment hold is **operator discipline**: keep staging
+> provisioning current before merging `dev → main`, because publish auto-deploys
+> staging when the self-hosted runner is listening. Production promotion remains
+> manual-only.
 
 > **Public error rename.** The 409 surface for identity conflicts is
 > `{"error":"identity_conflict"}`. Android error mapping must use
@@ -66,7 +67,8 @@ retained as historical rollout evidence only.
 
 ## L0 provisioning runbook — staging
 
-1. PR 2 image published; record the candidate digest as `CANDIDATE_IMAGE`.
+1. Candidate image published from `main`; record the candidate digest as
+   `CANDIDATE_IMAGE`.
 2. Place the staging Firebase service-account JSON at the host path
    `/run/secrets/firebase-serviceaccount-staging.json` (root-owned, mode `444`,
    not committed) — this is the bind-mount source in `deploy/docker-compose.yml`.
@@ -86,11 +88,16 @@ retained as historical rollout evidence only.
    no compose edit is needed — just confirm the host file from step 2 exists.
 5. Create Firebase test users against the staging project; set
    `TEST_UID_A/B/DENIED/CONFLICT` and a non-empty `ALLOWED_FIREBASE_UIDS`.
-6. Install operator scripts on the host via `docker create`/`docker cp` from
-   `CANDIDATE_IMAGE` (no git clone on the VPS).
-7. Approve → dispatch `deploy-staging.yml`; the wrapper rejects images below
-   `MIN_TENANT_SCOPED_MIGRATION_VERSION=16`
-   with `inputs.image = CANDIDATE_IMAGE` from `main`.
+6. Ensure the host-installed deploy wrappers and operator scripts are already
+   current before the merge. If the PR changes `deploy/scripts/` or `scripts/`,
+   stop the self-hosted runner, merge/publish the image, copy the updated files
+   from the published digest, then use manual `deploy-staging.yml` fallback.
+   Do not git-clone on the VPS.
+7. Merge `dev → main`; `publish-backend-image.yml` publishes the image and
+   auto-deploys staging. The wrapper rejects images below
+   `MIN_TENANT_SCOPED_MIGRATION_VERSION=16`. Manual `deploy-staging.yml` remains
+   available for fallback/recovery with `inputs.image = CANDIDATE_IMAGE` from
+   `main`.
 
 ## L0 provisioning runbook — production
 
