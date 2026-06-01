@@ -64,8 +64,11 @@ verifies the running service via `/version` (asserting `commit_sha` ==
 
 1. PR 2 image published; record the candidate digest as `CANDIDATE_IMAGE`.
 2. Place the staging Firebase service-account JSON at the host path
-   `/run/secrets/firebase-serviceaccount-staging.json` (root-owned, mode `400`,
+   `/run/secrets/firebase-serviceaccount-staging.json` (root-owned, mode `444`,
    not committed) — this is the bind-mount source in `deploy/docker-compose.yml`.
+   Runtime service-account JSON needs world-read permission because the backend
+   process inside the container is non-root; the host parent directory remains
+   root-owned and locked down.
    In `/opt/algoedgefno/env/staging.env` set `FIREBASE_PROJECT_ID` /
    `FIREBASE_WEB_API_KEY` to staging values and
    `FIREBASE_CREDENTIALS_FILE=/run/secrets/firebase-serviceaccount-staging.json`
@@ -88,7 +91,11 @@ verifies the running service via `/version` (asserting `commit_sha` ==
 
 No test fixtures; mechanically promote the staging-running digest; no
 pre-provisioning of the user row. The owner's first sign-in creates the first
-`users` row. See the launch flow below.
+backend `users` row. The owner Firebase UID is captured before dispatch by
+signing in to the production Firebase project from the Android client and then
+reading the resulting UID from Firebase Console → Authentication → Users.
+Firebase Console **Add user** is reserved for the post-launch `PROD_SMOKE_UID`
+step, not for the owner bootstrap. See the launch flow below.
 
 ---
 
@@ -96,15 +103,17 @@ pre-provisioning of the user row. The owner's first sign-in creates the first
 
 Fill in as each step completes:
 
-- [ ] **Step 1** — owner signs in to Firebase on the production Android client;
-      captured owner Firebase UID: `__________`
-- [ ] **Step 2** — `ALLOWED_FIREBASE_UIDS=<owner-uid>` written to
+- [x] **Step 1** — owner signs in to Firebase on the production Android client
+      using production Firebase config; no successful backend `/auth/session`
+      is required yet. Captured owner Firebase UID from Authentication → Users:
+      `WoUt4uqIOQPs95tFOVRwyzVdH5T2`
+- [x] **Step 2** — `ALLOWED_FIREBASE_UIDS=<owner-uid>` written to
       `/opt/algoedgefno/env/prod.env` before dispatch (no backend restart yet).
-- [ ] **Step 3** — `deploy-production.yml` dispatched with `smoke_mode=launch`;
+- [x] **Step 3** — `deploy-production.yml` dispatched with `smoke_mode=launch`;
       preflight passed (running `/version`: PR 1 `commit_sha`, migration 16); 017+018 applied; backend-prod
       started on PR 2 image; `smoke-prod-launch.sh` green.
-- [ ] **Step 5** — owner completes `/auth/session`; first `users` row created;
-      captured `users.id`: `__________`
+- [x] **Step 5** — owner completes `/auth/session`; first `users` row created;
+      captured `users.id`: `bf7f4c56-8ca4-4d2e-ad89-e409bc4bba17`
 - [ ] **Step 6** — owner links the second provider (`linkWithCredential`); second
       `/auth/session` returned the SAME `users.id` (DO UPDATE branch, no new row).
       Result: `__________`
@@ -120,11 +129,16 @@ plan §9. Link it here before launch.
 **RETAIN.** `PROD_SMOKE_UID` becomes a second allowlisted production identity.
 After launch, the operator performs §10 Step 9:
 
-- [ ] Create `PROD_SMOKE_UID` in the production Firebase Console; recorded UID:
-      `__________`
-- [ ] Append it to `ALLOWED_FIREBASE_UIDS`; restart backend-prod.
+- [x] Create `PROD_SMOKE_UID` in the production Firebase Console; recorded UID:
+      `3wvHesrFhTNqXDCq11irroKBdw43`
+- [x] Set `PROD_SMOKE_UID` in `/opt/algoedgefno/env/prod.env`, append it to
+      `ALLOWED_FIREBASE_UIDS`; restart backend-prod.
+- [ ] Verify standard production smoke (`/auth/session` with `PROD_SMOKE_UID`
+      returns 200; pending Firebase email verification/admin update for the
+      smoke user).
 - [ ] Switch subsequent production dispatches to `smoke_mode=standard`.
 - [ ] Activation date: `__________`
 
-Until Step 9 runs, the owner's identity is the only allowlisted production
-identity AND every production dispatch must continue to use `smoke_mode=launch`.
+Until standard production smoke is verified and activated, production dispatches
+must continue to use `smoke_mode=launch` even though `PROD_SMOKE_UID` is present
+in the allowlist.

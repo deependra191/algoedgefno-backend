@@ -76,6 +76,22 @@ sudo chown root:root /usr/local/sbin/algoedgefno-deploy-staging /usr/local/sbin/
 sudo chmod 755 /usr/local/sbin/algoedgefno-deploy-staging /usr/local/sbin/algoedgefno-deploy-prod
 ```
 
+Runtime Firebase service-account JSON files are the exception to the `*.env`
+mode rule. They are bind-mounted into backend containers whose app process runs
+as a non-root user, so they must be readable inside the container:
+
+```bash
+sudo mkdir -p /run/secrets
+sudo chown root:root /run/secrets
+sudo chmod 700 /run/secrets
+sudo chown root:root /run/secrets/firebase-serviceaccount-*.json
+sudo chmod 444 /run/secrets/firebase-serviceaccount-*.json
+```
+
+Mode `444` on the JSON is acceptable because the parent directory is
+`/run/secrets`, owned by `root:root` and mode `700` on the host. Do not apply
+this exception to env files, database backups, or tokens.
+
 > **Wrapper re-copy on script change.** The `/usr/local/sbin/algoedgefno-deploy-*`
 > wrappers are copies of the repo `deploy/scripts/*.sh`. Editing those scripts in
 > the repo does **not** change the live wrappers. After any change, re-copy each
@@ -642,9 +658,12 @@ forward-reference this section for the rationale.
 **Production smoke residue.** For **post-launch** deploys, each smoke run
 updates `last_login_at` for `PROD_SMOKE_UID` and inserts+revokes one
 `refresh_tokens` row per run. Cleanup: the nightly
-`cleanup-expired-refresh-tokens` cron. For the **launch** deploy, the mutating
-smoke is disabled (`smoke_mode=launch`); the owner's §10 Step-5 sign-in creates
-the FIRST production `users` row.
+`cleanup-expired-refresh-tokens` cron. Standard production smoke requires both
+`PROD_SMOKE_UID=<smoke-uid>` and the same UID included in
+`ALLOWED_FIREBASE_UIDS` in `/opt/algoedgefno/env/prod.env`; after changing either
+value, recreate `backend-prod` so the running process reloads the allowlist. For
+the **launch** deploy, the mutating smoke is disabled (`smoke_mode=launch`); the
+owner's §10 Step-5 sign-in creates the FIRST production `users` row.
 
 **Production runtime image is staging-promoted unchanged.** The runtime image
 **bundles** operator scripts at `/app/scripts/` — the image digest is the trust
