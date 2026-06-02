@@ -145,6 +145,57 @@ Whichever comes first.
 
 ---
 
+## 6. GitHub-enforced merge and deploy controls
+
+**Deferred decision:** CI is visible on every PR, and deploy workflows are guarded by explicit `if: github.ref == 'refs/heads/main'` checks plus human merge/dispatch discipline. GitHub-enforced branch protection/rulesets and environment-scoped deployment controls are not enabled because the private repo is currently on GitHub Free.
+
+**Risk being accepted:**
+- A human can still merge a red PR or dispatch a deploy at the wrong time if they ignore the documented process.
+- Repository variables, deploy branch controls, and required-reviewer style gates are weaker than they would be on a paid plan with supported rulesets. This is acceptable while one operator owns both code and deploy decisions, but it should not stay process-only once more people or external users depend on the service.
+
+**Trigger to pull this forward:**
+- First non-friend external user signs up, OR
+- A second regular code contributor/operator is added, OR
+- Any near miss where a red PR, wrong branch, or premature deploy almost reaches production.
+
+**Scope sketch when implemented:**
+
+- Upgrade to a GitHub plan that supports the needed private-repo rulesets.
+- Add branch protection/rulesets for `dev` and `main` requiring CI to pass before merge.
+- Keep task PRs targeting `dev`; reserve `main` for `dev -> main` integration PRs.
+- Re-evaluate whether deployment environment features add useful controls without contradicting the current self-hosted-runner model.
+- Update `docs/production-checklist.md` §6 and `docs/one-vps-deployment.md` once machine enforcement replaces the current manual gate.
+
+**Estimated effort:** 1-2 hours after the plan upgrade decision, plus a controlled test with a deliberately failing PR.
+
+---
+
+## 7. Deploy credential hardening
+
+**Deferred decision:** current deployment uses narrow root-owned wrappers, a limited self-hosted runner user, digest-qualified images, and root-owned server-side env files. A full secrets-manager or short-lived deploy-credential model is not implemented.
+
+**Risk being accepted:**
+- Long-lived GHCR/package credentials and server-side deployment credentials remain operationally convenient but increase blast radius if the VPS, runner user, or Docker credentials are compromised.
+- Secret rotation is manual, so stale credentials may survive longer than ideal.
+
+**Trigger to pull this forward:**
+- First non-friend external user signs up, OR
+- A second operator needs deployment access, OR
+- Any credential exposure, runner compromise, or token-rotation incident occurs.
+
+**Scope sketch when implemented:**
+
+- Inventory every deploy credential: GHCR pull credentials, GitHub runner registration/token state, Firebase service-account JSON, healthcheck/Telegram URLs, DB env files, and backup/off-site storage credentials.
+- Rotate long-lived tokens and document owner, scope, creation date, and next rotation date outside Git.
+- Prefer least-privilege package-read tokens for GHCR and keep them only in root-owned Docker auth on the VPS.
+- Evaluate a secrets manager or encrypted deployment store for server-side credentials.
+- If practical, replace long-lived deploy credentials with shorter-lived or tightly scoped alternatives.
+- Update `docs/one-vps-deployment.md` and `docs/production-checklist.md` after the credential model changes.
+
+**Estimated effort:** 2-4 hours for inventory/rotation; longer if introducing a secrets manager.
+
+---
+
 ## Add new items here
 
 When a future scope decision pushes something to "after users exist," add it above this line with the same shape (risk / trigger / scope sketch / effort).
