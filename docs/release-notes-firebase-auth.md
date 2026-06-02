@@ -145,18 +145,17 @@ After launch, the operator performs §10 Step 9:
       `3wvHesrFhTNqXDCq11irroKBdw43`
 - [x] Set `PROD_SMOKE_UID` in `/opt/algoedgefno/env/prod.env`, append it to
       `ALLOWED_FIREBASE_UIDS`; restart backend-prod.
-- [ ] Mark `PROD_SMOKE_UID` email verified with the production-only operator
+- [x] Mark `PROD_SMOKE_UID` email verified with the production-only operator
       command:
       ```bash
       cd /opt/algoedgefno/compose
       docker compose exec -T backend-prod /app/verify-prod-smoke-user
       ```
-- [ ] Verify standard production smoke (`/auth/session` with `PROD_SMOKE_UID`
-      returns 200; pending Firebase email verification/admin update for the
-      smoke user).
-- [ ] Switch subsequent production dispatches to `smoke_mode=standard`.
-- [ ] Activation date: `__________`
+- [x] Verify standard production smoke (`/auth/session` with `PROD_SMOKE_UID`
+      returns 200; `/auth/logout` returns 204; protected endpoint smoke passes).
+- [x] Switch subsequent production dispatches to `smoke_mode=standard`.
+- [x] Activation date: `2026-06-02`
 
-Until standard production smoke is verified and activated, production dispatches
-must continue to use `smoke_mode=launch` even though `PROD_SMOKE_UID` is present
-in the allowlist.
+Standard production smoke is active. Production dispatches now default to
+`smoke_mode=standard`; `smoke_mode=launch` remains available only for exceptional
+bootstrap or recovery cases.
