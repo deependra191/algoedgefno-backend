@@ -133,9 +133,10 @@ Fill in as each step completes:
       backend session exchange converges to existing `users.id`
       `bf7f4c56-8ca4-4d2e-ad89-e409bc4bba17` without creating a duplicate row.
 
-**Android contract:** the Android-side Firebase auth/linking contract is tracked
-at `__________` (Android repo committed file or reviewed Android PR) — see
-plan §9. Link it here before launch.
+**Android contract:** the Android-side Firebase auth/linking/logout contract is
+tracked in the Android repo at
+[docs/plans/login-firebase-v1.md](</Users/deependrasingh/AndroidStudioProjects/algoedgefno-droid/docs/plans/login-firebase-v1.md:76>) —
+see plan §9.
 
 ---
 
