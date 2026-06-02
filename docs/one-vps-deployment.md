@@ -1,6 +1,6 @@
 # One-VPS deployment runbook
 
-This runbook is for the temporary private-staging and early-production setup on one Hetzner CPX22-class VPS. Image publishing is automatic from `main`, but staging deployment and production promotion are both manual workflow dispatches. Production promotion deploys the image already pinned on staging. Do not paste real secrets into Git, issue comments, screenshots, or chat.
+This runbook is for the temporary private-staging and early-production setup on one Hetzner CPX22-class VPS. Image publishing is automatic from `main` and auto-deploys the published digest to staging; production promotion remains a manual workflow dispatch. Production promotion deploys the image already pinned on staging. Do not paste real secrets into Git, issue comments, screenshots, or chat.
 
 ## Scope
 
@@ -9,7 +9,7 @@ This runbook is for the temporary private-staging and early-production setup on 
 - PostgreSQL remains private on the DB-only internal Docker network; Caddy is attached only to the proxy network and publishes ports `80` and `443`.
 - Sync jobs attach to the DB network plus a separate egress network so they can reach NSE without putting PostgreSQL on the proxy network.
 - Production migrations are explicit. The backend must not auto-run production migrations.
-- Staging is optional and should stay stopped unless it is being used.
+- Staging is optional, but a `main` publish will start/restart it through the auto-staging deploy job when the self-hosted runner is listening.
 
 ## Secret access model
 
@@ -452,17 +452,19 @@ Expected results:
 
 The `Publish backend image` GitHub Actions workflow runs on pushes to `main`.
 It publishes the backend image to GHCR and exports the immutable digest-qualified
-image reference, then **stops** — from PR 2 it no longer auto-deploys to staging
-(the `deploy-staging` job was removed). The GHCR image remains published and
-visible in the workflow summary; production remains untouched.
+image reference, then auto-deploys that digest to staging through the
+`auto-deploy-staging` job. The staging job runs on the self-hosted runner, shares
+the `vps-deploy` concurrency group with manual staging and production deploys,
+and is guarded by `if: github.ref == 'refs/heads/main'`.
 
-Deployment is performed only by the manual-only `Deploy staging` workflow with an
-explicit digest. It runs on the self-hosted runner and deploys staging only. It
-runs staging migrations through the root-owned wrapper
-before restarting staging, do not restart production services, and do not expose
-app, database, JWT, or bearer-token secret files to GitHub Actions. They do not
-use `rsync`, `scp`, or inbound SSH from GitHub-hosted runners, and they do not
-overwrite server env files from the repository.
+The auto-staging job calls the root-owned
+`/usr/local/sbin/algoedgefno-deploy-staging` wrapper with the published digest.
+It runs staging migrations before restarting staging only; it does not restart
+production services and does not expose app, database, JWT, or bearer-token
+secret files to GitHub Actions. It does not use `rsync`, `scp`, or inbound SSH
+from GitHub-hosted runners, and it does not overwrite server env files from the
+repository. The manual-only `Deploy staging` workflow remains available as a
+fallback or recovery path with an explicit digest.
 Do not configure `APP_SECRET_TOKEN`, database passwords, JWT secrets, GHCR tokens,
 VPS passwords, or SSH private keys in this workflow.
 
@@ -473,9 +475,10 @@ unavailable. The deploy workflows therefore do NOT declare `environment:`
 at all. Branch restriction is enforced solely by explicit
 `if: github.ref == 'refs/heads/main'` on every self-hosted-runner job
 (deploy jobs). `STAGING_BASE_URL` / `PROD_BASE_URL` are sourced
-from **repository variables**. Operator discipline — "provision before
-manual dispatch" — is the hold mechanism, supported by the publish
-workflow no longer auto-deploying.
+from **repository variables**. Operator discipline remains the hold mechanism:
+staging provisioning must be persistent or completed before merging a `dev →
+main` integration PR, because the publish workflow auto-deploys staging when the
+runner is listening. Production promotion remains manual-only.
 
 Register a self-hosted GitHub Actions runner on the VPS for this repository and
 give it the custom label `algoedgefno-staging`. The runner may be started only
@@ -572,16 +575,18 @@ Keep `/opt/algoedgefno/compose/.env` non-secret. It must define both
 `BACKEND_PROD_IMAGE` is missing, and it never modifies the production image
 reference.
 
-**Normal operator flow after PR 2.** When a `dev → main` integration PR
-merges, `publish-backend-image.yml` builds and pushes the image, then
-**stops**. To deploy:
+**Normal operator flow after restoring auto-staging deploy.** Before a `dev →
+main` integration PR merges, ensure staging provisioning is current and the
+self-hosted runner state is intentional. Host-installed deploy wrappers and
+operator scripts must already be current. If the PR changes `deploy/scripts/` or
+`scripts/`, stop the runner, merge/publish the image, copy the updated files
+from the published digest, then use manual `deploy-staging.yml` fallback. When
+the integration PR merges, `publish-backend-image.yml` builds and pushes the
+image, then auto-deploys the published digest to staging. To promote production:
 
-1. Operator captures the candidate image digest from the publish workflow
-   run summary.
-2. Operator performs Phase L0 staging-side provisioning on the shared VPS.
-3. Operator manually dispatches `deploy-staging.yml` with
-   `inputs.image = <digest>`.
-4. After staging soaks, operator manually dispatches `deploy-production.yml`.
+1. Operator confirms the auto-staging deploy passed and captures the digest from
+   the publish workflow run summary.
+2. After staging soaks, operator manually dispatches `deploy-production.yml`.
    `deploy-prod.sh` mechanically promotes the staging-running digest to
    production.
 
@@ -673,9 +678,10 @@ owner's §10 Step-5 sign-in creates the FIRST production `users` row.
 anchor. Host-installed scripts come from `docker create`/`docker cp` of the
 candidate digest, never a `git clone` on the VPS.
 
-**Auto-deploy from publish workflow removed.** `publish-backend-image.yml` only
-publishes the image. Deployment is strictly via `deploy-staging.yml` and
-`deploy-production.yml`, both `workflow_dispatch`-only.
+**Auto-staging deploy restored.** `publish-backend-image.yml` publishes the
+image and auto-deploys that digest to staging under the shared `vps-deploy`
+concurrency group. `deploy-staging.yml` remains a manual fallback.
+`deploy-production.yml` remains `workflow_dispatch`-only.
 
 **GitHub plan upgrade (future option, not required).** GitHub Team would add
 environment-scoped vars/secrets and deployment branch policies for this private

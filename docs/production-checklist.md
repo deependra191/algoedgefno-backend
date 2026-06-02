@@ -42,20 +42,24 @@ Run this twice — once for `APP_SECRET_TOKEN`, once for `JWT_SECRET`. Never reu
 
 ---
 
-## 1.5 Pre-deploy provisioning (manual, PR 2 only)
+## 1.5 Pre-deploy provisioning
 
-The publish workflow no longer auto-deploys, so a `workflow_dispatch` is the only path to a deployment. Complete provisioning BEFORE dispatching:
+The publish workflow auto-deploys the published `main` digest to staging when
+the self-hosted runner is listening. Complete staging provisioning BEFORE merging
+a `dev → main` integration PR. Production promotion remains a manual
+`workflow_dispatch`.
 
-- [ ] PR 2 image published by `publish-backend-image.yml`
-- [ ] Operator records the candidate digest as `CANDIDATE_IMAGE`
+- [ ] Staging provisioning is current before the `dev → main` integration PR merges
 - [ ] Per-environment service-account files placed (root-owned)
 - [ ] Staging fixture authorization file installed root-owned/mode-`400` BEFORE any fixture binary runs
 - [ ] Compose credential mounts updated for `backend-staging`/`backend-prod` only (not sync-*/migrate-*)
 - [ ] Env files updated per Phase L0
+- [ ] Host-installed deploy wrappers and operator scripts are current before merge. If the PR changes `deploy/scripts/` or `scripts/`, stop the self-hosted runner, merge/publish the image, copy updated files from the published digest, then use manual `deploy-staging.yml` fallback.
+- [ ] After publish, operator records the candidate digest as `CANDIDATE_IMAGE`
 - [ ] Candidate-image preflight: `/app/firebase-token`, `/app/setup-firebase-test-users`, `/app/teardown-firebase-test-users`, `/app/verify-prod-smoke-user`, `/app/scripts/smoke-deploy.sh`, `/app/scripts/smoke-staging.sh`, `/app/scripts/smoke-prod.sh`, `/app/scripts/security/abuse-suite.sh`, `/app/scripts/security/check-log-redaction.sh`, and `/app/scripts/staging-only/seed-conflict-fixture.sh` are all present and executable (image-digest trust anchor)
-- [ ] Operator smoke + security-gate scripts installed on host via `docker create`/`docker cp` from the candidate image digest — **no git clone on the VPS**
+- [ ] If auto-staging was intentionally bypassed for script refresh, operator smoke + security-gate scripts are installed on host via `docker create`/`docker cp` from the candidate image digest — **no git clone on the VPS**
 - [ ] Staging only: Firebase test users created against the staging project
-- [ ] Operator approves → dispatch runs → wrapper validates the image and deploy proceeds
+- [ ] Auto-staging deploy passes; manual `deploy-staging.yml` is reserved for fallback/recovery
 - [ ] Repeat for production (no test fixtures; mechanically promote the staging digest; no pre-provisioning of the backend `users` row; owner Firebase UID is captured from production Firebase Auth before dispatch)
 - [ ] Migration 017's inline pre-condition is the authoritative gate for "zero users rows pre-Firebase". The migrate compose service runs `/app/migrate` only. The operator MAY use any administrative SQL access from the VPS shell (e.g. `docker compose exec postgres psql -U <postgres-admin-user> -d algoedgefno_{staging,prod} -c "SELECT COUNT(*) FROM users;"`) as an optional pre-dispatch heads-up. Skipping it is acceptable; the migration's inline guard fails closed regardless. Do NOT introduce a shell-script gate that uses the migrate compose profile or the application role.
 
@@ -87,7 +91,7 @@ The publish workflow no longer auto-deploys, so a `workflow_dispatch` is the onl
 - [ ] `BACKEND_PROD_IMAGE` is the digest-qualified GHCR image reference that already passed staging, not `latest`
 - [ ] `BACKEND_STAGING_IMAGE` is separate from `BACKEND_PROD_IMAGE` so staging candidate deploys cannot implicitly change production
 - [ ] Deploy runner, if enabled, runs as a limited non-root user with only the `/usr/local/sbin/algoedgefno-deploy-staging *` and `/usr/local/sbin/algoedgefno-deploy-prod *` sudo capabilities
-- [ ] **Branch restriction is enforced by `if: github.ref == 'refs/heads/main'` on every self-hosted-runner deploy job, NOT by GitHub `environment:` declarations.** GitHub Free + private repo does not support environment-scoped vars/secrets, deployment branch policies, or required reviewers, so the deploy workflows declare no `environment:` at all. The hold is operator discipline: provisioning runs BEFORE a manual `workflow_dispatch`, and `publish-backend-image.yml` no longer auto-deploys.
+- [ ] **Branch restriction is enforced by `if: github.ref == 'refs/heads/main'` on every self-hosted-runner deploy job, NOT by GitHub `environment:` declarations.** GitHub Free + private repo does not support environment-scoped vars/secrets, deployment branch policies, or required reviewers, so the deploy workflows declare no `environment:` at all. The hold is operator discipline: staging provisioning runs BEFORE a `dev → main` merge that triggers publish and auto-staging deploy; production promotion remains a manual `workflow_dispatch`.
 - [ ] `STAGING_BASE_URL` / `PROD_BASE_URL` are sourced from GitHub **repository variables** (not environment-scoped)
 - [ ] Only `Publish backend image`, `Deploy staging`, and `Deploy production` use the `algoedgefno-staging` self-hosted runner label
 - [ ] Root Docker auth on the VPS can pull the private GHCR backend package with read-only package credentials
