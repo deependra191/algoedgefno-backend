@@ -126,9 +126,12 @@ Fill in as each step completes:
       started on PR 2 image; `smoke-prod-launch.sh` green.
 - [x] **Step 5** — owner completes `/auth/session`; first `users` row created;
       captured `users.id`: `bf7f4c56-8ca4-4d2e-ad89-e409bc4bba17`
-- [ ] **Step 6** — owner links the second provider (`linkWithCredential`); second
+- [x] **Step 6** — owner links the second provider (`linkWithCredential`); second
       `/auth/session` returned the SAME `users.id` (DO UPDATE branch, no new row).
-      Result: `__________`
+      Result: production reverse-link verification passed on 2026-06-02; Google
+      and email-link providers resolve to the same Firebase identity and the
+      backend session exchange converges to existing `users.id`
+      `bf7f4c56-8ca4-4d2e-ad89-e409bc4bba17` without creating a duplicate row.
 
 **Android contract:** the Android-side Firebase auth/linking contract is tracked
 at `__________` (Android repo committed file or reviewed Android PR) — see
