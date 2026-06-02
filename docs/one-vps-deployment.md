@@ -441,7 +441,7 @@ Expected results:
 
 - `/health` returns `200`.
 - `/ready` returns `200` only when DB connectivity and environment identity match.
-- `/api/v1/config/app` returns `200` without auth.
+- `/api/v1/config/app` returns `200` without auth and contains only static pre-login bootstrap config. If it ever needs dynamic or user-specific values, move that data behind authenticated routes before shipping it.
 - No-token protected tenant request returns `401`.
 - Protected tenant request with an invalid token returns `401`.
 - Logs include method, path, status, latency, environment, version, commit, and request ID.
@@ -686,6 +686,12 @@ candidate digest, never a `git clone` on the VPS.
 image and auto-deploys that digest to staging under the shared `vps-deploy`
 concurrency group. `deploy-staging.yml` remains a manual fallback.
 `deploy-production.yml` remains `workflow_dispatch`-only.
+
+**Stale app-secret cleanup.** After deploying an image that no longer reads
+`APP_SECRET_TOKEN`, remove any leftover `APP_SECRET_TOKEN=` lines from
+`/opt/algoedgefno/env/staging.env` and `/opt/algoedgefno/env/prod.env`. This is
+not required for runtime correctness, but it prevents future operators from
+mistaking the removed `/config/app` bearer token for an active secret.
 
 **GitHub plan upgrade (future option, not required).** GitHub Team would add
 environment-scoped vars/secrets and deployment branch policies for this private

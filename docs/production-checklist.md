@@ -16,12 +16,14 @@ Run through this fully before every production deploy. Do not skip items.
 - [ ] `FIREBASE_PROJECT_ID`, `FIREBASE_CREDENTIALS_FILE`, `FIREBASE_WEB_API_KEY` set to **staging** values; staging service-account JSON placed at `/run/secrets/firebase-serviceaccount-staging.json` (root-owned, not committed, mode `444` so the non-root backend process can read the bind mount; `/run/secrets` remains mode `700`)
 - [ ] `ALLOWED_FIREBASE_UIDS` populated; `TEST_UID_A`, `TEST_UID_B`, `TEST_UID_DENIED`, `TEST_UID_CONFLICT` set
 - [ ] Root-owned, mode-`400` `/opt/algoedgefno/env/firebase-staging-fixture-project-id.guard` created from the approved staging Firebase project ID, independently of the runtime env/credential files
+- [ ] Removed stale `APP_SECRET_TOKEN=` from `/opt/algoedgefno/env/staging.env`; `/api/v1/config/app` is public and the backend no longer reads that secret
 
 **Firebase auth — production-side:**
 - [ ] Prod Firebase values (`FIREBASE_PROJECT_ID` is a **different project** from staging), prod service-account JSON placed at `/run/secrets/firebase-serviceaccount-prod.json` (root-owned, not committed, mode `444` so the non-root backend process can read the bind mount; `/run/secrets` remains mode `700`)
 - [ ] `ALLOWED_FIREBASE_UIDS` remains non-empty for every production deploy; `config.ValidateServerConfig` rejects startup otherwise. Current production allowlist contains the owner UID and the standard-smoke UID.
 - [ ] Historical launch bootstrap record is understood: the owner UID was captured from a production Firebase-only Android sign-in; no backend `users` row was manually inserted. Firebase Console **Add user** is used only for the separate `PROD_SMOKE_UID`.
 - [ ] **No `TEST_UID_*` in `prod.env`.** The staging-only fixture at `/opt/algoedgefno/scripts/staging-only/seed-conflict-fixture.sh` is referenced only by `abuse-suite.sh --env staging` (staging and prod share one VPS)
+- [ ] Removed stale `APP_SECRET_TOKEN=` from `/opt/algoedgefno/env/prod.env`; `/api/v1/config/app` is public and the backend no longer reads that secret
 
 **GitHub repo vars (active post-launch deploy semantics):**
 - [ ] The root-owned deploy wrappers contain
@@ -114,7 +116,7 @@ a `dev → main` integration PR. Production promotion remains a manual
 - [ ] Hit `/health` endpoint and confirm `200 OK`
 - [ ] Hit `/ready` endpoint and confirm `200 OK`
 - [ ] Hit `/version` endpoint and confirm environment, commit, and migration version
-- [ ] Hit `/api/v1/config/app` without a token — confirm `200 OK` and no tenant-specific data
+- [ ] Hit `/api/v1/config/app` without a token — confirm `200 OK` and no tenant-specific or dynamic user-specific data
 - [ ] Hit a protected endpoint without a token — confirm `401 Unauthorized`
 - [ ] Hit a protected endpoint with an invalid bearer token — confirm `401 Unauthorized`
 - [ ] Confirm logs contain request IDs and do not contain bearer tokens, JWTs, Firebase ID tokens, refresh tokens, DB passwords, or full DSNs
@@ -129,7 +131,7 @@ a `dev → main` integration PR. Production promotion remains a manual
 - [ ] `docker compose -f /opt/algoedgefno/compose/docker-compose.yml exec -T backend-staging sh -c '/app/firebase-token --uid="$1"' sh "$TEST_UID_A"` returns an ID token
 - [ ] `/auth/session` with that ID token → `200`
 - [ ] GET `/api/v1/backtests` with the returned accessToken → `200`
-- [ ] GET `/api/v1/config/app` without a token → `200`
+- [ ] GET `/api/v1/config/app` without a token → `200` and static pre-login data only
 - [ ] GET `/api/v1/backtests` without a token → `401`
 - [ ] The deleted debug-session endpoint remains absent in every environment; automated route coverage asserts this in dev/test/staging/prod.
 - [ ] Staging abuse suite passes (burst last)
@@ -171,7 +173,7 @@ This section is historical evidence for the Firebase rollout. It is not the acti
 - [ ] `docker compose -f /opt/algoedgefno/compose/docker-compose.yml exec -T backend-prod sh -c '/app/firebase-token --uid="$1"' sh "$PROD_SMOKE_UID"` returns an ID token
 - [ ] `/auth/session` with that ID token → `200`; subsequent `/auth/logout` → `204`
 - [ ] GET `/api/v1/backtests` with the returned accessToken → `200`
-- [ ] GET `/api/v1/config/app` without a token → `200`; GET `/api/v1/backtests` without a token → `401`
+- [ ] GET `/api/v1/config/app` without a token → `200` and static pre-login data only; GET `/api/v1/backtests` without a token → `401`
 - [ ] The deleted debug-session endpoint remains absent in every environment; automated route coverage asserts this in dev/test/staging/prod.
 - [ ] Production read-only abuse suite passes; it does not invoke session/refresh/logout or data mutations
 

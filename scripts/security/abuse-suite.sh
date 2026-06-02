@@ -270,11 +270,6 @@ run_auth_checks() {
         "${base_url}${BACKTESTS_PATH}"
 }
 
-run_unauthenticated_tenant_check() {
-    assert_status "unauthenticated-backtests" "${HTTP_STATUS_UNAUTHORIZED}" \
-        "${base_url}${BACKTESTS_PATH}"
-}
-
 run_log_redaction_check() {
     local output
     if output="$("${script_dir}/check-log-redaction.sh" --env "${env_name}" --since "${run_started_at}" 2>&1)"; then
@@ -420,7 +415,6 @@ if [[ "${env_name}" == "${ENV_STAGING}" ]]; then
 else
     # Production path: read-only — no /auth/* calls, no mutation, no staging-only paths.
     run_auth_checks
-    run_unauthenticated_tenant_check
     run_log_redaction_check
 fi
 
