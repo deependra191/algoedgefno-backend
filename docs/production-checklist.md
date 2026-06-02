@@ -120,6 +120,7 @@ a `dev → main` integration PR. Production promotion remains a manual
 - [ ] Confirm logs contain request IDs and do not contain bearer tokens, JWTs, Firebase ID tokens, refresh tokens, DB passwords, or full DSNs
 - [ ] Run `scripts/security/abuse-suite.sh --env staging` and confirm zero failures before merging closed-beta security changes
 - [ ] Run the **read-only** production subset with `scripts/security/abuse-suite.sh --env prod` before first external user access — the prod path does NOT create Firebase sessions or mutate tenant data; production **smoke** (post-launch only) is the single documented intentional mutation
+- [ ] Run a full infra/security sign-off before first public closed-beta access. Produce evidence, not just ticks: route auth classification, tenant `user_id` scoping audit, production quota/kill-switch env values, staging kill-switch test, recent production backup restore rehearsal, prod/staging DB isolation proof, Android staging/release URL separation, curl abuse-suite report link, firewall/SSH hardening review, deploy-runner sudo scope, log redaction, and immutable-image deploy proof.
 
 - [ ] Create and review a screen-by-screen smoke-test sheet before live. For each Android screen/state, list the expected test cases, identify missing/unimplemented cases first, then run proper smoke testing against the implemented flows.
 
