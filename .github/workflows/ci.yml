@@ -164,6 +164,8 @@ jobs:
         run: |
           grep -q 'smoke_mode' .github/workflows/deploy-production.yml
           grep -q '\-\-smoke-mode=' .github/workflows/deploy-production.yml
+          grep -q 'default: standard' .github/workflows/deploy-production.yml
+          grep -q 'options: \[launch, standard\]' .github/workflows/deploy-production.yml
 
       - name: smoke-prod-launch.sh makes no /auth/session /auth/refresh or /auth/logout call
         run: |
