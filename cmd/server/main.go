@@ -106,7 +106,7 @@ func main() {
 		userRepo, tokenRepo, verifier,
 		cfg.JWTSecret, cfg.AllowedFirebaseUIDs, cfg.Env,
 	)
-	authHandler := handlers.NewAuthHandler(authSvc, cfg.Env)
+	authHandler := handlers.NewAuthHandler(authSvc)
 
 	registry := providers.NewRegistry()
 	registry.Register(nse.NewEODProvider(instrumentStore, candleStore,

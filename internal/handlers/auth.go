@@ -6,7 +6,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/deependra191/algoedgefno-backend/internal/config"
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 	"github.com/deependra191/algoedgefno-backend/internal/services"
 )
@@ -26,23 +25,14 @@ type logoutRequest struct {
 	RefreshToken string `json:"refreshToken" binding:"required"`
 }
 
-// debugSessionRequest is the JSON body for POST /api/v1/auth/debug-session.
-type debugSessionRequest struct {
-	UID         string `json:"uid"         binding:"required"`
-	Email       string `json:"email"       binding:"required"`
-	DisplayName string `json:"displayName"`
-}
-
 // AuthHandler handles HTTP requests for Firebase-based authentication.
 type AuthHandler struct {
 	authSvc *services.AuthService
-	env     config.Environment
 }
 
-// NewAuthHandler constructs an AuthHandler. env is used to gate the
-// debug-session endpoint (only in development and test).
-func NewAuthHandler(authSvc *services.AuthService, env config.Environment) *AuthHandler {
-	return &AuthHandler{authSvc: authSvc, env: env}
+// NewAuthHandler constructs an AuthHandler.
+func NewAuthHandler(authSvc *services.AuthService) *AuthHandler {
+	return &AuthHandler{authSvc: authSvc}
 }
 
 // Session exchanges a Firebase ID token for a backend access + refresh token
@@ -146,29 +136,6 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		c.Status(http.StatusNoContent)
 	case errors.Is(err, models.ErrInvalidRequest):
 		c.JSON(http.StatusBadRequest, gin.H{"error": errCodeInvalidRequest})
-	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": errCodeInternal})
-	}
-}
-
-// DebugSession mints a session for a synthetic identity without requiring a
-// real Firebase ID token. Only available in development and test environments.
-// POST /api/v1/auth/debug-session.
-func (h *AuthHandler) DebugSession(c *gin.Context) {
-	var req debugSessionRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": errCodeInvalidRequest})
-		return
-	}
-
-	result, err := h.authSvc.DebugSession(c.Request.Context(), req.UID, req.Email, req.DisplayName)
-	switch {
-	case err == nil:
-		c.JSON(http.StatusOK, toAuthResponse(result))
-	case errors.Is(err, models.ErrNotAvailable):
-		c.JSON(http.StatusNotFound, gin.H{"error": errCodeNotAvailable})
-	case errors.Is(err, models.ErrIdentityConflict):
-		c.JSON(http.StatusConflict, gin.H{"error": errCodeIdentityConflict})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": errCodeInternal})
 	}

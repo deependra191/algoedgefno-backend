@@ -17,12 +17,11 @@ const (
 	errCodeAuthNotAllowed          = "auth_not_allowed"
 	errCodeIdentityConflict        = "identity_conflict"
 	errCodeRefreshTokenInvalid     = "refresh_token_invalid"
-	errCodeNotAvailable            = "not_available"
 	errCodeInternal                = "internal"
 )
 
-// authResponse is the wire shape returned by POST /api/v1/auth/session and
-// POST /api/v1/auth/debug-session. JSON keys are the Android contract.
+// authResponse is the wire shape returned by POST /api/v1/auth/session.
+// JSON keys are the Android contract.
 type authResponse struct {
 	AccessToken  string       `json:"accessToken"`
 	RefreshToken string       `json:"refreshToken"`

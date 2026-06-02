@@ -576,37 +576,6 @@ func TestAllowlistAllows_EmptyAllowlist_StagingProdBlocks(t *testing.T) {
 	}
 }
 
-// --- DebugSession: blocked in production ---
-
-func TestAuthService_DebugSession_BlockedInProd(t *testing.T) {
-	svc := newAuthSvc(&mockUserRepo{}, &mockTokenRepo{}, nil, nil, config.EnvProduction)
-	_, err := svc.DebugSession(context.Background(), "uid", "e@e.com", "")
-	if !errors.Is(err, models.ErrNotAvailable) {
-		t.Fatalf("expected ErrNotAvailable in prod, got %v", err)
-	}
-}
-
-// --- DebugSession: works in dev/test ---
-
-func TestAuthService_DebugSession_WorksInDevTest(t *testing.T) {
-	u := validUser()
-	userRepo := &mockUserRepo{upsertResult: u}
-	tokenRepo := &mockTokenRepo{}
-
-	for _, env := range []config.Environment{config.EnvDevelopment, config.EnvTest} {
-		t.Run(string(env), func(t *testing.T) {
-			svc := newAuthSvc(userRepo, tokenRepo, nil, nil, env)
-			result, err := svc.DebugSession(context.Background(), u.FirebaseUID, u.Email, u.DisplayName)
-			if err != nil {
-				t.Fatalf("DebugSession in %s: %v", env, err)
-			}
-			if result == nil || result.User == nil {
-				t.Fatal("DebugSession returned nil result")
-			}
-		})
-	}
-}
-
 // --- Refresh token TTL sanity ---
 
 func TestAuthService_RefreshTokenTTL(t *testing.T) {

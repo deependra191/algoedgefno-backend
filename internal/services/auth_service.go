@@ -22,8 +22,7 @@ const (
 	reasonEmailDifferentUID = "email_collision_different_uid"
 )
 
-// SessionResult is returned by ExchangeFirebaseToken and DebugSession.
-// It bundles the minted token pair with the upserted user.
+// SessionResult bundles the minted token pair with the upserted user.
 type SessionResult struct {
 	TokenPair
 	User *models.User
@@ -48,8 +47,8 @@ type AuthService struct {
 }
 
 // NewAuthService constructs an AuthService. fbVerifier may be nil in dev/test
-// when Firebase credentials are not configured; only ExchangeFirebaseToken is
-// gated on a non-nil verifier.
+// when Firebase credentials are not configured; ExchangeFirebaseToken is gated
+// on a non-nil verifier.
 func NewAuthService(
 	userRepo models.UserRepository,
 	tokenRepo models.RefreshTokenRepository,
@@ -181,24 +180,6 @@ func (s *AuthService) Logout(ctx context.Context, refreshToken string) error {
 		return models.ErrInvalidRequest
 	}
 	return s.tokenRepo.RevokeByHash(ctx, sha256HexOf(refreshToken))
-}
-
-// DebugSession is available only in development and test environments. It
-// upserts a user with the provided synthetic identity and mints a session
-// without requiring a real Firebase ID token.
-func (s *AuthService) DebugSession(ctx context.Context, uid, email, displayName string) (*SessionResult, error) {
-	if s.env != config.EnvDevelopment && s.env != config.EnvTest {
-		return nil, models.ErrNotAvailable
-	}
-	user, err := s.userRepo.UpsertByFirebaseUID(ctx, &models.User{
-		FirebaseUID: uid,
-		Email:       email,
-		DisplayName: displayName,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return s.mintSession(ctx, user)
 }
 
 // mintSession mints a new token pair and persists the refresh token.

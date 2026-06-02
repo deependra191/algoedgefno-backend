@@ -45,13 +45,12 @@ func buildHandlerWithMocks(
 		userRepo, tokenRepo, verifier,
 		"test-jwt-secret-32-bytes-minimum!!", allowedUIDs, env,
 	)
-	h := NewAuthHandler(authSvc, env)
+	h := NewAuthHandler(authSvc)
 
 	r := gin.New()
 	r.POST("/api/v1/auth/session", h.Session)
 	r.POST("/api/v1/auth/refresh", h.Refresh)
 	r.POST("/api/v1/auth/logout", h.Logout)
-	r.POST("/api/v1/auth/debug-session", h.DebugSession)
 	return r, h
 }
 
@@ -128,6 +127,44 @@ func assertJSON(t *testing.T, w *httptest.ResponseRecorder, wantStatus int, want
 }
 
 // --- Session handler tests ---
+
+func TestSession_SuccessResponseShape(t *testing.T) {
+	u := &models.User{
+		ID:          uuid.New(),
+		FirebaseUID: "uid-abc",
+		Email:       "user@example.com",
+		DisplayName: "Test User",
+		PhotoURL:    "https://example.com/photo.png",
+	}
+	verifier := &handlerMockVerifier{result: &models.FirebaseClaims{
+		UID:           u.FirebaseUID,
+		Email:         u.Email,
+		DisplayName:   u.DisplayName,
+		PhotoURL:      u.PhotoURL,
+		EmailVerified: true,
+	}}
+	r, _ := buildHandlerWithMocks(
+		&handlerMockUserRepo{upsertResult: u},
+		&handlerMockTokenRepo{},
+		verifier,
+		[]string{u.FirebaseUID},
+		config.EnvTest,
+	)
+
+	w := doPost(r, "/api/v1/auth/session", `{"firebaseIdToken":"fake-id-token"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body: %s", w.Code, w.Body)
+	}
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, key := range []string{"accessToken", "refreshToken", "user"} {
+		if _, ok := body[key]; !ok {
+			t.Errorf("session response missing %s", key)
+		}
+	}
+}
 
 // TestSession_OversizedFirebaseIdToken asserts that a firebaseIdToken longer
 // than 4096 characters is rejected with 400 invalid_request.
