@@ -175,10 +175,10 @@ Staging only (mutating, burst last):
 
 The suite and `check-log-redaction.sh` assert the redaction contract: the
 `Authorization` header is logged as `Bearer [REDACTED]`; request/response bodies
-for `/auth/session`, `/auth/refresh`, `/auth/logout`, and `/auth/debug-session`
-are not logged; and JSON fields `accessToken`, `refreshToken`, `firebaseIdToken`
-are redacted defensively wherever they appear. Reports show pattern labels and
-counts only — never matching log lines or secret values.
+for `/auth/session`, `/auth/refresh`, and `/auth/logout` are not logged; and JSON
+fields `accessToken`, `refreshToken`, `firebaseIdToken` are redacted defensively
+wherever they appear. Reports show pattern labels and counts only — never
+matching log lines or secret values.
 
 ## Partial-outcome note (§12)
 

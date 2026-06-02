@@ -167,9 +167,9 @@ jobs:
           grep -q 'default: standard' .github/workflows/deploy-production.yml
           grep -q 'options: \[launch, standard\]' .github/workflows/deploy-production.yml
 
-      - name: smoke-prod-launch.sh makes no /auth/session /auth/refresh or /auth/logout call
+      - name: smoke-prod-launch.sh makes no /auth call
         run: |
-          ! grep -E '/auth/(session|refresh|logout)' scripts/smoke-prod-launch.sh
+          ! grep -E '/auth/' scripts/smoke-prod-launch.sh
 
       - name: smoke-prod.sh has no TEST_UID_* reference
         run: |

@@ -23,9 +23,9 @@ const (
 
 // Body-cap constants (bytes) for auth endpoints.
 const (
-	// bodyCapSession is the pre-bind body limit for /auth/session and
-	// /auth/debug-session. Firebase ID tokens can be up to ~4 KB; 8 KiB
-	// gives comfortable headroom including the JSON wrapper.
+	// bodyCapSession is the pre-bind body limit for /auth/session. Firebase ID
+	// tokens can be up to ~4 KB; 8 KiB gives comfortable headroom including the
+	// JSON wrapper.
 	bodyCapSession = 8 * 1024
 
 	// bodyCapRefreshLogout is the pre-bind body limit for /auth/refresh and
@@ -94,14 +94,6 @@ func Register(
 				middleware.RateLimit(routeAuthLogout, rpmLogout),
 				authHandler.Logout,
 			)
-			// Debug-session endpoint: only registered in development and test.
-			// No rate limit — dev/test only, operator-facing.
-			if cfg.Env == config.EnvDevelopment || cfg.Env == config.EnvTest {
-				auth.POST("/debug-session",
-					middleware.RequestBodyLimit(bodyCapSession),
-					authHandler.DebugSession,
-				)
-			}
 		}
 
 		// Protected endpoints require a valid backend JWT (or the static

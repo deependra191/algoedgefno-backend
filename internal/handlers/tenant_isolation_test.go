@@ -5,6 +5,7 @@ package handlers_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -30,6 +31,18 @@ import (
 // the per-user lastBacktest lookup can be exercised at the HTTP boundary.
 const builtinMACrossoverSlug = "ma_crossover"
 
+type tenantFirebaseVerifier struct {
+	claimsByToken map[string]*models.FirebaseClaims
+}
+
+func (v *tenantFirebaseVerifier) VerifyIDToken(_ context.Context, idToken string) (*models.FirebaseClaims, error) {
+	claims, ok := v.claimsByToken[idToken]
+	if !ok {
+		return nil, errors.New("unknown firebase token")
+	}
+	return claims, nil
+}
+
 func init() {
 	gin.SetMode(gin.TestMode)
 }
@@ -48,24 +61,6 @@ func mustOpenTenantIsolationPool(t *testing.T) *pgxpool.Pool {
 	}
 	t.Cleanup(func() { pool.Close() })
 	return pool
-}
-
-// upsertIsolationUser creates a test user and registers cleanup.
-func upsertIsolationUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, firebaseUID, email string) *models.User {
-	t.Helper()
-	store := storage.NewUserStore(pool)
-	user, err := store.UpsertByFirebaseUID(ctx, &models.User{
-		FirebaseUID: firebaseUID,
-		Email:       email,
-	})
-	if err != nil {
-		t.Fatalf("upsert user %s: %v", firebaseUID, err)
-	}
-	t.Cleanup(func() {
-		pool.Exec(ctx, `DELETE FROM refresh_tokens WHERE user_id = $1`, user.ID)
-		pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, user.ID)
-	})
-	return user
 }
 
 // seedCompletedBacktest inserts a COMPLETED backtest run (with >0 trades so it is
@@ -127,40 +122,52 @@ func TestTenantIsolation_AllSixRoutes(t *testing.T) {
 	ctx := context.Background()
 
 	cfg := &config.Config{
-		Env:            config.EnvTest,
-		AppSecretToken: "test-secret",
-		JWTSecret:      "test-jwt-secret-32-bytes-minimum!!",
+		Env:                 config.EnvTest,
+		AppSecretToken:      "test-secret",
+		JWTSecret:           "test-jwt-secret-32-bytes-minimum!!",
+		AllowedFirebaseUIDs: []string{"tenant-a-" + uuid.NewString(), "tenant-b-" + uuid.NewString()},
 	}
 
 	userRepo := storage.NewUserStore(pool)
 	tokenRepo := storage.NewRefreshTokenStore(pool)
-	authSvc := services.NewAuthService(userRepo, tokenRepo, nil, cfg.JWTSecret, nil, cfg.Env)
-	authHandler := handlers.NewAuthHandler(authSvc, cfg.Env)
+	const firebaseTokenA = "fake-firebase-token-a"
+	const firebaseTokenB = "fake-firebase-token-b"
+	claimsByToken := map[string]*models.FirebaseClaims{
+		firebaseTokenA: {
+			UID:           cfg.AllowedFirebaseUIDs[0],
+			Email:         "tenant-a-" + uuid.NewString() + "@test.com",
+			EmailVerified: true,
+		},
+		firebaseTokenB: {
+			UID:           cfg.AllowedFirebaseUIDs[1],
+			Email:         "tenant-b-" + uuid.NewString() + "@test.com",
+			EmailVerified: true,
+		},
+	}
+	authSvc := services.NewAuthService(
+		userRepo, tokenRepo, &tenantFirebaseVerifier{claimsByToken: claimsByToken},
+		cfg.JWTSecret, cfg.AllowedFirebaseUIDs, cfg.Env,
+	)
+	authHandler := handlers.NewAuthHandler(authSvc)
 
 	r := gin.New()
 	routes.Register(r, pool, cfg, providers.NewRegistry(), authSvc, authHandler)
 
-	// Seed two distinct users.
-	userA := upsertIsolationUser(t, ctx, pool,
-		"tenant-a-"+uuid.NewString(), "tenant-a-"+uuid.NewString()+"@test.com")
-	userB := upsertIsolationUser(t, ctx, pool,
-		"tenant-b-"+uuid.NewString(), "tenant-b-"+uuid.NewString()+"@test.com")
-
-	// Mint tokens via DebugSession (works without Firebase verifier in test env).
-	mintToken := func(t *testing.T, u *models.User) string {
+	mintSession := func(t *testing.T, firebaseToken string) (*models.User, string) {
 		t.Helper()
-		result, err := authSvc.DebugSession(ctx, u.FirebaseUID, u.Email, "")
+		result, err := authSvc.ExchangeFirebaseToken(ctx, firebaseToken)
 		if err != nil {
-			t.Fatalf("DebugSession for %s: %v", u.FirebaseUID, err)
+			t.Fatalf("ExchangeFirebaseToken for %s: %v", firebaseToken, err)
 		}
 		t.Cleanup(func() {
-			pool.Exec(ctx, `DELETE FROM refresh_tokens WHERE user_id = $1`, u.ID)
+			pool.Exec(ctx, `DELETE FROM refresh_tokens WHERE user_id = $1`, result.User.ID)
+			pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, result.User.ID)
 		})
-		return "Bearer " + result.AccessToken
+		return result.User, "Bearer " + result.AccessToken
 	}
 
-	tokenA := mintToken(t, userA)
-	tokenB := mintToken(t, userB)
+	userA, bearerTokenA := mintSession(t, firebaseTokenA)
+	_, bearerTokenB := mintSession(t, firebaseTokenB)
 
 	// A owns a completed backtest attached to a real built-in strategy slug.
 	runA := seedCompletedBacktest(t, ctx, pool, userA.ID, builtinMACrossoverSlug)
@@ -201,7 +208,7 @@ func TestTenantIsolation_AllSixRoutes(t *testing.T) {
 		for _, token := range []struct {
 			name string
 			tok  string
-		}{{"A", tokenA}, {"B", tokenB}} {
+		}{{"A", bearerTokenA}, {"B", bearerTokenB}} {
 			w := do(http.MethodGet, "/api/v1/backtests", token.tok)
 			if w.Code != http.StatusOK {
 				t.Errorf("user %s /backtests: got %d, want 200; body: %s", token.name, w.Code, w.Body)
@@ -210,34 +217,34 @@ func TestTenantIsolation_AllSixRoutes(t *testing.T) {
 	})
 
 	t.Run("owner_reads_own_backtest_detail_and_trades", func(t *testing.T) {
-		if w := do(http.MethodGet, "/api/v1/backtests/"+runA.ID.String(), tokenA); w.Code != http.StatusOK {
+		if w := do(http.MethodGet, "/api/v1/backtests/"+runA.ID.String(), bearerTokenA); w.Code != http.StatusOK {
 			t.Errorf("A own detail: got %d, want 200; body: %s", w.Code, w.Body)
 		}
-		if w := do(http.MethodGet, "/api/v1/backtests/"+runA.ID.String()+"/trades", tokenA); w.Code != http.StatusOK {
+		if w := do(http.MethodGet, "/api/v1/backtests/"+runA.ID.String()+"/trades", bearerTokenA); w.Code != http.StatusOK {
 			t.Errorf("A own trades: got %d, want 200; body: %s", w.Code, w.Body)
 		}
 	})
 
 	t.Run("B_cannot_read_As_real_backtest_detail_404", func(t *testing.T) {
-		w := do(http.MethodGet, "/api/v1/backtests/"+runA.ID.String(), tokenB)
+		w := do(http.MethodGet, "/api/v1/backtests/"+runA.ID.String(), bearerTokenB)
 		if w.Code != http.StatusNotFound {
 			t.Errorf("B reading A's real backtest detail: got %d, want 404; body: %s", w.Code, w.Body)
 		}
 	})
 
 	t.Run("B_cannot_read_As_real_backtest_trades_404", func(t *testing.T) {
-		w := do(http.MethodGet, "/api/v1/backtests/"+runA.ID.String()+"/trades", tokenB)
+		w := do(http.MethodGet, "/api/v1/backtests/"+runA.ID.String()+"/trades", bearerTokenB)
 		if w.Code != http.StatusNotFound {
 			t.Errorf("B reading A's real backtest trades: got %d, want 404; body: %s", w.Code, w.Body)
 		}
 	})
 
 	t.Run("backtest_list_isolated_by_owner", func(t *testing.T) {
-		aBody := do(http.MethodGet, "/api/v1/backtests", tokenA).Body.String()
+		aBody := do(http.MethodGet, "/api/v1/backtests", bearerTokenA).Body.String()
 		if !strings.Contains(aBody, runA.ID.String()) {
 			t.Errorf("A's /backtests list must include A's run %s; body: %s", runA.ID, aBody)
 		}
-		bBody := do(http.MethodGet, "/api/v1/backtests", tokenB).Body.String()
+		bBody := do(http.MethodGet, "/api/v1/backtests", bearerTokenB).Body.String()
 		if strings.Contains(bBody, runA.ID.String()) {
 			t.Errorf("B's /backtests list must NOT include A's run %s; body: %s", runA.ID, bBody)
 		}
@@ -245,11 +252,11 @@ func TestTenantIsolation_AllSixRoutes(t *testing.T) {
 
 	t.Run("strategy_detail_lastBacktest_isolated_by_owner", func(t *testing.T) {
 		path := "/api/v1/strategies/" + builtinMACrossoverSlug
-		aBody := do(http.MethodGet, path, tokenA).Body.String()
+		aBody := do(http.MethodGet, path, bearerTokenA).Body.String()
 		if !strings.Contains(aBody, runA.ID.String()) {
 			t.Errorf("A's strategy detail must expose lastBacktest %s; body: %s", runA.ID, aBody)
 		}
-		bBody := do(http.MethodGet, path, tokenB).Body.String()
+		bBody := do(http.MethodGet, path, bearerTokenB).Body.String()
 		if strings.Contains(bBody, runA.ID.String()) {
 			t.Errorf("B's strategy detail must NOT expose A's run %s; body: %s", runA.ID, bBody)
 		}
@@ -259,11 +266,11 @@ func TestTenantIsolation_AllSixRoutes(t *testing.T) {
 	})
 
 	t.Run("strategy_list_lastBacktest_isolated_by_owner", func(t *testing.T) {
-		aBody := do(http.MethodGet, "/api/v1/strategies", tokenA).Body.String()
+		aBody := do(http.MethodGet, "/api/v1/strategies", bearerTokenA).Body.String()
 		if !strings.Contains(aBody, runA.ID.String()) {
 			t.Errorf("A's strategy list must expose lastBacktest %s; body: %s", runA.ID, aBody)
 		}
-		bBody := do(http.MethodGet, "/api/v1/strategies", tokenB).Body.String()
+		bBody := do(http.MethodGet, "/api/v1/strategies", bearerTokenB).Body.String()
 		if strings.Contains(bBody, runA.ID.String()) {
 			t.Errorf("B's strategy list must NOT expose A's run %s; body: %s", runA.ID, bBody)
 		}
@@ -280,7 +287,7 @@ func TestTenantIsolation_AllSixRoutes(t *testing.T) {
 	// persisted user_id == JWT-subject guarantee is proven deterministically at
 	// the storage layer by TestBacktestStore_Create_PersistsUserID.
 	t.Run("post_backtests_dispatched_under_callers_identity", func(t *testing.T) {
-		w := do(http.MethodPost, "/api/v1/backtests", tokenA)
+		w := do(http.MethodPost, "/api/v1/backtests", bearerTokenA)
 		if w.Code == http.StatusUnauthorized || w.Code == http.StatusForbidden {
 			t.Errorf("POST /backtests as A must pass auth and dispatch to the service; got %d; body: %s", w.Code, w.Body)
 		}

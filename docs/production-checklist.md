@@ -141,7 +141,7 @@ a `dev → main` integration PR. Production promotion remains a manual
 - [ ] GET `/api/v1/backtests` with the returned accessToken → `200`
 - [ ] GET `/api/v1/config/app` with `APP_SECRET_TOKEN` → `200`
 - [ ] GET `/api/v1/backtests` with `APP_SECRET_TOKEN` → `401`
-- [ ] POST `/api/v1/auth/debug-session` → `404`
+- [ ] The deleted debug-session endpoint remains absent in every environment; automated route coverage asserts this in dev/test/staging/prod.
 - [ ] Staging abuse suite passes (burst last)
 - [ ] Nightly `cleanup-expired-refresh-tokens` cron has separate `backend-staging` and `backend-prod` invocations installed on the shared VPS
 - [ ] Firebase Console → Authentication → Settings → "One account per email" is ENABLED in the STAGING Firebase project
@@ -181,7 +181,7 @@ a `dev → main` integration PR. Production promotion remains a manual
 - [ ] `/auth/session` with that ID token → `200`; subsequent `/auth/logout` → `204`
 - [ ] GET `/api/v1/backtests` with the returned accessToken → `200`
 - [ ] GET `/api/v1/config/app` with `APP_SECRET_TOKEN` → `200`; GET `/api/v1/backtests` with `APP_SECRET_TOKEN` → `401`
-- [ ] POST `/api/v1/auth/debug-session` → `404`
+- [ ] The deleted debug-session endpoint remains absent in every environment; automated route coverage asserts this in dev/test/staging/prod.
 - [ ] Production read-only abuse suite passes; it does not invoke session/refresh/logout or data mutations
 
 **Rollback procedure (post-launch):**

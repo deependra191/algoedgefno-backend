@@ -118,13 +118,17 @@ if [[ "${version_code}" != "200" ]]; then
 fi
 actual_commit="$(json_field "${version_body}" commit_sha)"
 actual_migration="$(json_field "${version_body}" migration_version)"
+actual_env="$(json_field "${version_body}" environment)"
 if [[ "${actual_commit}" != "${EXPECTED_COMMIT}" ]]; then
     fail "version commit_sha: got ${actual_commit}, want ${EXPECTED_COMMIT}"
 fi
 if [[ "${actual_migration}" != "${EXPECTED_MIGRATION}" ]]; then
     fail "version migration_version: got ${actual_migration}, want ${EXPECTED_MIGRATION}"
 fi
-pass "version: commit and migration match"
+if [[ "${actual_env}" != "production" ]]; then
+    fail "version environment: got ${actual_env}, want production"
+fi
+pass "version: commit/migration/environment match"
 
 status_code config-app-with-token 200 --config "${auth_cfg}" "${BASE_URL}/api/v1/config/app"
 status_code backtests-static-token-rejected 401 --config "${auth_cfg}" "${BASE_URL}/api/v1/backtests"
