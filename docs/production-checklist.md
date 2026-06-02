@@ -137,8 +137,8 @@ This section is historical evidence for the Firebase rollout. It is not the acti
   If default privileges were already set at provisioning time (per `docs/one-vps-deployment.md`), re-running this backfill is idempotent and harmless. Verify with `docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d algoedgefno_prod -c "\dp refresh_tokens"'` and confirm `algoedgefno_prod_app` has `arwd` (SELECT/INSERT/UPDATE/DELETE) access privileges.
 - The owner completed `/auth/session` via the Android client. DB query confirmed exactly one users row with the owner's UID; `users.id` was captured in `docs/release-notes-firebase-auth.md`.
 - The owner linked the second provider via the Android `linkWithCredential` flow. Second `/auth/session` succeeded; same `users.id` returned (DO UPDATE branch); no new row.
-- [ ] Android-side Firebase auth contract is documented in a TRACKED location (Android repo committed file, or reviewed Android PR) and linked from `docs/release-notes-firebase-auth.md`
-- [ ] Android logout flow is verified on a production-configured build: app calls backend `/auth/logout`, clears local access/refresh state, and a subsequent protected request requires login again
+- [x] Android-side Firebase auth contract is documented in a TRACKED location (Android repo committed file, or reviewed Android PR) and linked from `docs/release-notes-firebase-auth.md`
+- [x] Android logout flow is verified on a production-configured build: app calls backend `/auth/logout`, clears local access/refresh state, and a subsequent protected request requires login again
 - The retained production-smoke decision is recorded in `docs/release-notes-firebase-auth.md`: `PROD_SMOKE_UID` is a second allowlisted production identity.
 - `PROD_SMOKE_UID` was created in the production Firebase Console, written to `/opt/algoedgefno/env/prod.env`, appended to `ALLOWED_FIREBASE_UIDS`, verified with `/app/verify-prod-smoke-user`, and activated for standard production smoke.
 
