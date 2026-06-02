@@ -42,10 +42,24 @@ func newTestEngine(t *testing.T) *gin.Engine {
 	userRepo := storage.NewUserStore(pool)
 	tokenRepo := storage.NewRefreshTokenStore(pool)
 	authSvc := services.NewAuthService(userRepo, tokenRepo, nil, cfg.JWTSecret, nil, cfg.Env)
-	authHandler := handlers.NewAuthHandler(authSvc, cfg.Env)
+	authHandler := handlers.NewAuthHandler(authSvc)
 
 	r := gin.New()
 	Register(r, pool, cfg, providers.NewRegistry(), authSvc, authHandler)
+	return r
+}
+
+func newRouteTableOnlyEngine(env config.Environment) *gin.Engine {
+	cfg := &config.Config{
+		AppSecretToken: "test-secret",
+		Env:            env,
+		JWTSecret:      "test-jwt-secret",
+	}
+	authSvc := services.NewAuthService(nil, nil, nil, cfg.JWTSecret, nil, cfg.Env)
+	authHandler := handlers.NewAuthHandler(authSvc)
+
+	r := gin.New()
+	Register(r, nil, cfg, providers.NewRegistry(), authSvc, authHandler)
 	return r
 }
 
@@ -64,6 +78,25 @@ func TestRemovedRoutes_LoginAndRegisterReturn404(t *testing.T) {
 			r.ServeHTTP(w, req)
 			if w.Code != http.StatusNotFound {
 				t.Errorf("expected 404 for removed route %s, got %d", path, w.Code)
+			}
+		})
+	}
+}
+
+func TestRemovedRoutes_DebugSessionReturn404InAllEnvironments(t *testing.T) {
+	for _, env := range []config.Environment{
+		config.EnvDevelopment,
+		config.EnvTest,
+		config.EnvStaging,
+		config.EnvProduction,
+	} {
+		t.Run(string(env), func(t *testing.T) {
+			r := newRouteTableOnlyEngine(env)
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/debug-session", nil)
+			r.ServeHTTP(w, req)
+			if w.Code != http.StatusNotFound {
+				t.Errorf("expected 404 for removed debug-session route in %s, got %d", env, w.Code)
 			}
 		})
 	}

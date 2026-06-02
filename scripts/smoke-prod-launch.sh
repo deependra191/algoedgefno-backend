@@ -1,7 +1,7 @@
 #!/bin/bash
 # smoke-prod-launch.sh — non-identity smoke for the production launch deploy.
 # Runs ONLY checks that do not require a Firebase ID token or a users row.
-# /auth/* endpoints are NOT called here (a CI grep asserts this).
+# Auth endpoints are NOT called here (a CI grep asserts this).
 # Use smoke-prod.sh for post-launch mutating smoke (smoke_mode=standard).
 set -euo pipefail
 
@@ -109,21 +109,22 @@ if [[ "${version_code}" != "200" ]]; then
 fi
 actual_commit="$(json_field "${version_body}" commit_sha)"
 actual_migration="$(json_field "${version_body}" migration_version)"
+actual_env="$(json_field "${version_body}" environment)"
 if [[ "${actual_commit}" != "${EXPECTED_COMMIT}" ]]; then
     fail "version commit_sha: got ${actual_commit}, want ${EXPECTED_COMMIT}"
 fi
 if [[ "${actual_migration}" != "${EXPECTED_MIGRATION}" ]]; then
     fail "version migration_version: got ${actual_migration}, want ${EXPECTED_MIGRATION}"
 fi
-pass "version: commit and migration match"
+if [[ "${actual_env}" != "production" ]]; then
+    fail "version environment: got ${actual_env}, want production"
+fi
+pass "version: commit/migration/environment match"
 
 # 3. /config/app with APP_SECRET_TOKEN returns 200.
 status_code config-app-with-token 200 --config "${auth_cfg}" "${BASE_URL}/api/v1/config/app"
 
-# 4. /auth/debug-session returns 404 (dev/test-only route absent in production).
-status_code auth-debug-session-absent 404 "${BASE_URL}/api/v1/auth/debug-session"
-
-# 5. /backtests with APP_SECRET_TOKEN returns 401 (tenant endpoint, static token rejected).
+# 4. /backtests with APP_SECRET_TOKEN returns 401 (tenant endpoint, static token rejected).
 status_code backtests-static-token-rejected 401 --config "${auth_cfg}" "${BASE_URL}/api/v1/backtests"
 
 printf 'launch smoke passed for %s\n' "${EXPECTED_COMMIT}"

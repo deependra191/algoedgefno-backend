@@ -55,11 +55,6 @@ var (
 	// Mapped to 401 refresh_token_invalid.
 	ErrRefreshTokenInvalid = errors.New("refresh token invalid")
 
-	// ErrNotAvailable is returned when an endpoint is not available in the
-	// current environment (e.g. /auth/debug-session outside dev/test).
-	// Mapped to 404.
-	ErrNotAvailable = errors.New("not available")
-
 	// ErrInvalidRequest is the bound-violation sentinel surfaced to handlers
 	// as 400 invalid_request (oversized token body, malformed refresh-token
 	// format, etc.).
