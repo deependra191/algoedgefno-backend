@@ -91,21 +91,12 @@ if [[ ! -r "${APP_ENV_FILE}" ]]; then
     fail "app env file not readable: ${APP_ENV_FILE}"
 fi
 
-app_token="$(env_file_value APP_SECRET_TOKEN "${APP_ENV_FILE}" || true)"
-if [[ -z "${app_token}" ]]; then
-    fail "APP_SECRET_TOKEN missing or empty in ${APP_ENV_FILE}"
-fi
 prod_smoke_uid="$(env_file_value PROD_SMOKE_UID "${APP_ENV_FILE}" || true)"
 if [[ -z "${prod_smoke_uid}" ]]; then
     fail "PROD_SMOKE_UID missing or empty in ${APP_ENV_FILE} — provision per §10 Step 9 before using smoke_mode=standard"
 fi
 
 chmod 700 "${tmpdir}"
-
-# Write APP_SECRET_TOKEN to mode-600 temp file; never inline in curl args.
-auth_cfg="${tmpdir}/curl-auth.conf"
-printf 'header = "Authorization: Bearer %s"\n' "${app_token}" > "${auth_cfg}"
-chmod 600 "${auth_cfg}"
 
 # 1. Non-identity baseline checks (same as launch smoke, but here as a guard).
 status_code health 200 "${BASE_URL}/health"
@@ -130,15 +121,16 @@ if [[ "${actual_env}" != "production" ]]; then
 fi
 pass "version: commit/migration/environment match"
 
-status_code config-app-with-token 200 --config "${auth_cfg}" "${BASE_URL}/api/v1/config/app"
-status_code backtests-static-token-rejected 401 --config "${auth_cfg}" "${BASE_URL}/api/v1/backtests"
+status_code config-app-public 200 "${BASE_URL}/api/v1/config/app"
+status_code backtests-no-auth-rejected 401 "${BASE_URL}/api/v1/backtests"
+status_code backtests-bad-token-rejected 401 -H 'Authorization: Bearer bad-token' "${BASE_URL}/api/v1/backtests"
 
 # 2. Firebase token exchange — produces a real Firebase ID token for PROD_SMOKE_UID.
 # Token written to mode-600 temp file; never echoed.
 id_token_file="${tmpdir}/firebase-id-token"
 docker compose -f "${COMPOSE_DIR}/docker-compose.yml" \
     exec -T backend-prod \
-    sh -c "/app/firebase-token --uid=\"${prod_smoke_uid}\"" > "${id_token_file}"
+    sh -c '/app/firebase-token --uid="$1"' sh "${prod_smoke_uid}" > "${id_token_file}"
 chmod 600 "${id_token_file}"
 
 id_token="$(cat "${id_token_file}")"

@@ -13,7 +13,7 @@ This runbook is for the temporary private-staging and early-production setup on 
 
 ## Secret access model
 
-The files under `/opt/algoedgefno/env/` are readable only by root on the host, but Docker also receives those values through `env_file`. Treat root access, Docker group access, and permission to run `docker inspect` or `docker compose exec` on this VPS as secret access. Do not grant Docker or sudo access to anyone who should not be able to read database passwords, app bearer tokens, and JWT secrets.
+The files under `/opt/algoedgefno/env/` are readable only by root on the host, but Docker also receives those values through `env_file`. Treat root access, Docker group access, and permission to run `docker inspect` or `docker compose exec` on this VPS as secret access. Do not grant Docker or sudo access to anyone who should not be able to read database passwords, Firebase credentials, and JWT secrets.
 
 ## DNS
 
@@ -419,9 +419,9 @@ curl -i https://staging-api.<domain>/version
 Or copy `scripts/smoke-deploy.sh`, `scripts/smoke-staging.sh`, and
 `scripts/smoke-prod.sh` to `/opt/algoedgefno/scripts/`, make them executable, and
 run the scripted deploy smoke check from the VPS. The wrappers set the target
-environment, host, container, and env-file defaults; the shared deploy script reads
-the app token and database name from the environment file when `APP_TOKEN` and
-`DB_NAME` are not already set, and it does not print the token.
+environment, host, container, and env-file defaults; the shared deploy script
+reads the database name from the environment file when `DB_NAME` is not already
+set.
 
 ```bash
 cd /opt/algoedgefno/compose
@@ -429,20 +429,21 @@ EXPECTED_IMAGE="ghcr.io/deependra191/algoedgefno-backend@sha256:<image-digest>" 
   /opt/algoedgefno/scripts/smoke-staging.sh "<commit-sha>" 12
 ```
 
-Verify protected endpoints:
+Verify app config and protected endpoints:
 
 ```bash
 curl -i https://api.<domain>/api/v1/config/app
-curl -i -H "Authorization: Bearer <production-token>" https://api.<domain>/api/v1/config/app
-curl -i -H "Authorization: Bearer <staging-token>" https://api.<domain>/api/v1/config/app
+curl -i https://api.<domain>/api/v1/backtests
+curl -i -H "Authorization: Bearer <invalid-token>" https://api.<domain>/api/v1/backtests
 ```
 
 Expected results:
 
 - `/health` returns `200`.
 - `/ready` returns `200` only when DB connectivity and environment identity match.
-- No-token protected request returns `401`.
-- Production API rejects the staging token.
+- `/api/v1/config/app` returns `200` without auth.
+- No-token protected tenant request returns `401`.
+- Protected tenant request with an invalid token returns `401`.
 - Logs include method, path, status, latency, environment, version, commit, and request ID.
 - Logs do not include bearer tokens, JWTs, DB passwords, full DSNs, or Firebase secrets.
 - Browser CORS response headers are absent. CORS is intentionally disabled for v1 because there is no browser client; future browser/admin CORS support should be added in a separate PR when needed.
@@ -465,7 +466,7 @@ secret files to GitHub Actions. It does not use `rsync`, `scp`, or inbound SSH
 from GitHub-hosted runners, and it does not overwrite server env files from the
 repository. The manual-only `Deploy staging` workflow remains available as a
 fallback or recovery path with an explicit digest.
-Do not configure `APP_SECRET_TOKEN`, database passwords, JWT secrets, GHCR tokens,
+Do not configure database passwords, JWT secrets, GHCR tokens,
 VPS passwords, or SSH private keys in this workflow.
 
 **Branch and runner control (replaces the prior `environment:`-based

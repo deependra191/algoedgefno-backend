@@ -9,7 +9,6 @@ EXPECTED_MIGRATION="${EXPECTED_MIGRATION:-}"
 EXPECTED_IMAGE="${EXPECTED_IMAGE:-}"
 EXPECTED_COMMIT="${EXPECTED_COMMIT:-}"
 APP_ENV_FILE="${APP_ENV_FILE:-}"
-APP_TOKEN="${APP_TOKEN:-}"
 DB_NAME="${DB_NAME:-}"
 LOG_SINCE="${LOG_SINCE:-10m}"
 
@@ -64,21 +63,14 @@ env_file_value() {
 }
 
 load_app_env() {
-    if [[ -n "${APP_TOKEN}" && -n "${DB_NAME}" ]]; then
+    if [[ -n "${DB_NAME}" ]]; then
         return
     fi
     if [[ -z "${APP_ENV_FILE}" ]]; then
-        fail "APP_ENV_FILE must be set unless APP_TOKEN and DB_NAME are both set"
+        fail "APP_ENV_FILE must be set unless DB_NAME is set"
     fi
     if [[ ! -r "${APP_ENV_FILE}" ]]; then
         fail "app env values unset and ${APP_ENV_FILE} is not readable"
-    fi
-
-    if [[ -z "${APP_TOKEN}" ]]; then
-        APP_TOKEN="$(env_file_value APP_SECRET_TOKEN "${APP_ENV_FILE}" || true)"
-        if [[ -z "${APP_TOKEN}" ]]; then
-            fail "APP_SECRET_TOKEN missing or empty in ${APP_ENV_FILE}"
-        fi
     fi
 
     if [[ -z "${DB_NAME}" ]]; then
@@ -144,14 +136,6 @@ validate_environment() {
     esac
 }
 
-auth_config() {
-    local cfg="${tmpdir}/curl-auth.conf"
-    chmod 700 "${tmpdir}"
-    printf 'header = "Authorization: Bearer %s"\n' "${APP_TOKEN}" > "${cfg}"
-    chmod 600 "${cfg}"
-    printf '%s' "${cfg}"
-}
-
 json_field() {
     local file="$1"
     local field="$2"
@@ -215,10 +199,9 @@ if [[ "${migration_version}" != "${EXPECTED_MIGRATION}" ]]; then
 fi
 pass "version: commit/environment/migration match"
 
-status_code protected-no-token 401 "${BASE_URL}/api/v1/config/app"
-status_code protected-bad-token 401 -H 'Authorization: Bearer bad-token' "${BASE_URL}/api/v1/config/app"
-
-status_code protected-valid-token 200 --config "$(auth_config)" "${BASE_URL}/api/v1/config/app"
+status_code config-app-public 200 "${BASE_URL}/api/v1/config/app"
+status_code tenant-no-token 401 "${BASE_URL}/api/v1/backtests"
+status_code tenant-bad-token 401 -H 'Authorization: Bearer bad-token' "${BASE_URL}/api/v1/backtests"
 
 actual_image="$(docker inspect "${CONTAINER_NAME}" --format '{{.Config.Image}}')"
 if [[ "${actual_image}" != "${EXPECTED_IMAGE}" ]]; then

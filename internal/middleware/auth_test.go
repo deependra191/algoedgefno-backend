@@ -3,7 +3,6 @@ package middleware
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,6 +14,8 @@ import (
 
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 )
+
+const testTenantPath = "/api/v1/backtests"
 
 func init() {
 	gin.SetMode(gin.TestMode)
@@ -39,20 +40,15 @@ func (v alwaysAcceptValidator) ValidateToken(_ string) (uuid.UUID, error) {
 }
 
 // newAuthRouter returns a minimal gin engine with the Auth middleware applied.
-// It registers two routes: one on the config path (static token allowed) and
-// one tenant path (requires a valid JWT from validator).
-func newAuthRouter(appSecretToken string) *gin.Engine {
-	return newAuthRouterWithValidator(appSecretToken, alwaysRejectValidator{})
+func newAuthRouter() *gin.Engine {
+	return newAuthRouterWithValidator(alwaysRejectValidator{})
 }
 
 // newAuthRouterWithValidator builds a router with an injectable TokenValidator.
-func newAuthRouterWithValidator(appSecretToken string, v models.TokenValidator) *gin.Engine {
+func newAuthRouterWithValidator(v models.TokenValidator) *gin.Engine {
 	r := gin.New()
-	r.Use(Auth(appSecretToken, v))
-	r.GET(appConfigPath, func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
-	r.GET("/api/v1/backtests", func(c *gin.Context) {
+	r.Use(Auth(v))
+	r.GET(testTenantPath, func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 	return r
@@ -94,65 +90,34 @@ func assertTokenRejected(t *testing.T, w *httptest.ResponseRecorder) {
 	}
 }
 
-// TestAuth_StaticTokenBlockedOnTenantEndpoints asserts that the static APP_SECRET_TOKEN
-// is rejected on any path other than /api/v1/config/app when the validator also rejects.
-func TestAuth_StaticTokenBlockedOnTenantEndpoints(t *testing.T) {
-	const secret = "test-secret"
-	r := newAuthRouter(secret)
+// TestAuth_RejectedTokenOnTenantEndpoint asserts that any bearer token rejected
+// by the validator is rejected by the middleware.
+func TestAuth_RejectedTokenOnTenantEndpoint(t *testing.T) {
+	r := newAuthRouter()
 
-	w := doRequest(r, "/api/v1/backtests", "Bearer "+secret)
-	// validator rejects (alwaysRejectValidator), so 401.
+	w := doRequest(r, testTenantPath, "Bearer rejected-token")
 	assertTokenRejected(t, w)
-}
-
-// TestAuth_StaticTokenAcceptedOnConfigApp asserts that a valid static token is
-// accepted on the /api/v1/config/app path and the handler is invoked.
-func TestAuth_StaticTokenAcceptedOnConfigApp(t *testing.T) {
-	const secret = "test-secret"
-	r := newAuthRouter(secret)
-
-	w := doRequest(r, appConfigPath, "Bearer "+secret)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200 on config/app with valid static token, got %d", w.Code)
-	}
 }
 
 // TestAuth_ValidJWTAcceptedOnTenantEndpoint asserts that a token accepted by
 // the validator is allowed through on tenant paths.
 func TestAuth_ValidJWTAcceptedOnTenantEndpoint(t *testing.T) {
-	const secret = "test-secret"
 	fixedUID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
-	r := newAuthRouterWithValidator(secret, alwaysAcceptValidator{uid: fixedUID})
+	r := newAuthRouterWithValidator(alwaysAcceptValidator{uid: fixedUID})
 
-	w := doRequest(r, "/api/v1/backtests", "Bearer some-jwt-token")
+	w := doRequest(r, testTenantPath, "Bearer some-jwt-token")
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200 for valid JWT on tenant path, got %d; body: %s", w.Code, w.Body)
 	}
 }
 
-// TestAuth_ValidJWTRejectedOnConfigAppWhenNotStaticToken asserts that a JWT
-// that the validator accepts is still rejected on /config/app if it does not
-// constant-time-match the static token — the static-token check takes priority
-// on /config/app, and a JWT reaching the validator path on /config/app succeeds
-// only when the validator accepts it (which the alwaysRejectValidator does not).
-func TestAuth_ValidJWTRejectedOnConfigAppWhenNotStaticToken(t *testing.T) {
-	const secret = "correct-secret"
-	r := newAuthRouter(secret) // alwaysRejectValidator
-
-	// A JWT that is not the static token will fall through to the validator,
-	// which rejects it.
-	w := doRequest(r, appConfigPath, "Bearer wrong-token")
-	assertTokenRejected(t, w)
-}
-
 // TestAuth_HMACJWTPassedToValidator asserts that a syntactically valid HS256 JWT
-// is passed to the TokenValidator (not short-circuited by the static-token check).
-// With alwaysRejectValidator the result is 401 — what matters is that the
-// middleware delegates to the validator rather than silently accepting the JWT.
+// is passed to the TokenValidator. With alwaysRejectValidator the result is 401
+// — what matters is that the middleware delegates to the validator rather than
+// silently accepting the JWT.
 func TestAuth_HMACJWTPassedToValidator(t *testing.T) {
-	const secret = "test-secret"
 	const jwtSigningKey = "jwt-signing-key"
-	r := newAuthRouter(secret) // alwaysRejectValidator
+	r := newAuthRouter()
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub": "11111111-1111-1111-1111-111111111111",
@@ -163,36 +128,17 @@ func TestAuth_HMACJWTPassedToValidator(t *testing.T) {
 		t.Fatalf("sign jwt: %v", err)
 	}
 
-	// Tenant path — validator rejects.
-	w := doRequest(r, "/api/v1/backtests", "Bearer "+tokenStr)
-	assertTokenRejected(t, w)
-
-	// Config/app — JWT is not the static token; falls to validator which rejects.
-	w = doRequest(r, appConfigPath, "Bearer "+tokenStr)
+	w := doRequest(r, testTenantPath, "Bearer "+tokenStr)
 	assertTokenRejected(t, w)
 }
 
-// TestAuth_MissingAuthorizationHeader asserts that requests without an Authorization
-// header receive 401 on all paths.
+// TestAuth_MissingAuthorizationHeader asserts that requests without an
+// Authorization header receive 401.
 func TestAuth_MissingAuthorizationHeader(t *testing.T) {
-	r := newAuthRouter("test-secret")
+	r := newAuthRouter()
 
-	for _, path := range []string{appConfigPath, "/api/v1/backtests"} {
-		t.Run(fmt.Sprintf("path=%s", path), func(t *testing.T) {
-			w := doRequest(r, path, "")
-			assertAuthRejected(t, w)
-		})
-	}
-}
-
-// TestAuth_WrongTokenOnConfigPath asserts that the correct path check alone is not
-// sufficient — the token must also match (both path + token must match for static bypass).
-func TestAuth_WrongTokenOnConfigPath(t *testing.T) {
-	r := newAuthRouter("correct-secret")
-
-	w := doRequest(r, appConfigPath, "Bearer wrong-secret")
-	// Falls through to validator (alwaysRejectValidator) → 401.
-	assertTokenRejected(t, w)
+	w := doRequest(r, testTenantPath, "")
+	assertAuthRejected(t, w)
 }
 
 // TestAuth_UserIDKeySetOnSuccess asserts that a valid JWT causes the middleware
@@ -201,8 +147,8 @@ func TestAuth_UserIDKeySetOnSuccess(t *testing.T) {
 	fixedUID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
 
 	r := gin.New()
-	r.Use(Auth("", alwaysAcceptValidator{uid: fixedUID}))
-	r.GET("/api/v1/backtests", func(c *gin.Context) {
+	r.Use(Auth(alwaysAcceptValidator{uid: fixedUID}))
+	r.GET(testTenantPath, func(c *gin.Context) {
 		raw, ok := c.Get(models.UserIDKey)
 		if !ok {
 			t.Error("UserIDKey not set in context")
@@ -218,7 +164,7 @@ func TestAuth_UserIDKeySetOnSuccess(t *testing.T) {
 		c.Status(http.StatusOK)
 	})
 
-	w := doRequest(r, "/api/v1/backtests", "Bearer some-token")
+	w := doRequest(r, testTenantPath, "Bearer some-token")
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}

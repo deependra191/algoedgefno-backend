@@ -8,18 +8,13 @@ restart containers, or read server-side env files.
 
 - Run from a shell that has `curl`, `python3`, and either Docker log access or
   `journalctl` access on the VPS.
-- Export the target token in the operator shell. The scripts deliberately do
-  NOT read server-side env files, so you extract it yourself (see "Staging
-  setup" below):
-  - `STAGING_APP_TOKEN` for `--env staging`
-  - `PROD_APP_TOKEN` for `--env prod`
 - For `--env staging` you must ALSO export the Firebase test UIDs the suite
   uses: `TEST_UID_A`, `TEST_UID_DENIED`, `TEST_UID_CONFLICT` (the same values
   provisioned by `setup-firebase-test-users` in Phase L0). A missing
-  `STAGING_APP_TOKEN` fails the run immediately; a missing `TEST_UID_*` makes
-  the dependent check **SKIP** — which is not a pass.
-- Do not pass tokens on the command line. The scripts write bearer headers to
-  chmod-600 temporary curl config files and remove them on exit.
+  `TEST_UID_*` makes the dependent check **SKIP** — which is not a pass.
+- Do not pass tokens on the command line. When the suite needs a test bearer
+  header, it writes it to a chmod-600 temporary curl config file and removes it
+  on exit.
 
 Optional payload overrides, if the default staging data shape changes:
 
@@ -39,30 +34,15 @@ export ABUSE_STAGING_CONTAINER=algoedgefno-backend-staging
 export ABUSE_PROD_CONTAINER=algoedgefno-backend-prod
 ```
 
-### Staging setup — extract token and test UIDs on the VPS
-
-`STAGING_APP_TOKEN` is the staging `APP_SECRET_TOKEN`. Extract it from the
-compose env file (root-owned, mode 600) and strip any surrounding quotes — a
-quoted value makes the `config-app-with-token` check return `401` instead of
-`200`:
+### Staging setup — export test UIDs on the VPS
 
 ```bash
-export STAGING_APP_TOKEN="$(sudo sed -n 's/^APP_SECRET_TOKEN=//p' \
-  /opt/algoedgefno/env/staging.env | tail -1 | sed -e 's/^["'\'']//' -e 's/["'\'']$//')"
-
 # Firebase test UIDs — use the values provisioned in Phase L0; the ones below
 # are the staging convention. TEST_UID_DENIED is deliberately absent from
 # ALLOWED_FIREBASE_UIDS so the allowlist-denied check gets 403.
 export TEST_UID_A='staging-test-uid-a'
 export TEST_UID_DENIED='staging-test-uid-denied'
 export TEST_UID_CONFLICT='staging-test-uid-conflict'
-
-# Verify the token is set and unquoted, without printing it:
-case "$STAGING_APP_TOKEN" in
-  \"*|*\"|\'*|*\') echo "token has surrounding quotes — re-extract" ;;
-  "")             echo "token empty — extraction failed" ;;
-  *)              echo "token looks clean" ;;
-esac
 ```
 
 ## Environment split (PR 2)
@@ -70,14 +50,12 @@ esac
 The suite runs two materially different paths:
 
 - **`--env staging` — mutating.** Mints Firebase ID tokens (via the in-container
-  `firebase-token` binary), exchanges them at `/auth/session`, exercises
-  tenant-authenticated abuse checks (burst submit, aggressive poll, large date
-  range, cross-tenant lookup), seeds the identity-conflict fixture, and ends
-  with the burst checks last. A `trap` cleans up any session/refresh artifacts
-  on exit.
+  `firebase-token` binary), exercises allowlist-denied and identity-conflict
+  checks, and ends with the `/auth/session` burst check last. A `trap` cleans
+  up the identity-conflict fixture on exit.
 - **`--env prod` — read-only.** Asserts only non-mutating invariants:
-  unauthenticated/invalid-token `401`, the static-token split (200 on
-  `/config/app`, 401 on tenant endpoints), and log redaction. It NEVER calls
+  public `/config/app`, unauthenticated/invalid-token tenant `401`, and log
+  redaction. It NEVER calls
   `/auth/session`, `/auth/refresh`, `/auth/logout`, never runs `firebase-token`,
   and never touches the staging-only conflict fixture. Production **smoke**
   (post-launch only) is the single documented intentional production mutation —
@@ -120,16 +98,6 @@ approved staging Firebase project ID; it refuses to run unless the guard matches
 the running staging project. It is referenced only by `abuse-suite.sh --env
 staging`. `--env prod` never touches it.
 
-## Kill-Switch Check
-
-From PR 2, kill-switch validation runs against an authenticated tenant request
-(Firebase-derived backend JWT), so a `503` can be distinguished from an auth
-lockdown. Run on staging:
-
-```bash
-scripts/security/abuse-suite.sh --env staging --expect-backtests-disabled
-```
-
 ## Independent Log Check
 
 The log redaction check can be run without the abuse suite:
@@ -153,23 +121,21 @@ scripts/security/check-log-redaction.sh --env staging --secret-file /path/to/sec
 ## Expected Coverage
 
 Both environments:
+- `/api/v1/config/app` returns `200` without auth and contains no tenant data.
 - Protected endpoint without auth returns `401` (`missing or invalid authorization header`).
 - Protected endpoint with a present-but-invalid bearer returns `401`
   (`invalid or expired token`) — a distinct error body from the missing-header
   case above. The two messages are separate constants in
   `internal/middleware/auth.go`; the suite asserts each precisely.
-- Production URL with staging token returns `401` when `STAGING_APP_TOKEN` is
-  available during the prod run.
-- Static-token split: `APP_SECRET_TOKEN` → `200` on `/api/v1/config/app`, `401`
-  on tenant endpoints (permanent from PR 2).
 - Recent logs contain no bearer tokens, JWT markers, Firebase ID tokens, refresh
-  tokens, app secret markers, DB passwords, or full DSNs.
+  tokens, secret markers, DB passwords, or full DSNs.
 
 Staging only (mutating, burst last):
-- Large-range, burst-submit, aggressive-poll, and cross-tenant lookup checks run
-  against a Firebase-derived backend JWT.
+- Allowlist-denied check against a verified but intentionally non-allowlisted
+  Firebase UID.
 - Identity-conflict check against the staging-only seeded fixture.
-- Kill-switch check via `--expect-backtests-disabled`.
+- `/auth/session` burst check confirms the auth route returns `429` under
+  rapid repeated exchange attempts.
 
 ## Logging redaction policy
 

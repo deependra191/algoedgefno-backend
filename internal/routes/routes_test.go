@@ -34,9 +34,8 @@ func newTestEngine(t *testing.T) *gin.Engine {
 	pool := mustOpenPool(t, dsn)
 
 	cfg := &config.Config{
-		AppSecretToken: "test-secret",
-		Env:            config.EnvTest,
-		JWTSecret:      "test-jwt-secret",
+		Env:       config.EnvTest,
+		JWTSecret: "test-jwt-secret",
 	}
 
 	userRepo := storage.NewUserStore(pool)
@@ -51,9 +50,8 @@ func newTestEngine(t *testing.T) *gin.Engine {
 
 func newRouteTableOnlyEngine(env config.Environment) *gin.Engine {
 	cfg := &config.Config{
-		AppSecretToken: "test-secret",
-		Env:            env,
-		JWTSecret:      "test-jwt-secret",
+		Env:       env,
+		JWTSecret: "test-jwt-secret",
 	}
 	authSvc := services.NewAuthService(nil, nil, nil, cfg.JWTSecret, nil, cfg.Env)
 	authHandler := handlers.NewAuthHandler(authSvc)
@@ -61,6 +59,16 @@ func newRouteTableOnlyEngine(env config.Environment) *gin.Engine {
 	r := gin.New()
 	Register(r, nil, cfg, providers.NewRegistry(), authSvc, authHandler)
 	return r
+}
+
+func TestConfigAppRouteIsPublic(t *testing.T) {
+	r := newRouteTableOnlyEngine(config.EnvTest)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/config/app", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for public config/app route, got %d", w.Code)
+	}
 }
 
 // TestRemovedRoutes_LoginAndRegisterReturn404 asserts that /api/v1/auth/login and

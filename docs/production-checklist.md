@@ -6,7 +6,6 @@ Run through this fully before every production deploy. Do not skip items.
 
 ## 1. Secrets & tokens (CRITICAL — do first)
 
-- [ ] `APP_SECRET_TOKEN` is set to a strong random value (not empty, not the example value)
 - [ ] `JWT_SECRET` is set to a strong random value (not `change-this-in-production`)
 - [ ] Real env files live only under `/opt/algoedgefno/env/` and `/opt/algoedgefno/compose/.env` on the VPS
 - [ ] Server env files are owned by root and mode `600`; `/opt/algoedgefno/env` is mode `700`
@@ -38,7 +37,7 @@ Run through this fully before every production deploy. Do not skip items.
 ```bash
 openssl rand -hex 32   # generates a secure 64-character hex token
 ```
-Run this twice — once for `APP_SECRET_TOKEN`, once for `JWT_SECRET`. Never reuse them.
+Use this for `JWT_SECRET`. Never reuse it across environments.
 
 ---
 
@@ -115,38 +114,28 @@ a `dev → main` integration PR. Production promotion remains a manual
 - [ ] Hit `/health` endpoint and confirm `200 OK`
 - [ ] Hit `/ready` endpoint and confirm `200 OK`
 - [ ] Hit `/version` endpoint and confirm environment, commit, and migration version
+- [ ] Hit `/api/v1/config/app` without a token — confirm `200 OK` and no tenant-specific data
 - [ ] Hit a protected endpoint without a token — confirm `401 Unauthorized`
-- [ ] **APP_SECRET_TOKEN split contract (permanent from PR 2):** `APP_SECRET_TOKEN` succeeds only on `/api/v1/config/app` (→ `200 OK`) and returns `401 Unauthorized` on every tenant endpoint (e.g. `/api/v1/backtests`). Tenant endpoints require a backend access JWT obtained via `/auth/session`.
+- [ ] Hit a protected endpoint with an invalid bearer token — confirm `401 Unauthorized`
 - [ ] Confirm logs contain request IDs and do not contain bearer tokens, JWTs, Firebase ID tokens, refresh tokens, DB passwords, or full DSNs
 - [ ] Run `scripts/security/abuse-suite.sh --env staging` and confirm zero failures before merging closed-beta security changes
 - [ ] Run the **read-only** production subset with `scripts/security/abuse-suite.sh --env prod` before first external user access — the prod path does NOT create Firebase sessions or mutate tenant data; production **smoke** (post-launch only) is the single documented intentional mutation
-- Kill-switch validation (`--expect-backtests-disabled`) runs against an authenticated tenant request from PR 2 onward (it failed fast during the PR 1 closed interval).
 
-> **Historical — PR 1 closed interval, superseded by PR 2.** Before PR 2 added Firebase JWT, the static token was rejected on tenant endpoints and the tenant-authenticated abuse checks were SKIP. The contract below documents that interval. Once PR 2 deploys, the previously-SKIP items (`burst-backtest-submit`, `aggressive-result-poll`, `backtest-large-date-range`, `cross-tenant-strategy-backtest-id-lookup`) become active in the **staging** suite.
-
-**PR 1 closed-interval abuse-suite contract** (historical; applied after PR 1 deployed, until PR 2 added Firebase JWT):
-- `GET /api/v1/backtests` with the static `APP_SECRET_TOKEN` → asserted **401** (`pr1-static-token-get-backtests`).
-- `POST /api/v1/backtests` with the static `APP_SECRET_TOKEN` → asserted **401** (`pr1-static-token-post-backtests`).
-- `GET /api/v1/config/app` with the static `APP_SECRET_TOKEN` → still **200** (asserted by `protected-valid-token`).
-- `burst-backtest-submit`, `aggressive-result-poll`, and `backtest-large-date-range` are SKIP (tenant endpoints 401 to static token; PR 2 reintroduces them via Firebase JWT).
-- `cross-tenant-strategy-backtest-id-lookup` remains SKIP until PR 2 introduces Firebase tokens.
-- `--expect-backtests-disabled` is rejected rather than reporting a misleading SKIP; validate the kill switch only after PR 2 restores authenticated tenant requests.
-- "Abuse suite green" in the PR 1 interval means: `run_auth_checks` passes + `run_pr1_closed_interval_check` passes + all other entries are SKIP, zero failures.
 - [ ] Create and review a screen-by-screen smoke-test sheet before live. For each Android screen/state, list the expected test cases, identify missing/unimplemented cases first, then run proper smoke testing against the implemented flows.
 
 **§5 Firebase verify — staging:**
 - [ ] Smoke `firebase_project_matches` step passes
-- [ ] `docker compose -f /opt/algoedgefno/compose/docker-compose.yml exec -T backend-staging sh -c '/app/firebase-token --uid="$TEST_UID_A"'` returns an ID token
+- [ ] `docker compose -f /opt/algoedgefno/compose/docker-compose.yml exec -T backend-staging sh -c '/app/firebase-token --uid="$1"' sh "$TEST_UID_A"` returns an ID token
 - [ ] `/auth/session` with that ID token → `200`
 - [ ] GET `/api/v1/backtests` with the returned accessToken → `200`
-- [ ] GET `/api/v1/config/app` with `APP_SECRET_TOKEN` → `200`
-- [ ] GET `/api/v1/backtests` with `APP_SECRET_TOKEN` → `401`
+- [ ] GET `/api/v1/config/app` without a token → `200`
+- [ ] GET `/api/v1/backtests` without a token → `401`
 - [ ] The deleted debug-session endpoint remains absent in every environment; automated route coverage asserts this in dev/test/staging/prod.
 - [ ] Staging abuse suite passes (burst last)
 - [ ] Nightly `cleanup-expired-refresh-tokens` cron has separate `backend-staging` and `backend-prod` invocations installed on the shared VPS
 - [ ] Firebase Console → Authentication → Settings → "One account per email" is ENABLED in the STAGING Firebase project
 - [ ] Manual cross-provider convergence verification, STAGING only, on a real Android device/emulator: (a) sign in with Google for an allowlisted staging test email, capture the Firebase UID via Console; (b) sign out, sign in with Firebase email-link for the same email, confirm SAME UID; (c) repeat in the opposite order for a second allowlisted staging test email. Uses `TEST_UID_A` and `TEST_UID_B`.
-- [ ] **Manual cross-tenant isolation verification (one-time, with real user data via Postman or the Android client).** Sign in as two allowlisted users A and B and obtain a backend access JWT for each. Create a backtest as A, then with B's token confirm: `GET /api/v1/backtests/{A-run-id}` → `404`; `GET /api/v1/backtests/{A-run-id}/trades` → `404`; `GET /api/v1/backtests` excludes A's run; `GET /api/v1/strategies/{slug}` shows `lastBacktest: null` for a strategy only A has run. Automated coverage lives in `internal/handlers/tenant_isolation_test.go`; this manual pass confirms it once against live data, after which the test cases are the ongoing guard (the staging abuse suite checks only the static-token boundary, not cross-user isolation).
+- [ ] **Manual cross-tenant isolation verification (one-time, with real user data via Postman or the Android client).** Sign in as two allowlisted users A and B and obtain a backend access JWT for each. Create a backtest as A, then with B's token confirm: `GET /api/v1/backtests/{A-run-id}` → `404`; `GET /api/v1/backtests/{A-run-id}/trades` → `404`; `GET /api/v1/backtests` excludes A's run; `GET /api/v1/strategies/{slug}` shows `lastBacktest: null` for a strategy only A has run. Automated coverage lives in `internal/handlers/tenant_isolation_test.go`; this manual pass confirms it once against live data, after which the test cases are the ongoing guard.
 
 **§5 Firebase verify — production (launch deploy, `smoke_mode=launch`):**
 - [ ] Pre-launch: `deploy-production.yml` dispatched with `smoke_mode=launch`; `smoke-prod-launch.sh` runs non-identity checks only; `/auth/session` is NOT invoked by automation
@@ -177,10 +166,10 @@ a `dev → main` integration PR. Production promotion remains a manual
 - [ ] §10 Step 9d: only after Step 9c passes, operator records the activation date in `docs/release-notes-firebase-auth.md` and switches subsequent production dispatches to `smoke_mode=standard`. Until standard production smoke is verified and activated, production dispatches must keep using `smoke_mode=launch`, even if `PROD_SMOKE_UID` is already present in the allowlist.
 
 **§5 Firebase verify — production (post-launch deploys, `smoke_mode=standard`):**
-- [ ] `docker compose -f /opt/algoedgefno/compose/docker-compose.yml exec -T backend-prod sh -c '/app/firebase-token --uid="$PROD_SMOKE_UID"'` returns an ID token
+- [ ] `docker compose -f /opt/algoedgefno/compose/docker-compose.yml exec -T backend-prod sh -c '/app/firebase-token --uid="$1"' sh "$PROD_SMOKE_UID"` returns an ID token
 - [ ] `/auth/session` with that ID token → `200`; subsequent `/auth/logout` → `204`
 - [ ] GET `/api/v1/backtests` with the returned accessToken → `200`
-- [ ] GET `/api/v1/config/app` with `APP_SECRET_TOKEN` → `200`; GET `/api/v1/backtests` with `APP_SECRET_TOKEN` → `401`
+- [ ] GET `/api/v1/config/app` without a token → `200`; GET `/api/v1/backtests` without a token → `401`
 - [ ] The deleted debug-session endpoint remains absent in every environment; automated route coverage asserts this in dev/test/staging/prod.
 - [ ] Production read-only abuse suite passes; it does not invoke session/refresh/logout or data mutations
 

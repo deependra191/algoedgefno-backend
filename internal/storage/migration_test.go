@@ -12,6 +12,7 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -20,6 +21,7 @@ const (
 	migration016Version = 16
 	migration017Version = 17
 	migration018Version = 18
+	migration019Version = 19
 )
 
 // migrationsDir returns the absolute path to the project's migrations/ directory by
@@ -376,4 +378,61 @@ func TestMigration018_DownGuard_RaisesWhenRefreshTokensRowExists(t *testing.T) {
 		t.Fatalf("migrate 018 down failed for an unexpected reason: %v", downErr)
 	}
 	t.Logf("migrate 018 down rejected as expected: %v", downErr)
+}
+
+// TestMigration019_DropsLegacyUserColumns asserts that migration 019 removes
+// the obsolete password-auth columns and that its down migration restores them
+// as nullable compatibility columns.
+func TestMigration019_DropsLegacyUserColumns(t *testing.T) {
+	isolatedDSN, cleanup := newIsolatedMigrationDB(t)
+	defer cleanup()
+
+	m := newMigrate(t, isolatedDSN)
+	defer m.Close()
+
+	if err := m.Migrate(migration019Version); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		t.Fatalf("migrate to v%d: %v", migration019Version, err)
+	}
+
+	pool := newIsolatedPool(t, isolatedDSN)
+
+	assertUserColumn := func(column string, wantExists bool, wantNullable bool) {
+		t.Helper()
+		var nullable string
+		err := pool.QueryRow(context.Background(), `
+			SELECT is_nullable
+			FROM information_schema.columns
+			WHERE table_schema = 'public'
+			  AND table_name = 'users'
+		      AND column_name = $1`, column,
+		).Scan(&nullable)
+		if !wantExists && errors.Is(err, pgx.ErrNoRows) {
+			return
+		}
+		if wantExists && errors.Is(err, pgx.ErrNoRows) {
+			t.Fatalf("column %s does not exist", column)
+		}
+		if err != nil {
+			t.Fatalf("query column %s: %v", column, err)
+		}
+		if !wantExists {
+			t.Fatalf("column %s exists, want absent", column)
+		}
+		gotNullable := nullable == "YES"
+		if gotNullable != wantNullable {
+			t.Fatalf("column %s nullable = %v, want %v", column, gotNullable, wantNullable)
+		}
+	}
+
+	assertUserColumn("name", false, false)
+	assertUserColumn("password_hash", false, false)
+
+	mDown := newMigrate(t, isolatedDSN)
+	defer mDown.Close()
+	if err := mDown.Steps(-1); err != nil {
+		t.Fatalf("step down v%d: %v", migration019Version, err)
+	}
+
+	assertUserColumn("name", true, true)
+	assertUserColumn("password_hash", true, true)
 }
