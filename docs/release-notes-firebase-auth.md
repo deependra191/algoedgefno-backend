@@ -145,6 +145,12 @@ After launch, the operator performs §10 Step 9:
       `3wvHesrFhTNqXDCq11irroKBdw43`
 - [x] Set `PROD_SMOKE_UID` in `/opt/algoedgefno/env/prod.env`, append it to
       `ALLOWED_FIREBASE_UIDS`; restart backend-prod.
+- [ ] Mark `PROD_SMOKE_UID` email verified with the production-only operator
+      command:
+      ```bash
+      cd /opt/algoedgefno/compose
+      docker compose exec -T backend-prod /app/verify-prod-smoke-user
+      ```
 - [ ] Verify standard production smoke (`/auth/session` with `PROD_SMOKE_UID`
       returns 200; pending Firebase email verification/admin update for the
       smoke user).

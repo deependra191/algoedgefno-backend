@@ -77,6 +77,8 @@ components:
     in: cmd/setup-firebase-test-users
   cmd_teardown_firebase_test_users:
     in: cmd/teardown-firebase-test-users
+  cmd_verify_prod_smoke_user:
+    in: cmd/verify-prod-smoke-user
 
 deps:
   models:
@@ -196,5 +198,9 @@ deps:
     anyVendorDeps: true
 
   cmd_teardown_firebase_test_users:
+    anyProjectDeps: true
+    anyVendorDeps: true
+
+  cmd_verify_prod_smoke_user:
     anyProjectDeps: true
     anyVendorDeps: true

@@ -666,9 +666,11 @@ updates `last_login_at` for `PROD_SMOKE_UID` and inserts+revokes one
 `refresh_tokens` row per run. Cleanup: the nightly
 `cleanup-expired-refresh-tokens` cron. Standard production smoke requires both
 `PROD_SMOKE_UID=<smoke-uid>` and the same UID included in
-`ALLOWED_FIREBASE_UIDS` in `/opt/algoedgefno/env/prod.env`; after changing either
-value, recreate `backend-prod` so the running process reloads the allowlist. For
-the **launch** deploy, the mutating smoke is disabled (`smoke_mode=launch`); the
+`ALLOWED_FIREBASE_UIDS` in `/opt/algoedgefno/env/prod.env`. The smoke user's
+Firebase Auth record must also have `emailVerified=true`; set it with
+`docker compose exec -T backend-prod /app/verify-prod-smoke-user` after
+recreating `backend-prod` so the command sees the updated env. For the
+**launch** deploy, the mutating smoke is disabled (`smoke_mode=launch`); the
 owner's §10 Step-5 sign-in creates the FIRST production `users` row.
 
 **Production runtime image is staging-promoted unchanged.** The runtime image
