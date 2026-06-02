@@ -196,6 +196,44 @@ Whichever comes first.
 
 ---
 
+## 8. Post-PR2 tenant identity cleanup
+
+**Deferred decision:** the Firebase auth rollout keeps the existing repeated
+handler-local `extractUserID(c)` checks for now so PR 2 stayed focused on token
+exchange, launch sequencing, and production hardening. A later cleanup PR can
+introduce a route invariant for tenant identity checks.
+
+**Risk being accepted:**
+- Handler code stays slightly repetitive and the route invariant is enforced in
+  each handler rather than centrally.
+- The current shape is already safe because handlers still reject missing,
+  malformed, or `uuid.Nil` identities, but the repeated pattern is easier to
+  drift over time than a single middleware guard.
+
+**Trigger to pull this forward:**
+- After PR 2 has been stable for a while, OR
+- If identity-check repetition starts to spread to more tenant handlers, OR
+- If a future cleanup pass wants to simplify tenant-route invariants without
+  changing session/auth semantics.
+
+**Scope sketch when implemented:**
+
+- Add `middleware.RequireUserIdentity()` that validates `models.UserIDKey` is
+  present, is a `uuid.UUID`, and is not `uuid.Nil`; otherwise abort with
+  `401 {"error":"missing user identity"}`.
+- Apply it only to tenant route groups, after `middleware.Auth(...)`.
+- Replace repeated handler blocks like `userID, ok := extractUserID(c)` with a
+  handler-local invariant helper such as `mustUserID(c)`.
+- Keep `/api/v1/config/app`, `/api/v1/auth/session`, `/api/v1/auth/refresh`,
+  and `/api/v1/auth/logout` outside this invariant.
+- Add tests for missing, malformed, and nil identities on tenant routes, plus
+  middleware ordering coverage.
+
+**Estimated effort:** low to medium, depending on how many tenant handlers are
+refactored in the same pass.
+
+---
+
 ## Add new items here
 
 When a future scope decision pushes something to "after users exist," add it above this line with the same shape (risk / trigger / scope sketch / effort).
