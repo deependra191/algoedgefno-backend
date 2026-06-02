@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"crypto/subtle"
 	"net/http"
 	"strings"
 
@@ -12,30 +11,18 @@ import (
 )
 
 const (
-	bearerPrefix  = "Bearer "
-	appConfigPath = "/api/v1/config/app"
+	bearerPrefix = "Bearer "
 
 	errMissingOrInvalidAuthorizationHeader = "missing or invalid authorization header"
 	errInvalidOrExpiredToken               = "invalid or expired token"
 )
 
-// Auth returns a Gin middleware that enforces bearer-token authentication.
+// Auth returns a Gin middleware that enforces backend JWT authentication.
 //
-// Static-token path: requests to /api/v1/config/app with a token that
-// constant-time-matches appSecretToken are allowed without involving the JWT
-// validator. This path is reserved for the Android app-config endpoint.
-//
-// JWT path: all other requests go through validator.ValidateToken, which
-// parses the HS256 token, verifies the env claim, and returns the user UUID.
-// On success the UUID is stored in the Gin context under models.UserIDKey.
-//
-// Scope note: APP_SECRET_TOKEN is scoped to /config/app — it is rejected on
-// every other route (the static-token branch only matches that path). The
-// converse is intentional: a valid backend JWT IS also accepted on /config/app
-// (the static-token compare fails and we fall through to the JWT validator), so
-// an authenticated tenant can read app config. The rule constrains where the
-// STATIC token works, not where JWTs work.
-func Auth(appSecretToken string, validator models.TokenValidator) gin.HandlerFunc {
+// Requests go through validator.ValidateToken, which parses the HS256 token,
+// verifies the env claim, and returns the user UUID. On success the UUID is
+// stored in the Gin context under models.UserIDKey.
+func Auth(validator models.TokenValidator) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")
 		if !strings.HasPrefix(header, bearerPrefix) {
@@ -44,15 +31,6 @@ func Auth(appSecretToken string, validator models.TokenValidator) gin.HandlerFun
 		}
 		token := strings.TrimPrefix(header, bearerPrefix)
 
-		// Static-token path — only for /api/v1/config/app.
-		if c.Request.URL.Path == appConfigPath &&
-			appSecretToken != "" &&
-			subtle.ConstantTimeCompare([]byte(token), []byte(appSecretToken)) == 1 {
-			c.Next()
-			return
-		}
-
-		// JWT validator path — all other protected endpoints.
 		uid, err := validator.ValidateToken(token)
 		if err != nil || uid == uuid.Nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": errInvalidOrExpiredToken})

@@ -28,7 +28,6 @@ const (
 	envVarDBPassword     = "DB_PASSWORD"
 	envVarDBName         = "DB_NAME"
 	envVarJWTSecret      = "JWT_SECRET"
-	envVarAppSecretToken = "APP_SECRET_TOKEN"
 	envVarMigrationsPath = "MIGRATIONS_PATH"
 	envVarNSEUserAgent   = "NSE_USER_AGENT"
 	envVarNSEAcceptHTML  = "NSE_ACCEPT_HTML"
@@ -84,7 +83,6 @@ type Config struct {
 	DBPass         string
 	DBName         string
 	JWTSecret      string
-	AppSecretToken string
 	Env            Environment
 	MigrationsPath string
 	AutoMigrate    bool
@@ -188,11 +186,6 @@ func newFromEnv(lookup func(string) (string, bool)) (*Config, error) {
 		return nil, err
 	}
 
-	appSecretToken, err := requireEnvFrom(lookup, envVarAppSecretToken)
-	if err != nil {
-		return nil, err
-	}
-
 	backtestEnabled, err := getBoolEnvFrom(lookup, envVarBacktestEnabled, defaultBacktestEnabled)
 	if err != nil {
 		return nil, err
@@ -223,7 +216,6 @@ func newFromEnv(lookup func(string) (string, bool)) (*Config, error) {
 		DBPass:             getEnvFrom(lookup, envVarDBPassword, ""),
 		DBName:             getEnvFrom(lookup, envVarDBName, ""),
 		JWTSecret:          jwtSecret,
-		AppSecretToken:     appSecretToken,
 		Env:                env,
 		MigrationsPath:     getEnvFrom(lookup, envVarMigrationsPath, defaultMigrationsPath),
 		AutoMigrate:        autoMigrate,
@@ -265,9 +257,6 @@ func newFromEnv(lookup func(string) (string, bool)) (*Config, error) {
 // mandatory production markers in DB user/name, no non-prod markers anywhere,
 // no auto-migrate, non-empty absolute migrations path.
 func (cfg *Config) validateProductionIdentity() error {
-	if cfg.AppSecretToken == "" {
-		return fmt.Errorf("production APP_SECRET_TOKEN must be set")
-	}
 	if cfg.JWTSecret == "" {
 		return fmt.Errorf("production JWT_SECRET must be set")
 	}
@@ -292,9 +281,6 @@ func (cfg *Config) validateProductionIdentity() error {
 // validateStagingIdentity enforces staging guardrails: non-empty secrets,
 // mandatory staging markers in DB user/name, no production markers anywhere.
 func (cfg *Config) validateStagingIdentity() error {
-	if cfg.AppSecretToken == "" {
-		return fmt.Errorf("staging APP_SECRET_TOKEN must be set")
-	}
 	if cfg.JWTSecret == "" {
 		return fmt.Errorf("staging JWT_SECRET must be set")
 	}

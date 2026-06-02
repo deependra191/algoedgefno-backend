@@ -47,6 +47,155 @@ Whichever comes first.
 
 ---
 
+## 2. External HTTP probes
+
+**Deferred decision:** public endpoint uptime probes are not installed for closed beta. The current active Healthchecks.io setup monitors VPS-side cron heartbeats and subsystem health only; checks 1-3 in `docs/monitoring-setup.md` remain reserved for external HTTP probing.
+
+**Risk being accepted:**
+- A failure that is visible only from outside the VPS can go undetected until the operator opens the Android app or manually curls the API. Examples: DNS drift, Caddy proxy misrouting, firewall changes, public network routing issues, backend endpoint hangs, or `/ready` returning 5xx while containers still look "running".
+- For friend-only closed beta this is acceptable because the operator is close to the product. For external users, this becomes user-visible downtime without independent alerting.
+
+**Trigger to pull this forward:**
+- First non-friend external user signs up, OR
+- Any incident where the API is unavailable from a client while VPS-internal checks remain green.
+
+**Scope sketch when implemented:**
+
+- Deploy Uptime Kuma on a second machine, not on the monitored VPS.
+- Add probes for:
+  - production `/health`
+  - staging `/health`
+  - production `/ready`
+- Wire Telegram alerts through Kuma.
+- Optionally migrate the existing cron heartbeat pings into Kuma push monitors later, but keep the current Healthchecks.io setup until the replacement has alerted successfully in a controlled test.
+- Update `docs/monitoring-setup.md` Phase 1 and `docs/production-checklist.md` §9 when shipped.
+
+**Estimated effort:** 1-2 hours if a second host is already available; longer if a second host must be provisioned.
+
+---
+
+## 3. Compose-level backend healthchecks
+
+**Deferred decision:** backend containers currently rely on Caddy/manual smoke checks plus the VPS meta-health script. The Compose file does not yet declare backend `healthcheck` entries.
+
+**Risk being accepted:**
+- Docker can report `backend-prod` or `backend-staging` as running even when the HTTP server is wedged, slow, or internally unhealthy.
+- Deploy verification still catches this through scripted smoke checks, but steady-state container health is less explicit than it could be.
+
+**Trigger to pull this forward:**
+- External HTTP probes are implemented, OR
+- Any incident where a backend container is running but endpoint smoke fails, OR
+- The runtime image gains a small HTTP probe tool suitable for Compose healthchecks.
+
+**Scope sketch when implemented:**
+
+- Add backend `healthcheck` entries in `deploy/docker-compose.yml`.
+- Prefer a lightweight internal probe that does not require secrets and does not log tokens.
+- Use `/health` for process liveness; consider `/ready` only if restart-on-DB-unavailable is explicitly desired.
+- Update `docs/one-vps-deployment.md` smoke-check notes once Compose health is active.
+
+**Estimated effort:** 30-60 minutes if the image already has a suitable probe binary; otherwise include image/tooling work.
+
+---
+
+## 4. Tighten VPS meta-health cadence
+
+**Deferred decision:** `vps-health.sh` runs hourly during closed beta, with Healthchecks.io grace set to 60 minutes. This intentionally tolerates one missed run.
+
+**Risk being accepted:**
+- Worst-case alert latency for VPS-side subsystem failures can be close to two hours.
+- This is acceptable before external users because it reduces false positives on a small VPS.
+
+**Trigger to pull this forward:**
+- First non-friend external user signs up, OR
+- A production incident shows the hourly cadence is too slow.
+
+**Scope sketch when implemented:**
+
+- Change the root crontab entry from hourly to `*/5 * * * *`.
+- Update Healthchecks.io check 4 grace to 5 minutes.
+- Confirm a controlled subsystem failure produces a Telegram alert at the new cadence.
+- Update `docs/monitoring-setup.md` Phase 3 and `docs/production-checklist.md` §9 if the target cadence changes.
+
+**Estimated effort:** 15-30 minutes.
+
+---
+
+## 5. Phone OTP
+
+**Deferred decision:** v1 keeps Firebase Google/email-link auth only. Phone OTP is intentionally not enabled.
+
+**Risk being accepted:**
+- Users without suitable Google/email-link access cannot sign in.
+- The product has less identity assurance than a future phone-verified flow.
+
+**Trigger to pull this forward:**
+- A real onboarding need appears that Google/email-link cannot handle, OR
+- Abuse patterns require stronger identity binding, OR
+- A product requirement explicitly needs verified phone numbers.
+
+**Scope sketch when implemented:**
+
+- Revisit Firebase Phone Auth pricing, quota, regional support, and abuse controls before enabling it.
+- Add Android phone-auth UI and backend contract tests only if the Firebase UID remains the canonical identity.
+- Add rate limits and monitoring for OTP send attempts before exposing the flow.
+- Update `docs/decisions.md` if the deferral decision changes.
+
+**Estimated effort:** depends on Android UX scope and abuse controls; treat as a product/security feature, not a small auth toggle.
+
+---
+
+## 6. GitHub-enforced merge and deploy controls
+
+**Deferred decision:** CI is visible on every PR, and deploy workflows are guarded by explicit `if: github.ref == 'refs/heads/main'` checks plus human merge/dispatch discipline. GitHub-enforced branch protection/rulesets and environment-scoped deployment controls are not enabled because the private repo is currently on GitHub Free.
+
+**Risk being accepted:**
+- A human can still merge a red PR or dispatch a deploy at the wrong time if they ignore the documented process.
+- Repository variables, deploy branch controls, and required-reviewer style gates are weaker than they would be on a paid plan with supported rulesets. This is acceptable while one operator owns both code and deploy decisions, but it should not stay process-only once more people or external users depend on the service.
+
+**Trigger to pull this forward:**
+- First non-friend external user signs up, OR
+- A second regular code contributor/operator is added, OR
+- Any near miss where a red PR, wrong branch, or premature deploy almost reaches production.
+
+**Scope sketch when implemented:**
+
+- Upgrade to a GitHub plan that supports the needed private-repo rulesets.
+- Add branch protection/rulesets for `dev` and `main` requiring CI to pass before merge.
+- Keep task PRs targeting `dev`; reserve `main` for `dev -> main` integration PRs.
+- Re-evaluate whether deployment environment features add useful controls without contradicting the current self-hosted-runner model.
+- Update `docs/production-checklist.md` §6 and `docs/one-vps-deployment.md` once machine enforcement replaces the current manual gate.
+
+**Estimated effort:** 1-2 hours after the plan upgrade decision, plus a controlled test with a deliberately failing PR.
+
+---
+
+## 7. Deploy credential hardening
+
+**Deferred decision:** current deployment uses narrow root-owned wrappers, a limited self-hosted runner user, digest-qualified images, and root-owned server-side env files. A full secrets-manager or short-lived deploy-credential model is not implemented.
+
+**Risk being accepted:**
+- Long-lived GHCR/package credentials and server-side deployment credentials remain operationally convenient but increase blast radius if the VPS, runner user, or Docker credentials are compromised.
+- Secret rotation is manual, so stale credentials may survive longer than ideal.
+
+**Trigger to pull this forward:**
+- First non-friend external user signs up, OR
+- A second operator needs deployment access, OR
+- Any credential exposure, runner compromise, or token-rotation incident occurs.
+
+**Scope sketch when implemented:**
+
+- Inventory every deploy credential: GHCR pull credentials, GitHub runner registration/token state, Firebase service-account JSON, healthcheck/Telegram URLs, DB env files, and backup/off-site storage credentials.
+- Rotate long-lived tokens and document owner, scope, creation date, and next rotation date outside Git.
+- Prefer least-privilege package-read tokens for GHCR and keep them only in root-owned Docker auth on the VPS.
+- Evaluate a secrets manager or encrypted deployment store for server-side credentials.
+- If practical, replace long-lived deploy credentials with shorter-lived or tightly scoped alternatives.
+- Update `docs/one-vps-deployment.md` and `docs/production-checklist.md` after the credential model changes.
+
+**Estimated effort:** 2-4 hours for inventory/rotation; longer if introducing a secrets manager.
+
+---
+
 ## Add new items here
 
 When a future scope decision pushes something to "after users exist," add it above this line with the same shape (risk / trigger / scope sketch / effort).

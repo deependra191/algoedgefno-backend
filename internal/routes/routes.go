@@ -13,12 +13,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Route-path constants — named per rule 17 (used in multiple places and in
-// the rate-limiter key, so a reader cannot safely inline them).
+// Route-path constants — named per rule 17 for API contract paths and
+// rate-limiter keys.
 const (
 	routeAuthSession = "/api/v1/auth/session"
 	routeAuthRefresh = "/api/v1/auth/refresh"
 	routeAuthLogout  = "/api/v1/auth/logout"
+	routeConfigApp   = "/config/app"
 )
 
 // Body-cap constants (bytes) for auth endpoints.
@@ -96,13 +97,12 @@ func Register(
 			)
 		}
 
-		// Protected endpoints require a valid backend JWT (or the static
-		// APP_SECRET_TOKEN on /config/app only).
-		protected := v1.Group("")
-		protected.Use(middleware.Auth(cfg.AppSecretToken, authSvc))
-		{
-			protected.GET("/config/app", handlers.AppConfig)
+		v1.GET(routeConfigApp, handlers.AppConfig)
 
+		// Protected endpoints require a valid backend JWT.
+		protected := v1.Group("")
+		protected.Use(middleware.Auth(authSvc))
+		{
 			protected.GET("/strategies", strategyHandler.List)
 			protected.GET("/strategies/:id", strategyHandler.GetByID)
 

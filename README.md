@@ -11,7 +11,7 @@ Go backend for AlgoEdgeFno — an Android-first intraday algo trading tool for I
 | Database | PostgreSQL 16 | ACID compliance required for financial data |
 | DB access | pgx/v5 (no ORM) | Direct SQL, full PostgreSQL/TimescaleDB feature support, no ORM overhead |
 | Auth (Android) | Firebase ID token → backend JWT/refresh | Identity via Firebase; backend mints short-lived JWT + rotating refresh |
-| Auth (/config/app) | APP_SECRET_TOKEN static bearer | Until /config/app moves to Firebase or public |
+| App config | Public `/config/app` | Static pre-login Android bootstrap config; no tenant data |
 | Config | godotenv | Simple .env loading, 12-factor compatible |
 
 ## Local setup
@@ -59,7 +59,7 @@ GET /health
 
 Android obtains a Firebase ID token, then exchanges it for a backend session
 (short-lived access JWT + rotating refresh token). Tenant endpoints require the
-backend access JWT — `APP_SECRET_TOKEN` is accepted only on `/api/v1/config/app`.
+backend access JWT.
 
 ```
 POST /api/v1/auth/session
@@ -76,7 +76,7 @@ Body: { "refreshToken": "<43-char-base64url>" }
 → 204 No Content
 ```
 
-### App Config _(requires Authorization: Bearer <token>)_
+### App Config
 
 ```
 GET /api/v1/config/app

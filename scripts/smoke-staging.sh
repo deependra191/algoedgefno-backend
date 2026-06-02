@@ -88,10 +88,6 @@ if [[ ! -r "${APP_ENV_FILE}" ]]; then
     fail "app env file not readable: ${APP_ENV_FILE}"
 fi
 
-app_token="$(env_file_value APP_SECRET_TOKEN "${APP_ENV_FILE}" || true)"
-if [[ -z "${app_token}" ]]; then
-    fail "APP_SECRET_TOKEN missing or empty in ${APP_ENV_FILE}"
-fi
 test_uid_a="$(env_file_value TEST_UID_A "${APP_ENV_FILE}" || true)"
 if [[ -z "${test_uid_a}" ]]; then
     fail "TEST_UID_A missing or empty in ${APP_ENV_FILE}"
@@ -102,10 +98,6 @@ if [[ -z "${db_name}" ]]; then
 fi
 
 chmod 700 "${tmpdir}"
-
-auth_cfg="${tmpdir}/curl-auth.conf"
-printf 'header = "Authorization: Bearer %s"\n' "${app_token}" > "${auth_cfg}"
-chmod 600 "${auth_cfg}"
 
 # --- Baseline checks (mirrors smoke-deploy.sh) ---
 
@@ -131,8 +123,9 @@ if [[ "${actual_env}" != "staging" ]]; then
 fi
 pass "version: commit/migration/environment match"
 
-status_code config-app-with-token 200 --config "${auth_cfg}" "${BASE_URL}/api/v1/config/app"
-status_code backtests-static-token-rejected 401 --config "${auth_cfg}" "${BASE_URL}/api/v1/backtests"
+status_code config-app-public 200 "${BASE_URL}/api/v1/config/app"
+status_code backtests-no-auth-rejected 401 "${BASE_URL}/api/v1/backtests"
+status_code backtests-bad-token-rejected 401 -H 'Authorization: Bearer bad-token' "${BASE_URL}/api/v1/backtests"
 
 # Container image check.
 if [[ -n "${EXPECTED_IMAGE:-}" ]]; then
@@ -159,7 +152,7 @@ pass "schema_migrations: version ${EXPECTED_MIGRATION}, dirty false"
 id_token_file="${tmpdir}/firebase-id-token"
 docker compose -f "${COMPOSE_DIR}/docker-compose.yml" \
     exec -T backend-staging \
-    sh -c "/app/firebase-token --uid=\"${test_uid_a}\"" > "${id_token_file}"
+    sh -c '/app/firebase-token --uid="$1"' sh "${test_uid_a}" > "${id_token_file}"
 chmod 600 "${id_token_file}"
 
 id_token="$(cat "${id_token_file}")"

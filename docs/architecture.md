@@ -5,7 +5,7 @@
 ```
 cmd/server/main.go          — entry point, wires dependencies, starts HTTP server
 internal/config/            — env config (reads .env, exposes typed Config struct)
-internal/middleware/        — HTTP middleware: Auth (APP_SECRET_TOKEN on /config/app + backend JWT validator on tenant endpoints), RequestID, Logger, rate limiter, request-body limiter
+internal/middleware/        — HTTP middleware: backend JWT Auth on tenant endpoints, RequestID, Logger, rate limiter, request-body limiter
 internal/entities/          — DB row structs used as pgx scan targets (no JSON tags)
 internal/models/            — domain objects with entity mappers (no JSON tags)
 internal/storage/           — pgx queries, one file per table group (accepts/returns *models.X; entity↔model mappers private to storage)

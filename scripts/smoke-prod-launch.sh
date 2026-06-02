@@ -15,8 +15,6 @@ EXPECTED_MIGRATION="$2"
 
 BASE_URL="${SMOKE_BASE_URL:-https://api.algoedgefno.com}"
 CONTAINER_NAME="${CONTAINER_NAME:-algoedgefno-backend-prod}"
-APP_ENV_FILE="${APP_ENV_FILE:-/opt/algoedgefno/env/prod.env}"
-
 tmpdir="$(mktemp -d)"
 cleanup() {
     rm -rf "${tmpdir}"
@@ -49,22 +47,6 @@ status_code() {
     pass "${name}: HTTP ${want}"
 }
 
-env_file_value() {
-    local key="$1"
-    local file="$2"
-    local line
-    line="$(grep -E "^${key}=" "${file}" | tail -1 || true)"
-    if [[ -z "${line}" ]]; then
-        return 1
-    fi
-    local value="${line#*=}"
-    value="${value%\"}"
-    value="${value#\"}"
-    value="${value%\'}"
-    value="${value#\'}"
-    printf '%s' "${value}"
-}
-
 json_field() {
     local file="$1"
     local field="$2"
@@ -81,21 +63,6 @@ PY
 
 require_cmd curl
 require_cmd python3
-
-if [[ ! -r "${APP_ENV_FILE}" ]]; then
-    fail "app env file not readable: ${APP_ENV_FILE}"
-fi
-
-app_token="$(env_file_value APP_SECRET_TOKEN "${APP_ENV_FILE}" || true)"
-if [[ -z "${app_token}" ]]; then
-    fail "APP_SECRET_TOKEN missing or empty in ${APP_ENV_FILE}"
-fi
-
-# Write token to a mode-600 temp file; never inline it in curl args.
-auth_cfg="${tmpdir}/curl-auth.conf"
-chmod 700 "${tmpdir}"
-printf 'header = "Authorization: Bearer %s"\n' "${app_token}" > "${auth_cfg}"
-chmod 600 "${auth_cfg}"
 
 # 1. Health and ready checks.
 status_code health 200 "${BASE_URL}/health"
@@ -121,10 +88,11 @@ if [[ "${actual_env}" != "production" ]]; then
 fi
 pass "version: commit/migration/environment match"
 
-# 3. /config/app with APP_SECRET_TOKEN returns 200.
-status_code config-app-with-token 200 --config "${auth_cfg}" "${BASE_URL}/api/v1/config/app"
+# 3. /config/app is public app bootstrap config.
+status_code config-app-public 200 "${BASE_URL}/api/v1/config/app"
 
-# 4. /backtests with APP_SECRET_TOKEN returns 401 (tenant endpoint, static token rejected).
-status_code backtests-static-token-rejected 401 --config "${auth_cfg}" "${BASE_URL}/api/v1/backtests"
+# 4. /backtests remains a protected tenant endpoint.
+status_code backtests-no-auth-rejected 401 "${BASE_URL}/api/v1/backtests"
+status_code backtests-bad-token-rejected 401 -H 'Authorization: Bearer bad-token' "${BASE_URL}/api/v1/backtests"
 
 printf 'launch smoke passed for %s\n' "${EXPECTED_COMMIT}"

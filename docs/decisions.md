@@ -12,9 +12,9 @@ Candle data will reach millions of rows across instruments and intervals. Timesc
 
 GORM abstracts away SQL in ways that are incompatible with TimescaleDB-specific DDL (hypertable creation, compression policies). Explicit SQL via pgx keeps queries readable, debuggable, and fully compatible with PostgreSQL extensions.
 
-## Firebase Auth for v1 Android, APP_SECRET_TOKEN scoped to /config/app
+## Firebase Auth for v1 Android, public bootstrap app config
 
-This is a single-owner tool, so Firebase handles identity rather than a custom login/password flow. Android obtains a Firebase ID token and exchanges it at `/api/v1/auth/session` for a backend session: a short-lived access JWT plus a rotating refresh token, both minted by the backend after it verifies the Firebase token. Tenant endpoints require the backend access JWT. The static `APP_SECRET_TOKEN` is accepted only on `/api/v1/config/app` and is scheduled for removal once that endpoint moves to Firebase or becomes public. JWT (golang-jwt/jwt v5) is now actively used to mint those backend session tokens — it is no longer a "kept for future" dependency.
+This is a single-owner tool, so Firebase handles identity rather than a custom login/password flow. Android obtains a Firebase ID token and exchanges it at `/api/v1/auth/session` for a backend session: a short-lived access JWT plus a rotating refresh token, both minted by the backend after it verifies the Firebase token. Tenant endpoints require the backend access JWT. `/api/v1/config/app` is public because it currently returns only static pre-login Android bootstrap config and no tenant data. JWT (golang-jwt/jwt v5) is actively used to mint backend session tokens.
 
 ## MarketDataProvider interface with Capability declarations
 

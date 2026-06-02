@@ -140,7 +140,6 @@ check_literal() {
 
 check_pattern "authorization bearer marker" 'Bearer[[:space:]]+'
 check_pattern "JWT_SECRET marker" 'JWT_SECRET'
-check_pattern "APP_SECRET_TOKEN marker" 'APP_SECRET_TOKEN'
 check_pattern "password key marker" 'password='
 check_pattern "postgres DSN marker" 'postgres://'
 check_pattern "DATABASE_URL marker" 'database_url|DATABASE_URL'
