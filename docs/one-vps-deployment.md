@@ -447,7 +447,7 @@ Expected results:
 - Logs include method, path, status, latency, environment, version, commit, and request ID.
 - Logs do not include bearer tokens, JWTs, DB passwords, full DSNs, or Firebase secrets.
 - Browser CORS response headers are absent. CORS is intentionally disabled for v1 because there is no browser client; future browser/admin CORS support should be added in a separate PR when needed.
-- Backend container health is validated through Caddy/manual smoke checks for now. Compose-level backend `healthcheck` entries can be added later after the runtime image includes a small HTTP probe tool or the app exposes a dependency-free internal probe strategy.
+- Backend container health is validated through Caddy/manual smoke checks for now. Compose-level backend `healthcheck` entries are tracked in `docs/post-beta-checklist.md` and can be added later after the runtime image includes a small HTTP probe tool or the app exposes a dependency-free internal probe strategy.
 
 ## Staging deploy automation
 
@@ -661,6 +661,9 @@ manual database recovery path.
   to any environment.
 - **Migration 018 down:** PROHIBITED while any `refresh_tokens` row exists,
   including revoked rows.
+- **Migration 019 down:** not part of normal rollback. If manually applied, it
+  only restores nullable legacy `users.name` and `users.password_hash` columns;
+  it does not remove Firebase identity data or refresh tokens.
 
 **Production smoke residue.** For **post-launch** deploys, each smoke run
 updates `last_login_at` for `PROD_SMOKE_UID` and inserts+revokes one

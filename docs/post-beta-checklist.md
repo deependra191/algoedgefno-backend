@@ -47,6 +47,104 @@ Whichever comes first.
 
 ---
 
+## 2. External HTTP probes
+
+**Deferred decision:** public endpoint uptime probes are not installed for closed beta. The current active Healthchecks.io setup monitors VPS-side cron heartbeats and subsystem health only; checks 1-3 in `docs/monitoring-setup.md` remain reserved for external HTTP probing.
+
+**Risk being accepted:**
+- A failure that is visible only from outside the VPS can go undetected until the operator opens the Android app or manually curls the API. Examples: DNS drift, Caddy proxy misrouting, firewall changes, public network routing issues, backend endpoint hangs, or `/ready` returning 5xx while containers still look "running".
+- For friend-only closed beta this is acceptable because the operator is close to the product. For external users, this becomes user-visible downtime without independent alerting.
+
+**Trigger to pull this forward:**
+- First non-friend external user signs up, OR
+- Any incident where the API is unavailable from a client while VPS-internal checks remain green.
+
+**Scope sketch when implemented:**
+
+- Deploy Uptime Kuma on a second machine, not on the monitored VPS.
+- Add probes for:
+  - production `/health`
+  - staging `/health`
+  - production `/ready`
+- Wire Telegram alerts through Kuma.
+- Optionally migrate the existing cron heartbeat pings into Kuma push monitors later, but keep the current Healthchecks.io setup until the replacement has alerted successfully in a controlled test.
+- Update `docs/monitoring-setup.md` Phase 1 and `docs/production-checklist.md` §9 when shipped.
+
+**Estimated effort:** 1-2 hours if a second host is already available; longer if a second host must be provisioned.
+
+---
+
+## 3. Compose-level backend healthchecks
+
+**Deferred decision:** backend containers currently rely on Caddy/manual smoke checks plus the VPS meta-health script. The Compose file does not yet declare backend `healthcheck` entries.
+
+**Risk being accepted:**
+- Docker can report `backend-prod` or `backend-staging` as running even when the HTTP server is wedged, slow, or internally unhealthy.
+- Deploy verification still catches this through scripted smoke checks, but steady-state container health is less explicit than it could be.
+
+**Trigger to pull this forward:**
+- External HTTP probes are implemented, OR
+- Any incident where a backend container is running but endpoint smoke fails, OR
+- The runtime image gains a small HTTP probe tool suitable for Compose healthchecks.
+
+**Scope sketch when implemented:**
+
+- Add backend `healthcheck` entries in `deploy/docker-compose.yml`.
+- Prefer a lightweight internal probe that does not require secrets and does not log tokens.
+- Use `/health` for process liveness; consider `/ready` only if restart-on-DB-unavailable is explicitly desired.
+- Update `docs/one-vps-deployment.md` smoke-check notes once Compose health is active.
+
+**Estimated effort:** 30-60 minutes if the image already has a suitable probe binary; otherwise include image/tooling work.
+
+---
+
+## 4. Tighten VPS meta-health cadence
+
+**Deferred decision:** `vps-health.sh` runs hourly during closed beta, with Healthchecks.io grace set to 60 minutes. This intentionally tolerates one missed run.
+
+**Risk being accepted:**
+- Worst-case alert latency for VPS-side subsystem failures can be close to two hours.
+- This is acceptable before external users because it reduces false positives on a small VPS.
+
+**Trigger to pull this forward:**
+- First non-friend external user signs up, OR
+- A production incident shows the hourly cadence is too slow.
+
+**Scope sketch when implemented:**
+
+- Change the root crontab entry from hourly to `*/5 * * * *`.
+- Update Healthchecks.io check 4 grace to 5 minutes.
+- Confirm a controlled subsystem failure produces a Telegram alert at the new cadence.
+- Update `docs/monitoring-setup.md` Phase 3 and `docs/production-checklist.md` §9 if the target cadence changes.
+
+**Estimated effort:** 15-30 minutes.
+
+---
+
+## 5. Phone OTP
+
+**Deferred decision:** v1 keeps Firebase Google/email-link auth only. Phone OTP is intentionally not enabled.
+
+**Risk being accepted:**
+- Users without suitable Google/email-link access cannot sign in.
+- The product has less identity assurance than a future phone-verified flow.
+
+**Trigger to pull this forward:**
+- A real onboarding need appears that Google/email-link cannot handle, OR
+- Abuse patterns require stronger identity binding, OR
+- A product requirement explicitly needs verified phone numbers.
+
+**Scope sketch when implemented:**
+
+- Revisit Firebase Phone Auth pricing, quota, regional support, and abuse controls before enabling it.
+- Add Android phone-auth UI and backend contract tests only if the Firebase UID remains the canonical identity.
+- Add rate limits and monitoring for OTP send attempts before exposing the flow.
+- Update `docs/decisions.md` if the deferral decision changes.
+
+**Estimated effort:** depends on Android UX scope and abuse controls; treat as a product/security feature, not a small auth toggle.
+
+---
+
 ## Add new items here
 
 When a future scope decision pushes something to "after users exist," add it above this line with the same shape (risk / trigger / scope sketch / effort).
