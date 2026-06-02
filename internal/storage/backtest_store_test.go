@@ -13,17 +13,14 @@ import (
 // insertTestUser inserts a users row and returns its ID.
 //
 // The fixture supplies firebase_uid (required post-017) as a synthetic per-test value.
-// name and password_hash are nullable post-017 but are supplied as placeholder strings
-// to keep the fixture compatible with both the pre- and post-017 schema when running
-// against the shared CI database (which is always at HEAD).
 func insertTestUser(t *testing.T, ctx context.Context, s *BacktestStore) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
 	firebaseUID := "test-uid-" + uuid.NewString()
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO users (id, email, name, password_hash, firebase_uid, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, NOW(), NOW())`,
-		id, "testuser+"+id.String()+"@example.com", "Test User", "hash", firebaseUID,
+		`INSERT INTO users (id, email, firebase_uid, created_at, updated_at)
+		 VALUES ($1, $2, $3, NOW(), NOW())`,
+		id, "testuser+"+id.String()+"@example.com", firebaseUID,
 	)
 	if err != nil {
 		t.Fatalf("insert test user: %v", err)

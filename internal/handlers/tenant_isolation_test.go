@@ -123,7 +123,6 @@ func TestTenantIsolation_AllSixRoutes(t *testing.T) {
 
 	cfg := &config.Config{
 		Env:                 config.EnvTest,
-		AppSecretToken:      "test-secret",
 		JWTSecret:           "test-jwt-secret-32-bytes-minimum!!",
 		AllowedFirebaseUIDs: []string{"tenant-a-" + uuid.NewString(), "tenant-b-" + uuid.NewString()},
 	}

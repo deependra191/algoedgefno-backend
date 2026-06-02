@@ -14,7 +14,7 @@ readonly DEFAULT_PROD_SERVICE="backend-prod"
 readonly REPORT_DIR="scratch/security-runs"
 readonly COMPOSE_DIR="${COMPOSE_DIR:-/opt/algoedgefno/compose}"
 
-readonly PROTECTED_CONFIG_PATH="/api/v1/config/app"
+readonly CONFIG_APP_PATH="/api/v1/config/app"
 readonly BACKTESTS_PATH="/api/v1/backtests"
 readonly AUTH_SESSION_PATH="/api/v1/auth/session"
 readonly AUTH_LOGOUT_PATH="/api/v1/auth/logout"
@@ -50,24 +50,20 @@ Runs deterministic HTTP abuse checks and writes a sanitized markdown report
 under scratch/security-runs/YYYY-MM-DD-{env}.md.
 
 Staging path (ordered):
-  1. static-token boundary (static token rejected 401 on tenant endpoints;
-     true cross-user isolation is covered by tenant_isolation_test.go, not here)
+  1. public config app and protected tenant boundary
   2. allowlist-denied (TEST_UID_DENIED session rejected 403 auth_not_allowed)
   3. email-conflict (TEST_UID_CONFLICT triggers identity_conflict 409)
   4. rate-limit burst (LAST — may trigger 429 for subsequent calls)
 
 Production path (read-only — no /auth/* calls, no mutation):
   1. public health/version checks
-  2. static-token /config/app 200
-  3. static-token tenant-endpoint 401
-  4. unauthenticated tenant-endpoint 401
-  5. log redaction check
+  2. public /config/app 200
+  3. unauthenticated/invalid-token tenant-endpoint 401
+  4. log redaction check
 
 The suite never reads server env files and never prints bearer token values.
 
 Environment variables:
-  STAGING_APP_TOKEN   (required for staging)
-  PROD_APP_TOKEN      (required for prod)
   TEST_UID_A          (required for staging; provisioned by setup-firebase-test-users)
   TEST_UID_DENIED     (required for staging)
   TEST_UID_CONFLICT   (required for staging)
@@ -116,15 +112,11 @@ case "${env_name}" in
         base_url="${ABUSE_STAGING_BASE_URL:-${DEFAULT_STAGING_BASE_URL}}"
         container_name="${ABUSE_STAGING_CONTAINER:-${DEFAULT_STAGING_CONTAINER}}"
         service_name="${ABUSE_STAGING_SERVICE:-${DEFAULT_STAGING_SERVICE}}"
-        token_var_name="STAGING_APP_TOKEN"
-        app_token="${STAGING_APP_TOKEN:-}"
         ;;
     "${ENV_PROD}")
         base_url="${ABUSE_PROD_BASE_URL:-${DEFAULT_PROD_BASE_URL}}"
         container_name="${ABUSE_PROD_CONTAINER:-${DEFAULT_PROD_CONTAINER}}"
         service_name="${ABUSE_PROD_SERVICE:-${DEFAULT_PROD_SERVICE}}"
-        token_var_name="PROD_APP_TOKEN"
-        app_token="${PROD_APP_TOKEN:-}"
         ;;
     "")
         fail_usage "--env is required"
@@ -133,10 +125,6 @@ case "${env_name}" in
         fail_usage "--env must be staging or prod"
         ;;
 esac
-
-if [[ -z "${app_token}" ]]; then
-    fail_fast "${token_var_name} must be set in the shell"
-fi
 
 require_cmd curl
 require_cmd python3
@@ -268,56 +256,23 @@ assert_error_response() {
     fi
 }
 
-selected_auth_cfg="$(auth_config "${app_token}" "selected")"
 invalid_auth_cfg="$(auth_config "invalid-abuse-suite-token" "invalid")"
 
 run_auth_checks() {
-    assert_error_response "protected-no-auth" "${HTTP_STATUS_UNAUTHORIZED}" "${ERR_MISSING_AUTH}" \
-        "${base_url}${PROTECTED_CONFIG_PATH}"
+    assert_status "config-app-public" "${HTTP_STATUS_OK}" \
+        "${base_url}${CONFIG_APP_PATH}"
 
-    assert_error_response "protected-invalid-token" "${HTTP_STATUS_UNAUTHORIZED}" "${ERR_INVALID_OR_EXPIRED_TOKEN}" \
+    assert_error_response "tenant-no-auth" "${HTTP_STATUS_UNAUTHORIZED}" "${ERR_MISSING_AUTH}" \
+        "${base_url}${BACKTESTS_PATH}"
+
+    assert_error_response "tenant-invalid-token" "${HTTP_STATUS_UNAUTHORIZED}" "${ERR_INVALID_OR_EXPIRED_TOKEN}" \
         --config "${invalid_auth_cfg}" \
-        "${base_url}${PROTECTED_CONFIG_PATH}"
-
-    assert_status "protected-valid-token" "${HTTP_STATUS_OK}" \
-        --config "${selected_auth_cfg}" \
-        "${base_url}${PROTECTED_CONFIG_PATH}"
-}
-
-# run_pr1_closed_interval_check: static token rejected (401) on tenant endpoints.
-run_pr1_closed_interval_check() {
-    local payload_file="${tmpdir}/pr1-closed-interval-post.json"
-    printf '{}' > "${payload_file}"
-
-    assert_status "pr1-static-token-get-backtests" "${HTTP_STATUS_UNAUTHORIZED}" \
-        --config "${selected_auth_cfg}" \
-        "${base_url}${BACKTESTS_PATH}"
-
-    assert_status "pr1-static-token-post-backtests" "${HTTP_STATUS_UNAUTHORIZED}" \
-        -X POST \
-        -H 'Content-Type: application/json' \
-        --data-binary "@${payload_file}" \
-        --config "${selected_auth_cfg}" \
-        "${base_url}${BACKTESTS_PATH}"
-}
-
-run_unauthenticated_tenant_check() {
-    assert_status "unauthenticated-backtests" "${HTTP_STATUS_UNAUTHORIZED}" \
         "${base_url}${BACKTESTS_PATH}"
 }
 
 run_log_redaction_check() {
     local output
-    local secret_file="${tmpdir}/log-redaction-secrets.txt"
-    chmod 700 "${tmpdir}"
-    printf 'target app token=%s\n' "${app_token}" > "${secret_file}"
-    if [[ "${env_name}" == "${ENV_PROD}" && -n "${STAGING_APP_TOKEN:-}" ]]; then
-        printf 'staging app token=%s\n' "${STAGING_APP_TOKEN}" >> "${secret_file}"
-    fi
-    chmod 600 "${secret_file}"
-    secret_files+=("${secret_file}")
-
-    if output="$("${script_dir}/check-log-redaction.sh" --env "${env_name}" --since "${run_started_at}" --secret-file "${secret_file}" 2>&1)"; then
+    if output="$("${script_dir}/check-log-redaction.sh" --env "${env_name}" --since "${run_started_at}" 2>&1)"; then
         record_result "PASS" "log-redaction" "${output}"
     else
         record_result "FAIL" "log-redaction" "${output}"
@@ -328,22 +283,21 @@ run_log_redaction_check() {
 
 firebase_id_token_for_uid() {
     local uid="$1"
-    local token_file="${tmpdir}/firebase-token-${uid//[^a-zA-Z0-9_-]/}.txt"
-    docker compose -f "${COMPOSE_DIR}/docker-compose.yml" \
-        exec -T "${service_name}" \
-        sh -c "/app/firebase-token --uid=\"${uid}\"" > "${token_file}"
+	local token_file="${tmpdir}/firebase-token-${uid//[^a-zA-Z0-9_-]/}.txt"
+	docker compose -f "${COMPOSE_DIR}/docker-compose.yml" \
+		exec -T "${service_name}" \
+		sh -c '/app/firebase-token --uid="$1"' sh "${uid}" > "${token_file}"
     chmod 600 "${token_file}"
     cat "${token_file}"
 }
 
 run_cross_tenant_check() {
-    # This live check verifies only the static-token boundary: the static
-    # APP_SECRET_TOKEN must be rejected (401) on all tenant endpoints. True
+    # This live check verifies the public-config/protected-tenant boundary. True
     # cross-user isolation (user A cannot read user B's resources) is proven by
     # internal/handlers/tenant_isolation_test.go against real owned resources;
     # it is deliberately NOT exercised here to avoid creating/cleaning tenant
     # data on the live shared VPS.
-    run_pr1_closed_interval_check
+    run_auth_checks
 }
 
 run_allowlist_denied_check() {
@@ -452,8 +406,7 @@ if [[ "${env_name}" == "${ENV_STAGING}" ]]; then
     require_cmd docker
     # trap cleanup EXIT already registered above — fixture_seeded guards the teardown.
 
-    # Staging path: ordered cross-tenant → allowlist-denied → email-conflict → rate-limit burst LAST.
-    run_auth_checks
+    # Staging path: ordered tenant-boundary → allowlist-denied → email-conflict → rate-limit burst LAST.
     run_cross_tenant_check
     run_allowlist_denied_check
     run_email_conflict_check
@@ -462,8 +415,6 @@ if [[ "${env_name}" == "${ENV_STAGING}" ]]; then
 else
     # Production path: read-only — no /auth/* calls, no mutation, no staging-only paths.
     run_auth_checks
-    run_pr1_closed_interval_check
-    run_unauthenticated_tenant_check
     run_log_redaction_check
 fi
 

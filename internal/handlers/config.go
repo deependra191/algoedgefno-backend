@@ -12,8 +12,8 @@ type NavTab struct {
 	IconKey string `json:"iconKey"`
 }
 
-// AppConfig returns the app configuration matching the Android app_config.json.
-// Hardcoded for now; will be made dynamic in a future release.
+// AppConfig returns public, static pre-login configuration for Android.
+// Dynamic or user-specific configuration must move behind authenticated routes.
 func AppConfig(c *gin.Context) {
 	tabs := []NavTab{
 		{Route: "home", IconKey: "home"},

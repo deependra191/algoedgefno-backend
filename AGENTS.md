@@ -15,7 +15,7 @@ Android is a thin client — all computation happens here.
 | DB driver | pgx/v5 | Direct SQL, no ORM overhead, full PostgreSQL feature support |
 | Migrations | golang-migrate/migrate | Numbered SQL files, CLI + library, no auto-migrate |
 | Auth (v1 Android) | Firebase ID token → backend JWT/refresh sessions | Single-owner tool, Firebase is the identity source |
-| Auth (`/config/app` only) | APP_SECRET_TOKEN static bearer | Stays until /config/app moves to Firebase or public |
+| App config | Public `/config/app` | Static pre-login Android bootstrap config; no tenant data |
 | UUID keys | github.com/google/uuid | Avoid sequential ID enumeration |
 
 ## Hard rules
@@ -31,7 +31,7 @@ Android is a thin client — all computation happens here.
 9. **SQL lives in storage/** — all pgx queries live in `internal/storage/`. Never inline SQL in handlers or services.
 10. **Numbered SQL migrations only** — migration files live in `migrations/`. Never auto-migrate in code.
 11. **`internal/engine/` is pure computation** — no DB imports, no HTTP imports. Only depends on models.
-12. **Firebase Auth for v1 Android — APP_SECRET_TOKEN scoped to `/config/app`** — Android obtains a Firebase ID token, exchanges it at `/api/v1/auth/session` for a backend JWT + refresh token; tenant endpoints require the backend JWT. `APP_SECRET_TOKEN` is accepted only on `/api/v1/config/app` and is scheduled for removal once that endpoint moves to Firebase or becomes public.
+12. **Firebase Auth for v1 Android — public bootstrap app config** — Android obtains a Firebase ID token, exchanges it at `/api/v1/auth/session` for a backend JWT + refresh token; tenant endpoints require the backend JWT. `/api/v1/config/app` is public because it returns only static pre-login bootstrap config and no tenant data.
 13. **All timestamps stored as TIMESTAMPTZ in UTC** — no naive timestamps anywhere.
 14. **Use pgx/v5 for all database operations** — no ORM.
 15. **One PR per task** — propose plan and wait for approval before touching code.

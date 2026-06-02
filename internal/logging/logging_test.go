@@ -50,7 +50,6 @@ func TestNewHandler_RedactsSensitiveKeys(t *testing.T) {
 		{"authorization", "Bearer tok"},
 		{"dsn", "postgres://u:p@host/db"},
 		{"database_url", "postgres://u:p@host/db"},
-		{"APP_SECRET_TOKEN", "mysecret"},
 		{"jwt_secret", "jwtkey"},
 	}
 

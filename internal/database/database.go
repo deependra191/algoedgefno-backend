@@ -83,7 +83,7 @@ func sanitizeDatabaseError(err error, cfg *config.Config, dsn string) string {
 	if cfg == nil {
 		return msg
 	}
-	for _, secret := range []string{cfg.DBPass, cfg.DatabaseURL, cfg.AppSecretToken, cfg.JWTSecret} {
+	for _, secret := range []string{cfg.DBPass, cfg.DatabaseURL, cfg.JWTSecret} {
 		if secret != "" {
 			msg = strings.ReplaceAll(msg, secret, "[redacted]")
 		}
