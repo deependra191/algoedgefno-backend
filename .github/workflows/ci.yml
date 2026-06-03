@@ -1,6 +1,13 @@
 # CI gate: build, vet, test, arch-lint on PRs to dev/main
 name: CI
 
+# The workflow ALWAYS triggers (no paths-ignore on the trigger). Path filtering
+# happens inside, via the `changes` job, so the required status check is always
+# reported. This is deliberate: a workflow skipped by a trigger-level
+# `paths-ignore` reports as perpetually "pending" and blocks merge once CI is a
+# required check under branch protection. Here the always-running `ci-required`
+# gate job is the single check to mark required — it reports a definite
+# pass/fail whether the heavy `ci` job ran or was skipped for a docs-only PR.
 on:
   pull_request:
     branches:
@@ -15,7 +22,56 @@ permissions:
   contents: read
 
 jobs:
+  # Decide whether anything beyond markdown changed. Only '**.md' is treated as
+  # "docs": .gitignore, .dockerignore, Dockerfile, *.yml workflows and *.sh
+  # scripts are all asserted on by the lint steps in `ci`, so any change to them
+  # must run the full job even though they are not Go source.
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: filter
+        name: Detect non-markdown changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Fail closed: any error aborts this step so the changes job fails
+          # rather than silently emitting a code value. The ci-required gate
+          # treats a non-success changes job as a hard failure.
+          set -euo pipefail
+
+          # Capture the diff first. If git diff fails, set -e aborts the step (the
+          # command substitution's non-zero status propagates) — we never fall
+          # through to emit a code value off a bad diff.
+          changed_files="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+
+          # Iterate the stored list rather than piping into `grep -q`: with
+          # pipefail, grep -q closing the pipe early SIGPIPEs the writer and the
+          # pipeline reports failure even on a match, which would misclassify a
+          # mixed PR. A plain shell loop has no such hazard.
+          #
+          # code=true when any changed file does not end in .md. An empty diff
+          # (no changed files) yields a single empty read that is skipped, so
+          # code stays false — nothing to build.
+          code=false
+          while IFS= read -r file; do
+            [ -n "$file" ] || continue
+            case "$file" in
+              *.md) ;;                 # markdown only — docs, no CI needed
+              *) code=true; break ;;   # any non-markdown file requires full CI
+            esac
+          done <<< "$changed_files"
+
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
   ci:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     services:
       timescaledb:
@@ -331,3 +387,37 @@ jobs:
       - name: cmd/sync/main.go does not import internal/firebaseauth
         run: |
           ! grep -q 'internal/firebaseauth' cmd/sync/main.go
+
+  # Single required status check. Always runs and reports a definite pass/fail,
+  # so branch protection is never left pending. Mark THIS job ("ci-required")
+  # required in branch protection — not "ci", which is skipped for docs-only PRs.
+  ci-required:
+    needs: [changes, ci]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Verify CI result
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          CI_RESULT: ${{ needs.ci.result }}
+        run: |
+          set -euo pipefail
+
+          # Fail closed on the detector. ci is gated on changes.outputs.code, so a
+          # failed/cancelled changes job would leave ci "skipped" too — and a bare
+          # ci==skipped check would wrongly pass. The gate therefore requires the
+          # detector to have succeeded before it will accept a skipped ci.
+          if [ "$CHANGES_RESULT" != "success" ]; then
+            echo "CI gate failed: changes detector did not succeed (result: $CHANGES_RESULT)" >&2
+            exit 1
+          fi
+
+          # With a successful detector, ci=skipped means a docs-only PR (accepted)
+          # and ci=success means the heavy job ran clean. failure, cancelled, or
+          # anything unexpected fails the gate.
+          if [ "$CI_RESULT" = "success" ] || [ "$CI_RESULT" = "skipped" ]; then
+            echo "CI gate passed (changes: $CHANGES_RESULT, ci: $CI_RESULT)"
+            exit 0
+          fi
+          echo "CI gate failed (changes: $CHANGES_RESULT, ci: $CI_RESULT)" >&2
+          exit 1

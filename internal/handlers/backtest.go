@@ -26,10 +26,7 @@ func NewBacktestHandler(backtestSvc *services.BacktestService) *BacktestHandler 
 // Submit validates the request, creates a run, and fires the engine asynchronously.
 // Returns HTTP 202 with {id, status} immediately; client polls GET /backtests/:id.
 func (h *BacktestHandler) Submit(c *gin.Context) {
-	userID, ok := extractUserID(c)
-	if !ok {
-		return
-	}
+	userID := mustUserID(c)
 
 	var req backtestSubmitRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -96,10 +93,7 @@ func (h *BacktestHandler) Submit(c *gin.Context) {
 
 // List returns completed backtest runs ordered by most recent completion first.
 func (h *BacktestHandler) List(c *gin.Context) {
-	userID, ok := extractUserID(c)
-	if !ok {
-		return
-	}
+	userID := mustUserID(c)
 	page, limit := parseBacktestListPagination(c)
 	runs, total, err := h.backtestSvc.ListCompleted(c.Request.Context(), userID, page, limit)
 	if err != nil {
@@ -122,10 +116,7 @@ func (h *BacktestHandler) List(c *gin.Context) {
 // COMPLETED: returns id, status, and the full result payload.
 // FAILED: returns id, status, and errorMessage.
 func (h *BacktestHandler) GetByID(c *gin.Context) {
-	userID, ok := extractUserID(c)
-	if !ok {
-		return
-	}
+	userID := mustUserID(c)
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid backtest ID"})
@@ -148,10 +139,7 @@ func (h *BacktestHandler) GetByID(c *gin.Context) {
 // GetTrades returns a paginated list of individual trades for a completed backtest.
 // Query params: page (default 1), limit (default 50, max 200).
 func (h *BacktestHandler) GetTrades(c *gin.Context) {
-	userID, ok := extractUserID(c)
-	if !ok {
-		return
-	}
+	userID := mustUserID(c)
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid backtest ID"})

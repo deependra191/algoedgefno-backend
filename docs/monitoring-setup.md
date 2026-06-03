@@ -26,6 +26,8 @@ All active checks (4, 5, 6, 8, 9) are **cron heartbeat** — Healthchecks.io ale
 
 **Off-host property:** Healthchecks.io is a third-party hosted service. The VPS dying — cron not running, container crashing, kernel panic — causes the heartbeat to stop arriving, which triggers the alert. If the monitor were on the same VPS, a full-server failure would silently kill the alerter too.
 
+**Local container health is separate.** Docker Compose `healthcheck` entries on `backend-prod`/`backend-staging` (see `docs/one-vps-deployment.md`) probe `/ready` on the container loopback and mark a wedged backend `unhealthy`, but that signal lives on the VPS. Healthchecks.io still owns off-host alerting; Compose health does not replace it.
+
 ---
 
 ## Phase 0 — Healthchecks.io account setup

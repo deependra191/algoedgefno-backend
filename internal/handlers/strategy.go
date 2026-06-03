@@ -21,10 +21,7 @@ func NewStrategyHandler(strategySvc *services.StrategyService) *StrategyHandler 
 
 // List returns all strategy sections (BUILTIN + CUSTOM).
 func (h *StrategyHandler) List(c *gin.Context) {
-	userID, ok := extractUserID(c)
-	if !ok {
-		return
-	}
+	userID := mustUserID(c)
 	sections, err := h.strategySvc.ListSections(c.Request.Context(), userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list strategies"})
@@ -35,10 +32,7 @@ func (h *StrategyHandler) List(c *gin.Context) {
 
 // GetByID returns the full detail for a single strategy by slug.
 func (h *StrategyHandler) GetByID(c *gin.Context) {
-	userID, ok := extractUserID(c)
-	if !ok {
-		return
-	}
+	userID := mustUserID(c)
 	slug := c.Param("id")
 	detail, err := h.strategySvc.GetBySlug(c.Request.Context(), slug, userID)
 	if err != nil {
