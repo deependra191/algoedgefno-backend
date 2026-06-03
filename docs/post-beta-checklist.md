@@ -121,56 +121,7 @@ Whichever comes first.
 
 ---
 
-## 5. Phone OTP
-
-**Deferred decision:** v1 keeps Firebase Google/email-link auth only. Phone OTP is intentionally not enabled.
-
-**Risk being accepted:**
-- Users without suitable Google/email-link access cannot sign in.
-- The product has less identity assurance than a future phone-verified flow.
-
-**Trigger to pull this forward:**
-- A real onboarding need appears that Google/email-link cannot handle, OR
-- Abuse patterns require stronger identity binding, OR
-- A product requirement explicitly needs verified phone numbers.
-
-**Scope sketch when implemented:**
-
-- Revisit Firebase Phone Auth pricing, quota, regional support, and abuse controls before enabling it.
-- Add Android phone-auth UI and backend contract tests only if the Firebase UID remains the canonical identity.
-- Add rate limits and monitoring for OTP send attempts before exposing the flow.
-- Update `docs/decisions.md` if the deferral decision changes.
-
-**Estimated effort:** depends on Android UX scope and abuse controls; treat as a product/security feature, not a small auth toggle.
-
----
-
-## 6. GitHub-enforced merge and deploy controls
-
-**Deferred decision:** CI is visible on every PR, and deploy workflows are guarded by explicit `if: github.ref == 'refs/heads/main'` checks plus human merge/dispatch discipline. GitHub-enforced branch protection/rulesets and environment-scoped deployment controls are not enabled because the private repo is currently on GitHub Free.
-
-**Risk being accepted:**
-- A human can still merge a red PR or dispatch a deploy at the wrong time if they ignore the documented process.
-- Repository variables, deploy branch controls, and required-reviewer style gates are weaker than they would be on a paid plan with supported rulesets. This is acceptable while one operator owns both code and deploy decisions, but it should not stay process-only once more people or external users depend on the service.
-
-**Trigger to pull this forward:**
-- First non-friend external user signs up, OR
-- A second regular code contributor/operator is added, OR
-- Any near miss where a red PR, wrong branch, or premature deploy almost reaches production.
-
-**Scope sketch when implemented:**
-
-- Upgrade to a GitHub plan that supports the needed private-repo rulesets.
-- Add branch protection/rulesets for `dev` and `main` requiring CI to pass before merge.
-- Keep task PRs targeting `dev`; reserve `main` for `dev -> main` integration PRs.
-- Re-evaluate whether deployment environment features add useful controls without contradicting the current self-hosted-runner model.
-- Update `docs/production-checklist.md` §6 and `docs/one-vps-deployment.md` once machine enforcement replaces the current manual gate.
-
-**Estimated effort:** 1-2 hours after the plan upgrade decision, plus a controlled test with a deliberately failing PR.
-
----
-
-## 7. Deploy credential hardening
+## 5. Deploy credential hardening
 
 **Deferred decision:** current deployment uses narrow root-owned wrappers, a limited self-hosted runner user, digest-qualified images, and root-owned server-side env files. A full secrets-manager or short-lived deploy-credential model is not implemented.
 
@@ -196,6 +147,43 @@ Whichever comes first.
 
 ---
 
+## 6. Post-PR2 tenant identity cleanup
+
+**Deferred decision:** the Firebase auth rollout keeps the existing repeated
+handler-local `extractUserID(c)` checks for now so PR 2 stayed focused on token
+exchange, launch sequencing, and production hardening. A later cleanup PR can
+introduce a route invariant for tenant identity checks.
+
+**Risk being accepted:**
+- Handler code stays slightly repetitive and the route invariant is enforced in
+  each handler rather than centrally.
+- The current shape is already safe because handlers still reject missing,
+  malformed, or `uuid.Nil` identities, but the repeated pattern is easier to
+  drift over time than a single middleware guard.
+
+**Trigger to pull this forward:**
+- After PR 2 has been stable for a while, OR
+- If identity-check repetition starts to spread to more tenant handlers, OR
+- If a future cleanup pass wants to simplify tenant-route invariants without
+  changing session/auth semantics.
+
+**Scope sketch when implemented:**
+
+- Add `middleware.RequireUserIdentity()` that validates `models.UserIDKey` is
+  present, is a `uuid.UUID`, and is not `uuid.Nil`; otherwise abort with
+  `401 {"error":"missing user identity"}`.
+- Apply it only to tenant route groups, after `middleware.Auth(...)`.
+- Replace repeated handler blocks like `userID, ok := extractUserID(c)` with a
+  handler-local invariant helper such as `mustUserID(c)`.
+- Keep `/api/v1/config/app`, `/api/v1/auth/session`, `/api/v1/auth/refresh`,
+  and `/api/v1/auth/logout` outside this invariant.
+- Add tests for missing, malformed, and nil identities on tenant routes, plus
+  middleware ordering coverage.
+
+**Estimated effort:** low to medium, depending on how many tenant handlers are
+refactored in the same pass.
+
+---
 ## Add new items here
 
 When a future scope decision pushes something to "after users exist," add it above this line with the same shape (risk / trigger / scope sketch / effort).
