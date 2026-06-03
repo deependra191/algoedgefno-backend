@@ -17,13 +17,13 @@ at the end so they do not get counted as unresolved checklist work again.
 - [x] `.env` has never been committed — verify with `git log --all -- .env`
 
 **Firebase auth — staging-side:**
-- [x] `FIREBASE_PROJECT_ID`, `FIREBASE_CREDENTIALS_FILE`, `FIREBASE_WEB_API_KEY` set to **staging** values; staging service-account JSON placed at `/run/secrets/firebase-serviceaccount-staging.json` (root-owned, not committed, mode `444` so the non-root backend process can read the bind mount; `/run/secrets` remains mode `700`)
+- [x] `FIREBASE_PROJECT_ID`, `FIREBASE_CREDENTIALS_FILE`, `FIREBASE_WEB_API_KEY` set to **staging** values; staging service-account JSON placed in the persistent `ENV_DIR` at `/opt/algoedgefno/env/firebase-serviceaccount-staging.json` (root-owned, not committed, mode `444` so the non-root backend process can read the bind mount; parent `/opt/algoedgefno/env` is mode `700`), bind-mounted to the in-container path `/run/secrets/firebase-serviceaccount-staging.json` which `FIREBASE_CREDENTIALS_FILE` points at. Not host `/run/secrets` (tmpfs — wiped on reboot)
 - [x] `ALLOWED_FIREBASE_UIDS` populated; `TEST_UID_A`, `TEST_UID_B`, `TEST_UID_DENIED`, `TEST_UID_CONFLICT` set
 - [x] Root-owned, mode-`400` `/opt/algoedgefno/env/firebase-staging-fixture-project-id.guard` created from the approved staging Firebase project ID, independently of the runtime env/credential files
 - [x] Removed stale `APP_SECRET_TOKEN=` from `/opt/algoedgefno/env/staging.env`; `/api/v1/config/app` is public and the backend no longer reads that secret
 
 **Firebase auth — production-side:**
-- [x] Prod Firebase values (`FIREBASE_PROJECT_ID` is a **different project** from staging), prod service-account JSON placed at `/run/secrets/firebase-serviceaccount-prod.json` (root-owned, not committed, mode `444` so the non-root backend process can read the bind mount; `/run/secrets` remains mode `700`)
+- [x] Prod Firebase values (`FIREBASE_PROJECT_ID` is a **different project** from staging), prod service-account JSON placed in the persistent `ENV_DIR` at `/opt/algoedgefno/env/firebase-serviceaccount-prod.json` (root-owned, not committed, mode `444` so the non-root backend process can read the bind mount; parent `/opt/algoedgefno/env` is mode `700`), bind-mounted to the in-container path `/run/secrets/firebase-serviceaccount-prod.json` which `FIREBASE_CREDENTIALS_FILE` points at. Not host `/run/secrets` (tmpfs — wiped on reboot)
 - [x] `ALLOWED_FIREBASE_UIDS` remains non-empty for every production deploy; `config.ValidateServerConfig` rejects startup otherwise. Current production allowlist contains the owner UID and the standard-smoke UID.
 - [x] Historical launch bootstrap record is understood: the owner UID was captured from a production Firebase-only Android sign-in; no backend `users` row was manually inserted. Firebase Console **Add user** is used only for the separate `PROD_SMOKE_UID`.
 - [x] **No `TEST_UID_*` in `prod.env`.** The staging-only fixture at `/opt/algoedgefno/scripts/staging-only/seed-conflict-fixture.sh` is referenced only by `abuse-suite.sh --env staging` (staging and prod share one VPS)
