@@ -6,6 +6,16 @@ This file now tracks only active open items for production readiness. Completed
 launch evidence and intentionally deferred items are summarized in the appendix
 at the end so they do not get counted as unresolved checklist work again.
 
+## Open items
+
+These are the currently unresolved production-readiness tasks. Keep this
+section in sync with the unchecked checklist items below.
+
+- [ ] Full infra/security sign-off before first public closed-beta access. See
+  the detailed checklist item in §5 for the required evidence bundle.
+- [ ] Screen-by-screen Android smoke-test sheet before live. See the detailed
+  checklist item in §5 for the expected scope.
+
 ---
 
 ## 1. Secrets & tokens (CRITICAL — do first)
