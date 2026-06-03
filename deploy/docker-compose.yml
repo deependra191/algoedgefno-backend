@@ -49,7 +49,7 @@ services:
     env_file:
       - ${ENV_DIR:-/opt/algoedgefno/env}/prod.env
     volumes:
-      - /run/secrets/firebase-serviceaccount-prod.json:/run/secrets/firebase-serviceaccount-prod.json:ro
+      - ${ENV_DIR:-/opt/algoedgefno/env}/firebase-serviceaccount-prod.json:/run/secrets/firebase-serviceaccount-prod.json:ro
     healthcheck:
       test: ["CMD", "/app/healthcheck"]
       interval: 10s
@@ -74,7 +74,7 @@ services:
     env_file:
       - ${ENV_DIR:-/opt/algoedgefno/env}/staging.env
     volumes:
-      - /run/secrets/firebase-serviceaccount-staging.json:/run/secrets/firebase-serviceaccount-staging.json:ro
+      - ${ENV_DIR:-/opt/algoedgefno/env}/firebase-serviceaccount-staging.json:/run/secrets/firebase-serviceaccount-staging.json:ro
     healthcheck:
       test: ["CMD", "/app/healthcheck"]
       interval: 10s
