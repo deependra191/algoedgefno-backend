@@ -40,13 +40,34 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          # code=true when at least one changed file is not markdown (and when
-          # the diff is empty, code=false → nothing to build).
-          if git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -qvE '\.md$'; then
-            echo "code=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "code=false" >> "$GITHUB_OUTPUT"
-          fi
+          # Fail closed: any error aborts this step so the changes job fails
+          # rather than silently emitting a code value. The ci-required gate
+          # treats a non-success changes job as a hard failure.
+          set -euo pipefail
+
+          # Capture the diff first. If git diff fails, set -e aborts the step (the
+          # command substitution's non-zero status propagates) — we never fall
+          # through to emit a code value off a bad diff.
+          changed_files="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+
+          # Iterate the stored list rather than piping into `grep -q`: with
+          # pipefail, grep -q closing the pipe early SIGPIPEs the writer and the
+          # pipeline reports failure even on a match, which would misclassify a
+          # mixed PR. A plain shell loop has no such hazard.
+          #
+          # code=true when any changed file does not end in .md. An empty diff
+          # (no changed files) yields a single empty read that is skipped, so
+          # code stays false — nothing to build.
+          code=false
+          while IFS= read -r file; do
+            [ -n "$file" ] || continue
+            case "$file" in
+              *.md) ;;                 # markdown only — docs, no CI needed
+              *) code=true; break ;;   # any non-markdown file requires full CI
+            esac
+          done <<< "$changed_files"
+
+          echo "code=$code" >> "$GITHUB_OUTPUT"
 
   ci:
     needs: changes
@@ -377,13 +398,26 @@ jobs:
     steps:
       - name: Verify CI result
         env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
           CI_RESULT: ${{ needs.ci.result }}
         run: |
-          # ci is "skipped" for docs-only PRs (gate passes) and "success" when it
-          # ran clean. Anything else (failure/cancelled) fails the gate.
+          set -euo pipefail
+
+          # Fail closed on the detector. ci is gated on changes.outputs.code, so a
+          # failed/cancelled changes job would leave ci "skipped" too — and a bare
+          # ci==skipped check would wrongly pass. The gate therefore requires the
+          # detector to have succeeded before it will accept a skipped ci.
+          if [ "$CHANGES_RESULT" != "success" ]; then
+            echo "CI gate failed: changes detector did not succeed (result: $CHANGES_RESULT)" >&2
+            exit 1
+          fi
+
+          # With a successful detector, ci=skipped means a docs-only PR (accepted)
+          # and ci=success means the heavy job ran clean. failure, cancelled, or
+          # anything unexpected fails the gate.
           if [ "$CI_RESULT" = "success" ] || [ "$CI_RESULT" = "skipped" ]; then
-            echo "CI gate passed (ci job result: $CI_RESULT)"
+            echo "CI gate passed (changes: $CHANGES_RESULT, ci: $CI_RESULT)"
             exit 0
           fi
-          echo "CI gate failed (ci job result: $CI_RESULT)" >&2
+          echo "CI gate failed (changes: $CHANGES_RESULT, ci: $CI_RESULT)" >&2
           exit 1
