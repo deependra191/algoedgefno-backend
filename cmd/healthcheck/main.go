@@ -10,16 +10,22 @@
 package main
 
 import (
+	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 )
 
 const (
 	envVarPort   = "PORT"
 	defaultPort  = "8080"
+	loopbackHost = "127.0.0.1"
 	readyPath    = "/ready"
 	probeTimeout = 2 * time.Second
+
+	minPort = 1
+	maxPort = 65535
 )
 
 func main() {
@@ -28,8 +34,15 @@ func main() {
 		port = defaultPort
 	}
 
+	// Validate PORT before building the URL so a malformed value fails the probe
+	// (exit 1) rather than producing a request to an unexpected host:port.
+	if portNum, err := strconv.Atoi(port); err != nil || portNum < minPort || portNum > maxPort {
+		os.Exit(1)
+	}
+
+	url := "http://" + net.JoinHostPort(loopbackHost, port) + readyPath
 	client := &http.Client{Timeout: probeTimeout}
-	resp, err := client.Get("http://127.0.0.1:" + port + readyPath)
+	resp, err := client.Get(url)
 	if err != nil {
 		os.Exit(1)
 	}
