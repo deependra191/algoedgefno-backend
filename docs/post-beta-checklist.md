@@ -76,7 +76,9 @@ Whichever comes first.
 
 ## 3. Compose-level backend healthchecks
 
-**Deferred decision:** backend containers currently rely on Caddy/manual smoke checks plus the VPS meta-health script. The Compose file does not yet declare backend `healthcheck` entries.
+**Status — IMPLEMENTED 2026-06-03 (pulled forward early as narrow ops-hardening):** `deploy/docker-compose.yml` now declares `healthcheck` entries on `backend-prod` and `backend-staging` (`interval: 10s`, `timeout: 3s`, `retries: 3`, `start_period: 20s`). The runtime image ships a small dependency-free probe binary (`cmd/healthcheck`, installed at `/app/healthcheck`) that does a single local `GET /ready` on `127.0.0.1:${PORT}`. `/ready` was chosen over `/health` so the container turns `unhealthy` when DB connectivity or environment identity breaks. No secrets required, no token logging, no external network calls. `docs/one-vps-deployment.md` smoke-check notes updated. The historical context below is retained for reference.
+
+**Deferred decision (historical):** backend containers currently rely on Caddy/manual smoke checks plus the VPS meta-health script. The Compose file does not yet declare backend `healthcheck` entries.
 
 **Risk being accepted:**
 - Docker can report `backend-prod` or `backend-staging` as running even when the HTTP server is wedged, slow, or internally unhealthy.

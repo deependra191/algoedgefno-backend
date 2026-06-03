@@ -50,6 +50,12 @@ services:
       - ${ENV_DIR:-/opt/algoedgefno/env}/prod.env
     volumes:
       - /run/secrets/firebase-serviceaccount-prod.json:/run/secrets/firebase-serviceaccount-prod.json:ro
+    healthcheck:
+      test: ["CMD", "/app/healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
     depends_on:
       postgres:
         condition: service_healthy
@@ -69,6 +75,12 @@ services:
       - ${ENV_DIR:-/opt/algoedgefno/env}/staging.env
     volumes:
       - /run/secrets/firebase-serviceaccount-staging.json:/run/secrets/firebase-serviceaccount-staging.json:ro
+    healthcheck:
+      test: ["CMD", "/app/healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
     depends_on:
       postgres:
         condition: service_healthy

@@ -39,6 +39,9 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
       -ldflags="-s -w" \
       -o /out/verify-prod-smoke-user ./cmd/verify-prod-smoke-user && \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
+      -ldflags="-s -w" \
+      -o /out/healthcheck ./cmd/healthcheck && \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -tags postgres \
       -ldflags="-s -w" \
       -o /out/migrate github.com/golang-migrate/migrate/v4/cmd/migrate
@@ -61,6 +64,7 @@ COPY --from=build /out/firebase-token /app/firebase-token
 COPY --from=build /out/setup-firebase-test-users /app/setup-firebase-test-users
 COPY --from=build /out/teardown-firebase-test-users /app/teardown-firebase-test-users
 COPY --from=build /out/verify-prod-smoke-user /app/verify-prod-smoke-user
+COPY --from=build /out/healthcheck /app/healthcheck
 COPY --from=build /out/migrate /app/migrate
 COPY migrations /app/migrations
 COPY scripts /app/scripts
