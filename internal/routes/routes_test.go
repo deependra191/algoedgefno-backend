@@ -109,3 +109,37 @@ func TestRemovedRoutes_DebugSessionReturn404InAllEnvironments(t *testing.T) {
 		})
 	}
 }
+
+// TestTenantRoutesAreGuarded asserts every tenant route produced by the real
+// Register wiring rejects an unauthenticated request with 401. It locks the
+// route table so a future refactor that registers a strategy/backtest endpoint
+// outside the auth-guarded tenant subgroup fails here instead of reaching a
+// handler that would panic in mustUserID. The 401 is emitted by Auth (which
+// runs ahead of RequireUserIdentity in the same group), so no DB is touched and
+// the test runs without TEST_DATABASE_URL.
+func TestTenantRoutesAreGuarded(t *testing.T) {
+	r := newRouteTableOnlyEngine(config.EnvTest)
+
+	tenantRoutes := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/v1/strategies"},
+		{http.MethodGet, "/api/v1/strategies/ma_crossover"},
+		{http.MethodGet, "/api/v1/backtests"},
+		{http.MethodPost, "/api/v1/backtests"},
+		{http.MethodGet, "/api/v1/backtests/11111111-1111-1111-1111-111111111111"},
+		{http.MethodGet, "/api/v1/backtests/11111111-1111-1111-1111-111111111111/trades"},
+	}
+
+	for _, rt := range tenantRoutes {
+		t.Run(rt.method+" "+rt.path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(rt.method, rt.path, nil)
+			r.ServeHTTP(w, req)
+			if w.Code != http.StatusUnauthorized {
+				t.Errorf("expected 401 for unauthenticated %s %s, got %d", rt.method, rt.path, w.Code)
+			}
+		})
+	}
+}
