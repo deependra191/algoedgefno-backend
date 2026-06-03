@@ -76,27 +76,54 @@ sudo chown root:root /usr/local/sbin/algoedgefno-deploy-staging /usr/local/sbin/
 sudo chmod 755 /usr/local/sbin/algoedgefno-deploy-staging /usr/local/sbin/algoedgefno-deploy-prod
 ```
 
-Runtime Firebase service-account JSON files are the exception to the `*.env`
-mode rule. They are bind-mounted into backend containers whose app process runs
-as a non-root user, so they must be readable inside the container:
+Runtime Firebase service-account JSON files live in the **same persistent
+`ENV_DIR`** as the env files (`/opt/algoedgefno/env/`), named
+`firebase-serviceaccount-<env>.json`. `deploy/docker-compose.yml` bind-mounts
+each one to the in-container path `/run/secrets/firebase-serviceaccount-<env>.json`
+(the mount source is `${ENV_DIR:-/opt/algoedgefno/env}/...`; Docker creates the
+`/run/secrets/...` target **inside the container**, so no host `/run/secrets`
+directory is needed). The `FIREBASE_CREDENTIALS_FILE` value in each env file is
+that in-container path, and must match the mount target.
 
 ```bash
-sudo mkdir -p /run/secrets
-sudo chown root:root /run/secrets
-sudo chmod 700 /run/secrets
-sudo chown root:root /run/secrets/firebase-serviceaccount-*.json
-sudo chmod 444 /run/secrets/firebase-serviceaccount-*.json
+sudo chown root:root /opt/algoedgefno/env/firebase-serviceaccount-*.json
+sudo chmod 444 /opt/algoedgefno/env/firebase-serviceaccount-*.json
 ```
 
-Mode `444` on the JSON is acceptable because the parent directory is
-`/run/secrets`, owned by `root:root` and mode `700` on the host. Do not apply
-this exception to env files, database backups, or tokens.
+These JSON files are the exception to the `*.env` mode rule: mode `444`
+(world-read) is required because the backend container runs as a non-root user
+and must read the bind-mounted file. Mode `444` is acceptable because the parent
+`/opt/algoedgefno/env` directory is `root:root` mode `700`, so only root can
+traverse to the file on the host. Do not apply this exception to env files,
+database backups, or tokens.
+
+> **Do not place these JSONs in host `/run/secrets`.** `/run` is a tmpfs
+> (RAM-backed), so anything under `/run/secrets` is wiped on every reboot. The
+> backend is fail-closed on credentials — `firebase.NewApp` calls `os.Exit(1)`
+> at startup if `FIREBASE_CREDENTIALS_FILE` is missing or unreadable
+> (`cmd/server/main.go`, `config.ValidateServerConfig`) — so a tmpfs-resident
+> credential would make the backend fail to start after a reboot until it was
+> manually repopulated. Keeping the JSONs in the persistent `ENV_DIR` avoids
+> that. The in-container mount target stays `/run/secrets/...`, which is fine
+> because that path lives in the container's own filesystem, not the host's.
 
 > **Wrapper re-copy on script change.** The `/usr/local/sbin/algoedgefno-deploy-*`
 > wrappers are copies of the repo `deploy/scripts/*.sh`. Editing those scripts in
 > the repo does **not** change the live wrappers. After any change, re-copy each
 > script to its `/usr/local/sbin/` path (and re-apply the `chown root:root` +
 > `chmod 755` above) before the next deploy, or the deploy still runs the old logic.
+
+> **Deploys do not carry compose or env changes.** The deploy wrappers update only
+> the `BACKEND_*_IMAGE` pin, run migrations, recreate the backend container, and
+> run smoke checks. They **never** re-copy `/opt/algoedgefno/compose/docker-compose.yml`
+> and **never** edit the `*.env` files. So any change to the compose file (e.g. a new
+> `healthcheck`, a changed bind mount) or to an env value (e.g. `FIREBASE_CREDENTIALS_FILE`)
+> is a **manual prerequisite**: apply it on the VPS first, then a deploy/recreate picks
+> it up when the container is next recreated. A running container keeps its create-time
+> compose/env config until then (a reboot just restarts the *existing* container, it does
+> not re-read the compose file). Concretely: if you rename a Firebase credential mount
+> target, update `FIREBASE_CREDENTIALS_FILE` in the env file in the same change, or the
+> fail-closed backend will crash-loop on the next recreate.
 
 ## Image references
 

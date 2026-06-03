@@ -69,23 +69,27 @@ retained as historical rollout evidence only.
 
 1. Candidate image published from `main`; record the candidate digest as
    `CANDIDATE_IMAGE`.
-2. Place the staging Firebase service-account JSON at the host path
-   `/run/secrets/firebase-serviceaccount-staging.json` (root-owned, mode `444`,
-   not committed) — this is the bind-mount source in `deploy/docker-compose.yml`.
-   Runtime service-account JSON needs world-read permission because the backend
-   process inside the container is non-root; the host parent directory remains
-   root-owned and locked down.
+2. Place the staging Firebase service-account JSON in the persistent `ENV_DIR` at
+   the host path `/opt/algoedgefno/env/firebase-serviceaccount-staging.json`
+   (root-owned, mode `444`, not committed) — this is the bind-mount source in
+   `deploy/docker-compose.yml` (`${ENV_DIR:-/opt/algoedgefno/env}/...`). Runtime
+   service-account JSON needs world-read permission because the backend process
+   inside the container is non-root; the host parent directory remains root-owned
+   and mode `700`. Do **not** use host `/run/secrets` — `/run` is tmpfs and is
+   wiped on reboot, which would make the fail-closed backend fail to start.
    In `/opt/algoedgefno/env/staging.env` set `FIREBASE_PROJECT_ID` /
    `FIREBASE_WEB_API_KEY` to staging values and
    `FIREBASE_CREDENTIALS_FILE=/run/secrets/firebase-serviceaccount-staging.json`
-   (the in-container path, which equals the mount target). Staging/prod refuse to
-   start if this file is unset or unreadable (`config.ValidateServerConfig`).
+   (the in-container mount target, which Docker creates inside the container).
+   Staging/prod refuse to start if this file is unset or unreadable
+   (`config.ValidateServerConfig`).
 3. Install the root-owned, mode-`400`
    `/opt/algoedgefno/env/firebase-staging-fixture-project-id.guard` from the
    approved staging Firebase project ID.
 4. The `backend-staging` / `backend-prod` credential mounts are already wired in
-   `deploy/docker-compose.yml` (bind-mount source `/run/secrets/firebase-serviceaccount-<env>.json`);
-   no compose edit is needed — just confirm the host file from step 2 exists.
+   `deploy/docker-compose.yml` (bind-mount source
+   `${ENV_DIR:-/opt/algoedgefno/env}/firebase-serviceaccount-<env>.json`); no
+   compose edit is needed — just confirm the host file from step 2 exists.
 5. Create Firebase test users against the staging project; set
    `TEST_UID_A/B/DENIED/CONFLICT` and a non-empty `ALLOWED_FIREBASE_UIDS`.
 6. Ensure the host-installed deploy wrappers and operator scripts are already
