@@ -147,7 +147,15 @@ Whichever comes first.
 
 ---
 
-## 6. Post-PR2 tenant identity cleanup
+## 6. Post-PR2 tenant identity cleanup — DONE
+
+**Status:** Implemented. `middleware.RequireUserIdentity()` now enforces the
+tenant identity invariant centrally (present, `uuid.UUID`, non-`uuid.Nil`,
+otherwise `401 {"error":"missing user identity"}`), applied to the tenant route
+subgroup after `middleware.Auth(...)`. The repeated handler-local
+`extractUserID(c)` checks were replaced by the `mustUserID(c)` invariant helper;
+`/config/app` and the `/auth/*` routes remain outside the guard. Original
+deferral context retained below for history.
 
 **Deferred decision:** the Firebase auth rollout keeps the existing repeated
 handler-local `extractUserID(c)` checks for now so PR 2 stayed focused on token

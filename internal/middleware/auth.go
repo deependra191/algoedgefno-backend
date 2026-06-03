@@ -36,7 +36,7 @@ func Auth(validator models.TokenValidator) gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": errInvalidOrExpiredToken})
 			return
 		}
-		c.Set(models.UserIDKey, uid) // uuid.UUID, consumed by extractUserID in handlers
+		c.Set(models.UserIDKey, uid) // uuid.UUID, enforced by RequireUserIdentity on tenant routes
 		c.Next()
 	}
 }
