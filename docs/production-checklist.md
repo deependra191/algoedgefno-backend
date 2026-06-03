@@ -211,6 +211,11 @@ status history and operational reference only.
 - `/opt/algoedgefno/env/healthchecks.env` exists and the active Healthchecks.io
   checks are configured and green.
 - The VPS health meta-check and sync alerting are live.
+- `backend-prod` and `backend-staging` declare Docker Compose `healthcheck`
+  entries (`/app/healthcheck` → local `GET /ready`); `docker compose ps` reports
+  `healthy`/`unhealthy` for steady-state local container health. This is a
+  VPS-local signal only — off-host alerting still belongs to Healthchecks.io.
+  See `docs/one-vps-deployment.md`.
 - HTTP probes 1–3 and backup cron check 7 remain deferred to
   `docs/post-beta-checklist.md`.
 
