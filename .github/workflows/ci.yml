@@ -1,6 +1,13 @@
 # CI gate: build, vet, test, arch-lint on PRs to dev/main
 name: CI
 
+# The workflow ALWAYS triggers (no paths-ignore on the trigger). Path filtering
+# happens inside, via the `changes` job, so the required status check is always
+# reported. This is deliberate: a workflow skipped by a trigger-level
+# `paths-ignore` reports as perpetually "pending" and blocks merge once CI is a
+# required check under branch protection. Here the always-running `ci-required`
+# gate job is the single check to mark required — it reports a definite
+# pass/fail whether the heavy `ci` job ran or was skipped for a docs-only PR.
 on:
   pull_request:
     branches:
@@ -15,7 +22,35 @@ permissions:
   contents: read
 
 jobs:
+  # Decide whether anything beyond markdown changed. Only '**.md' is treated as
+  # "docs": .gitignore, .dockerignore, Dockerfile, *.yml workflows and *.sh
+  # scripts are all asserted on by the lint steps in `ci`, so any change to them
+  # must run the full job even though they are not Go source.
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: filter
+        name: Detect non-markdown changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # code=true when at least one changed file is not markdown (and when
+          # the diff is empty, code=false → nothing to build).
+          if git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -qvE '\.md$'; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
   ci:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     services:
       timescaledb:
@@ -331,3 +366,24 @@ jobs:
       - name: cmd/sync/main.go does not import internal/firebaseauth
         run: |
           ! grep -q 'internal/firebaseauth' cmd/sync/main.go
+
+  # Single required status check. Always runs and reports a definite pass/fail,
+  # so branch protection is never left pending. Mark THIS job ("ci-required")
+  # required in branch protection — not "ci", which is skipped for docs-only PRs.
+  ci-required:
+    needs: [changes, ci]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Verify CI result
+        env:
+          CI_RESULT: ${{ needs.ci.result }}
+        run: |
+          # ci is "skipped" for docs-only PRs (gate passes) and "success" when it
+          # ran clean. Anything else (failure/cancelled) fails the gate.
+          if [ "$CI_RESULT" = "success" ] || [ "$CI_RESULT" = "skipped" ]; then
+            echo "CI gate passed (ci job result: $CI_RESULT)"
+            exit 0
+          fi
+          echo "CI gate failed (ci job result: $CI_RESULT)" >&2
+          exit 1
