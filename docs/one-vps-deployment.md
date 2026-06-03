@@ -447,7 +447,7 @@ Expected results:
 - Logs include method, path, status, latency, environment, version, commit, and request ID.
 - Logs do not include bearer tokens, JWTs, DB passwords, full DSNs, or Firebase secrets.
 - Browser CORS response headers are absent. CORS is intentionally disabled for v1 because there is no browser client; future browser/admin CORS support should be added in a separate PR when needed.
-- Backend container health is validated through Caddy/manual smoke checks for now. Compose-level backend `healthcheck` entries are tracked in `docs/post-beta-checklist.md` and can be added later after the runtime image includes a small HTTP probe tool or the app exposes a dependency-free internal probe strategy.
+- Backend container health is reported by Docker Compose `healthcheck` entries on `backend-prod` and `backend-staging`. Each backend runs a small dependency-free probe binary (`/app/healthcheck`, built from `cmd/healthcheck`) that performs a single local `GET /ready` against `127.0.0.1:${PORT}` on the container — never through Caddy and never reaching external services. `docker compose ps` shows `healthy` once the app can serve `/ready` (DB connectivity plus environment-identity match for prod/staging); if `/ready` starts failing, Docker marks the container `unhealthy`. The probe requires no secrets and logs nothing. The scripted/`curl` smoke checks above are still the deploy-time verification; the Compose healthcheck only reflects steady-state local container health and does not by itself restart or alert. Off-host alerting remains Healthchecks.io's job — see `docs/monitoring-setup.md`.
 
 ## Staging deploy automation
 

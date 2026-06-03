@@ -79,6 +79,8 @@ components:
     in: cmd/teardown-firebase-test-users
   cmd_verify_prod_smoke_user:
     in: cmd/verify-prod-smoke-user
+  cmd_healthcheck:
+    in: cmd/healthcheck
 
 deps:
   models:
@@ -203,4 +205,10 @@ deps:
 
   cmd_verify_prod_smoke_user:
     anyProjectDeps: true
+    anyVendorDeps: true
+
+  # The healthcheck probe is deliberately dependency-free (stdlib only). It is
+  # intentionally NOT granted anyProjectDeps, so arch-lint enforces that it
+  # imports no internal package and stays a minimal, self-contained probe.
+  cmd_healthcheck:
     anyVendorDeps: true
