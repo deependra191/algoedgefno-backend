@@ -3,9 +3,10 @@ package models
 import "context"
 
 // UserIDKey is the gin.Context key under which an authenticated user's
-// uuid.UUID identity is stored. Middleware sets it (PR 2 onward); handlers
-// read it via the extractUserID helper. Lives in models so both layers
-// reference the same constant without cross-component import.
+// uuid.UUID identity is stored. The Auth middleware sets it; the
+// RequireUserIdentity middleware enforces it on tenant routes, and handlers
+// then read it via the mustUserID invariant helper. Lives in models so both
+// layers reference the same constant without cross-component import.
 const UserIDKey = "userID"
 
 // requestIDCtxKey is a private typed key used as the context.Context lookup

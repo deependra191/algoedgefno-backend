@@ -1,28 +1,20 @@
 package handlers
 
 import (
-	"net/http"
-
 	"github.com/google/uuid"
 
 	"github.com/deependra191/algoedgefno-backend/internal/models"
 	"github.com/gin-gonic/gin"
 )
 
-const errMissingUserIdentity = "missing user identity"
-
-// extractUserID retrieves the typed UUID identity set by the auth middleware.
-// Returns (uuid.Nil, false) after writing a 401 — caller must just return.
-func extractUserID(c *gin.Context) (uuid.UUID, bool) {
-	raw, ok := c.Get(models.UserIDKey)
-	if !ok {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": errMissingUserIdentity})
-		return uuid.Nil, false
-	}
-	uid, ok := raw.(uuid.UUID)
-	if !ok || uid == uuid.Nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": errMissingUserIdentity})
-		return uuid.Nil, false
-	}
-	return uid, true
+// mustUserID returns the authenticated tenant's UUID from the Gin context.
+//
+// It is an invariant helper, not a validator: middleware.RequireUserIdentity
+// guarantees models.UserIDKey is present, a uuid.UUID, and non-nil before any
+// tenant handler runs, so this never yields uuid.Nil on a correctly wired
+// route. It panics (recovered as 500 by gin.Recovery) if a tenant route was
+// registered without that middleware — surfacing the misconfiguration loudly
+// rather than silently querying under uuid.Nil.
+func mustUserID(c *gin.Context) uuid.UUID {
+	return c.MustGet(models.UserIDKey).(uuid.UUID)
 }

@@ -103,13 +103,21 @@ func Register(
 		protected := v1.Group("")
 		protected.Use(middleware.Auth(authSvc))
 		{
-			protected.GET("/strategies", strategyHandler.List)
-			protected.GET("/strategies/:id", strategyHandler.GetByID)
+			// Tenant endpoints additionally require a valid user identity in
+			// context. RequireUserIdentity runs after Auth and enforces the
+			// route-level invariant so handlers can read the owner via
+			// mustUserID without re-validating.
+			tenant := protected.Group("")
+			tenant.Use(middleware.RequireUserIdentity())
+			{
+				tenant.GET("/strategies", strategyHandler.List)
+				tenant.GET("/strategies/:id", strategyHandler.GetByID)
 
-			protected.GET("/backtests", backtestHandler.List)
-			protected.POST("/backtests", backtestHandler.Submit)
-			protected.GET("/backtests/:id", backtestHandler.GetByID)
-			protected.GET("/backtests/:id/trades", backtestHandler.GetTrades)
+				tenant.GET("/backtests", backtestHandler.List)
+				tenant.POST("/backtests", backtestHandler.Submit)
+				tenant.GET("/backtests/:id", backtestHandler.GetByID)
+				tenant.GET("/backtests/:id/trades", backtestHandler.GetTrades)
+			}
 		}
 	}
 
