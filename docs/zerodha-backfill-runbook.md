@@ -109,14 +109,22 @@ continuous futures as a synthetic instrument: symbol `<UNDERLYING>-FUTCONT`
 (`models.ContinuousFuturesSuffix`), type `FUTIDX_CONT` / `FUTSTK_CONT`, populated
 today by the NSE EOD provider's near-month stitch.
 
-> **v1 backfill targets the continuous stream**, mapped onto the existing
-> `-FUTCONT` instruments, via Kite's `continuous=1` parameter (see §3).
-> Per-monthly-contract rows (each `NIFTY25JUNFUT` as its own instrument) are
-> **deferred** — backfilling them needs `instrument_token`s for *expired*
-> contracts, which Kite's instruments dump does not list (it carries active
-> contracts only). The continuous series is enough to validate intraday
-> strategies; true per-contract roll modelling is a later, additive step (new
-> instrument rows + new candles, no redesign).
+> **v1 is SPOT-first — deep 1-min futures history is NOT obtainable (corrected
+> per Kite docs).** Verified against the Kite historical docs: `continuous=1`,
+> given a *live* contract's token, returns only **`day`** candles for that
+> instrument's *expired* contracts — **minute intervals are not served for expired
+> futures**. So deep (2020→) **1-min** history exists only for instruments that
+> **don't expire**: index spot and equity spot. For futures the 1-min stream
+> exists only for the *currently active* contract (its ~3-month life); a deep 1-min
+> continuous futures series is therefore impossible by backfill — it can only be
+> built by **capturing active-contract minute data forward** and stitching over
+> time. Per-monthly-contract backfill is doubly blocked: expired tokens are
+> undiscoverable *and* expired minute data isn't served. **Implication:** v1 fills
+> **spot** at 1-min; futures get **daily** history now (via `continuous=1`) and a
+> **forward 1-min capture** pipeline later. How a strategy whose fill instrument is
+> a future gets validated intraday (spot-as-fill-proxy with basis, or validate on
+> the forward-captured window) is a workstream-5 methodology question — flagged,
+> not solved here.
 
 **Micro-task — start a daily instruments-dump snapshot now (free, high-leverage).**
 Kite's `/instruments` CSV lists only *currently-tradeable* contracts; once a
@@ -129,14 +137,15 @@ into `local-rnd/` (a tiny CSV). Do this from day one and every future month's
 per-contract token is preserved in your own archive, making true per-contract
 backfill possible retroactively — without ever hitting the discovery wall again.
 
-**Instrument rows the backfill needs (create via `UpsertBatch` if absent):**
+**Instrument universe & what's actually obtainable (create rows via `UpsertBatch`
+if absent):**
 
-| Instrument | exchange | instrument_type | Notes |
+| Instrument | exchange | instrument_type | 1-min deep history? |
 |---|---|---|---|
-| Index spot (NIFTY 50, BANKNIFTY, FINNIFTY) | `NSE` | `INDEX` | Signal source; small universe |
-| Index futures continuous | `NFO` | `FUTIDX_CONT` | `<U>-FUTCONT`, via `continuous=1` |
-| Equity spot (F&O underlyings) | `NSE` | `EQ` | Start with a liquid subset |
-| Equity futures continuous | `NFO` | `FUTSTK_CONT` | `<U>-FUTCONT`, via `continuous=1` |
+| Index spot (NIFTY 50, BANKNIFTY, FINNIFTY) | `NSE` | `INDEX` | ✅ Yes — no expiry, stable token. Signal source. |
+| Equity spot (F&O underlyings) | `NSE` | `EQ` | ✅ Yes — no expiry, stable token. Tradable; liquid subset first. |
+| Index futures continuous (`<U>-FUTCONT`) | `NFO` | `FUTIDX_CONT` | ❌ No backfill — **daily** via `continuous=1`; 1-min only forward-captured. |
+| Equity futures continuous (`<U>-FUTCONT`) | `NFO` | `FUTSTK_CONT` | ❌ Same as index futures. |
 
 ---
 
@@ -157,8 +166,12 @@ committing the pagination/interval constants** (policy doc's research rule):
   Paginate from `2020-01-01` to today in ≤60-day windows (policy doc start year).
 - **Token mapping:** the instruments dump (`GET /instruments`, CSV) maps
   `tradingsymbol` → `instrument_token`. **Active contracts only** — the reason
-  expired futures/options can't be pulled per-contract, and why v1 uses
-  `continuous=1` for futures.
+  expired futures/options can't be pulled per-contract.
+- **Continuous mode is day-only for expired contracts (verified).** Per the Kite
+  historical docs, `continuous=1` on a live contract's token returns **`day`**
+  candles for that instrument's expired contracts — **minute intervals are not
+  served for expired futures**. So `continuous=1` yields deep *daily* futures
+  history, never deep 1-min. This is why §2's 1-min plan is spot-only.
 - **Rate limit:** historical endpoint ≈ 3 req/s. Reuse the existing `-delay`
   throttle pattern from `cmd/sync/main.go` between requests.
 
@@ -192,9 +205,9 @@ committing the pagination/interval constants** (policy doc's research rule):
 structure:
 
 - **Flags:** `-from` (default `2020-01-01`), `-to` (default today), `-interval`
-  (default `minute`), `-instruments` (selection: e.g. `index-spot`,
-  `index-fut`, `equity-spot`, `equity-fut`, or explicit symbols), `-delay`
-  (req spacing).
+  (default `minute`), `-instruments` (selection: `index-spot`, `equity-spot` →
+  1-min; `index-fut`, `equity-fut` → resolve to **daily** via `continuous=1`, since
+  expired-futures minute data isn't served — see §2), `-delay` (req spacing).
 - **Loop:** for each selected instrument → resolve `instrument_token` → iterate
   ≤60-day windows from `-from` to `-to` → fetch → IST→UTC map → batch insert →
   record `sync_runs` → sleep `-delay`.
@@ -238,8 +251,12 @@ Deliverables for this phase:
   an optional `local-rnd/coverage/` helper that prints per-instrument 1-min
   coverage and obvious gaps (e.g. trading days with far fewer than ~375 one-min
   bars). This is the human-facing "is my data trustworthy yet?" check.
-- `sync_runs` already records each backfill attempt (§3b); `ListByProvider` gives
-  the run history.
+- `sync_runs` records each backfill attempt (§3b). Read run history directly from
+  the table via SQL; **do not** wire the tooling to `SyncRunStore.ListByProvider` —
+  it returns `entities.SyncRun`, and entities never leave the storage package
+  (rule 20). Coverage over `candles` (above) is the primary trust check; `sync_runs`
+  is the audit trail. (If a domain-typed list is ever needed, add a
+  `[]models.SyncRun`-returning method to `SyncRunRepository` first.)
 
 This is the seam the future fill engine reads. Building the engine on top is
 explicitly **out of scope here**.
@@ -248,9 +265,18 @@ explicitly **out of scope here**.
 
 ## 5. Rights & safety guardrails (enforced during this work)
 
-- **Local DB creds only.** The tool reads `config.Load()`; ensure the local `.env`
-  points `DB_*` / `DATABASE_URL` at the **local** Postgres
-  (`docker compose -f docker/docker-compose.yml up -d`), never a VPS host.
+- **Mechanical local-only guard — required in PR A, before any broker request or
+  insert.** `config.Load()` + `database.Connect()` will connect to *any* host —
+  including staging/prod — if the environment is wrong, so "local-only" cannot rest
+  on convention. The tooling must **fail closed at startup**: refuse to run unless
+  the DB target is provably local. Concretely — **reject a set `DATABASE_URL`,
+  reject `APP_ENV` of `staging`/`production`, and allow only loopback / local-Docker
+  DB hosts** (`localhost`, `127.0.0.1`, `::1`, the compose service host); abort with
+  a clear error otherwise. This is what makes "no code path to a deployable DB" true
+  by construction, not just by intent.
+- **Local DB creds only.** Beyond the guard above, ensure the local `.env` points
+  `DB_*` at the **local** Postgres (`docker compose -f docker/docker-compose.yml up
+  -d`), never a VPS host.
 - **Never run against staging/prod.** Staging counts as production for data rights
   (shared VPS). There is no code path from this tool to a deployable DB, by design.
 - **Promotion runbooks stay clear.** `docs/market-data-promotion.md` must never be
@@ -269,6 +295,8 @@ Build & boundary:
 - [ ] `go-arch-lint check` passes with the new `local_rnd` component.
 - [ ] `local-rnd/` is in `.dockerignore`; a built image contains **no** backfill
       binary (`docker build … && docker run --rm <img> ls /app` shows none).
+- [ ] Local-only guard trips: setting `DATABASE_URL`, `APP_ENV=production`, or a
+      non-local `DB_HOST` makes the tool abort **before** any broker call or insert.
 
 Data correctness (spot-check after a sample window, e.g. NIFTY spot, one week):
 - [ ] 1-min rows present; count ≈ 375/trading day (09:15–15:30 IST).
@@ -285,13 +313,17 @@ Target branch per rule 23: the data-sourcing policy doc is already merged to
 `dev`, so these implementation PRs target **`dev`**; a human merges (rule 26).
 
 1. **PR A — scaffold & boundary.** `local-rnd/` skeleton, `.dockerignore` entry,
-   `.go-arch-lint.yml` `local_rnd` component, Kite client skeleton + env wiring,
-   `CandleInterval1M` constant, README documenting the daily-token step. No bulk
-   data pull yet (or a single-window smoke pull).
-2. **PR B — index backfill.** Index spot + index-futures continuous, 2020→today;
-   run it; verify coverage (§4) and the §6 checklist.
-3. **PR C — equity backfill.** Extend the universe to equity spot + equity-futures
-   continuous, liquid subset first (disk + token-mapping cost). Re-verify coverage.
+   `.go-arch-lint.yml` `local_rnd` component, the **mechanical local-only DB guard**
+   (§5), Kite client skeleton + env wiring, `CandleInterval1M` constant, README
+   documenting the daily-token step. No bulk data pull yet (or a single-window smoke
+   pull — which doubles as the live probe of what Kite actually serves).
+2. **PR B — spot 1-min backfill.** Index spot + equity spot (liquid subset first),
+   2020→today at `minute`. Run it; verify coverage (§4) and the §6 checklist. This
+   is the deep-1-min deliverable.
+3. **PR C — futures daily + forward 1-min capture.** Index/equity futures *daily*
+   history via `continuous=1` onto the `-FUTCONT` instruments, plus a forward-running
+   capture of active-contract **minute** data to start building a real 1-min futures
+   series over time. (Deep 1-min futures history is not backfillable — §2.)
 
 ---
 
@@ -322,10 +354,13 @@ Target branch per rule 23: the data-sourcing policy doc is already merged to
 
 ## 9. Open assumptions to confirm against the live Kite API before coding
 
-- Exact minute-data window cap (the "60 days" figure) and whether it differs for
-  `continuous=1`.
-- How far back `continuous=1` intraday data actually reaches (does it cover 2020?).
-- **Whether `continuous=1` returns back-adjusted or unadjusted prices.**
+- Exact minute-data window cap (the "60 days" figure — the docs don't state it
+  explicitly; confirm the per-request limit live).
+- **RESOLVED:** `continuous=1` is **day-only for expired contracts** (no expired
+  minute data) — see §2/§3a. Remaining check: confirm minute data exists for the
+  **currently active** futures contract over its full life, for the forward-capture.
+- **Whether `continuous=1` returns back-adjusted or unadjusted prices** (matters
+  for the *daily* futures history and the forward-captured series).
   Back-adjusted = seamless roll, no gap, but historical absolute price levels are
   distorted. Unadjusted = true prices, but a visible basis gap at each monthly
   roll, which can trigger spurious stop/target hits on the roll bar. Which one Kite
