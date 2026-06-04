@@ -253,7 +253,14 @@ instruments (the deferred options).
 
 Implementation notes:
 - **Futures are a roll series**, not one instrument: store each monthly contract
-  and stitch the near→next roll at expiry.
+  and stitch the near→next roll at expiry. *This is the eventual target shape.*
+  **v1 data reality differs** — see the runbook
+  ([`zerodha-backfill-runbook.md`](zerodha-backfill-runbook.md)): brokers do not
+  serve **expired-futures minute data** (Kite's `continuous=1` returns only *daily*
+  candles for expired contracts), so deep 1-min history is **spot-only**; a true
+  per-contract / continuous 1-min futures series can only be built by capturing
+  active-contract minute data **forward**. Where the two docs differ on futures
+  intraday sourcing, the runbook's corrected v1 plan wins.
 - **Signal-on-spot, fill-on-future** needs an explicit series mapping; the fill
   price is the future's, and basis means the two don't track tick-for-tick.
 
@@ -262,8 +269,9 @@ Implementation notes:
 ## Workstreams & sequencing
 
 This doc is the *what* and *why*. The *how* — broker auth/token flow, rate limits,
-resume-on-failure, exact script structure, schema DDL — is deliberately left for
-the implementation plan and the session that picks this up. The separable
+resume-on-failure, exact script structure, schema DDL — is the **implementation
+runbook** for workstreams 1, 2 and 4: see
+[`docs/zerodha-backfill-runbook.md`](zerodha-backfill-runbook.md). The separable
 workstreams, in dependency order:
 
 1. **Instrument model** — confirm `instruments` can represent futures roll series
