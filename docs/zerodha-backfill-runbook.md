@@ -52,7 +52,7 @@ intended:
    ```yaml
    # components:
    local_rnd:
-     in: local-rnd/...
+     in: local-rnd/**
 
    # deps:
    local_rnd:
@@ -80,10 +80,9 @@ must avoid.
 
 ## 1. Prerequisites — Kite Connect access
 
-- A **Kite Connect** developer app: gives `api_key` + `api_secret`. The historical
-  data add-on is a paid monthly subscription (policy doc records **₹500 for a
-  single month** — *verify current pricing at signup*; take one month, pull the
-  deep history, stop renewing).
+- A **Kite Connect** developer app: gives `api_key` + `api_secret`. At signup on
+  **2026-06-04**, app creation showed **500 credits**, valid for **30 days from
+  creation**. Create it only when ready to run the probe/backfill window.
 - **Access token is daily.** The login flow is: open the Kite login URL with
   `api_key` → user authorises → redirect carries a `request_token` → exchange
   `request_token` + `api_secret` for an `access_token` valid until ~6am next day.
@@ -127,6 +126,32 @@ forward-capture proves the only intraday-futures path, we **adjust the instrumen
 scope and the strategies we validate accordingly** rather than force the plan onto
 data that isn't there.
 
+**Live probe findings — 2026-06-04.** Run against Kite with NIFTY spot token
+`256265` and active NIFTY futures token `15956226`:
+
+- `continuous=1` + `minute` on the futures token returned HTTP 400
+  `InputException`: `invalid interval for continuous data`. It does not silently
+  downgrade to day candles.
+- NIFTY spot 1-min (`NSE`, `NIFTY 50`) returned full 375-bar sessions for all
+  sampled January dates from **2018-01-02** through **2026-01-02**. The planned
+  2020 start is conservative; Kite served at least 2018 for this index.
+- Timestamps are ISO-like strings with explicit IST offset, e.g.
+  `2018-01-02T09:15:00+0530`; parsed offset is `+05:30`.
+- The minute request cap is exactly **60 calendar days** for the sampled index:
+  60 days succeeded, while 61/90/120 days returned HTTP 400 `InputException`:
+  `interval exceeds max limit: 60 days`.
+- A 6-request short burst against the historical endpoint returned all HTTP 200s
+  in this sample. Keep throttling anyway; a small burst passing is not a licence
+  to run the backfill unthrottled.
+- Active NIFTY futures minute data existed for at least one sampled active-token
+  date (`2026-05-05`, 375 bars). Other sampled dates returned 0 bars, so do not
+  treat the probe as proof of a full active-contract life window yet.
+- `continuous=1` + `day` returned daily bars around the sampled roll window;
+  `continuous=0` for the same active token and old dates returned 0 bars. This
+  confirms continuous daily retrieval, but does **not** by itself prove whether
+  Kite's continuous prices are back-adjusted or unadjusted against a raw expired
+  contract comparator.
+
 ---
 
 ## 2. Phase 0 — Instrument model verification (workstream 1)
@@ -143,22 +168,23 @@ continuous futures as a synthetic instrument: symbol `<UNDERLYING>-FUTCONT`
 (`models.ContinuousFuturesSuffix`), type `FUTIDX_CONT` / `FUTSTK_CONT`, populated
 today by the NSE EOD provider's near-month stitch.
 
-> **v1 is SPOT-first — deep 1-min futures history is NOT obtainable (corrected
-> per Kite docs).** Verified against the Kite historical docs: `continuous=1`,
-> given a *live* contract's token, returns only **`day`** candles for that
-> instrument's *expired* contracts — **minute intervals are not served for expired
-> futures**. So deep (2020→) **1-min** history exists only for instruments that
-> **don't expire**: index spot and equity spot. For futures the 1-min stream
-> exists only for the *currently active* contract (its ~3-month life); a deep 1-min
+> **v1 is SPOT-first — deep 1-min futures history is NOT obtainable (verified
+> live on 2026-06-04).** `continuous=1` with interval `minute`, given a live NIFTY
+> futures token, returned HTTP 400 `InputException` with `invalid interval for
+> continuous data`. So deep **1-min** history exists only for instruments that
+> **don't expire**: index spot and equity spot. The live probe showed NIFTY spot
+> 1-min data at least back to **2018-01-02**; the planned `2020-01-01` start remains
+> a conservative v1 boundary unless a strategy needs older regimes. For futures,
+> the 1-min stream exists only for currently listed contracts; a deep 1-min
 > continuous futures series is therefore impossible by backfill — it can only be
 > built by **capturing active-contract minute data forward** and stitching over
 > time. Per-monthly-contract backfill is doubly blocked: expired tokens are
-> undiscoverable *and* expired minute data isn't served. **Implication:** v1 fills
-> **spot** at 1-min; futures get **daily** history now (via `continuous=1`) and a
-> **forward 1-min capture** pipeline later. How a strategy whose fill instrument is
-> a future gets validated intraday (spot-as-fill-proxy with basis, or validate on
-> the forward-captured window) is a workstream-5 methodology question — flagged,
-> not solved here.
+> undiscoverable unless previously snapshotted, and `continuous=1` rejects
+> non-day intervals. **Implication:** v1 fills **spot** at 1-min; futures get
+> **daily** history now (via `continuous=1`) and a **forward 1-min capture**
+> pipeline later. How a strategy whose fill instrument is a future gets validated
+> intraday (spot-as-fill-proxy with basis, or validate on the forward-captured
+> window) is a workstream-5 methodology question — flagged, not solved here.
 
 **Micro-task — start a daily instruments-dump snapshot now (free, high-leverage).**
 Kite's `/instruments` CSV lists only *currently-tradeable* contracts; once a
@@ -176,7 +202,7 @@ if absent):**
 
 | Instrument | exchange | instrument_type | 1-min deep history? |
 |---|---|---|---|
-| Index spot (NIFTY 50, BANKNIFTY, FINNIFTY) | `NSE` | `INDEX` | ✅ Yes — no expiry, stable token. Signal source. |
+| Index spot (NIFTY 50, BANKNIFTY, FINNIFTY) | `NSE` | `INDEX` | ✅ Yes — no expiry, stable token. NIFTY spot served 1-min at least to 2018 in the live probe. Signal source. |
 | Equity spot (F&O underlyings) | `NSE` | `EQ` | ✅ Yes — no expiry, stable token. Tradable; liquid subset first. |
 | Index futures continuous (`<U>-FUTCONT`) | `NFO` | `FUTIDX_CONT` | ❌ No backfill — **daily** via `continuous=1`; 1-min only forward-captured. |
 | Equity futures continuous (`<U>-FUTCONT`) | `NFO` | `FUTSTK_CONT` | ❌ Same as index futures. |
@@ -185,10 +211,10 @@ if absent):**
 
 ## 3. Phase 1 — The Zerodha deep backfill script (workstream 2) — *the first real task*
 
-### 3a. Kite historical API — facts and assumptions to validate live
+### 3a. Kite historical API — live-verified facts
 
-These are read from published Kite docs; **confirm against the live API before
-committing the pagination/interval constants** (policy doc's research rule):
+These are now based on the 2026-06-04 live probe, with remaining uncertainties
+called out in §9:
 
 - **Endpoint:** `GET /instruments/historical/:instrument_token/:interval` with
   `from`, `to` (IST datetimes), optional `continuous=1`, optional `oi=1`.
@@ -196,18 +222,25 @@ committing the pagination/interval constants** (policy doc's research rule):
   `10minute`, `15minute`, `30minute`, `60minute`, `day`. **Store `minute` only**;
   coarser TFs are resampled from 1-min on demand (policy doc — 1-min is canonical),
   not stored.
-- **Window cap:** minute data is capped to roughly a **60-day window per request**.
-  Paginate from `2020-01-01` to today in ≤60-day windows (policy doc start year).
+- **Window cap:** minute data is capped to **60 calendar days per request** in the
+  live probe. A 60-day NIFTY spot request succeeded; 61/90/120 days returned
+  HTTP 400 `InputException` with `interval exceeds max limit: 60 days`. Paginate
+  in windows of **≤60 days**. Use `2020-01-01` as the conservative v1 start year,
+  even though NIFTY spot served sampled 1-min data back to **2018-01-02**.
 - **Token mapping:** the instruments dump (`GET /instruments`, CSV) maps
   `tradingsymbol` → `instrument_token`. **Active contracts only** — the reason
   expired futures/options can't be pulled per-contract.
-- **Continuous mode is day-only for expired contracts (verified).** Per the Kite
-  historical docs, `continuous=1` on a live contract's token returns **`day`**
-  candles for that instrument's expired contracts — **minute intervals are not
-  served for expired futures**. So `continuous=1` yields deep *daily* futures
-  history, never deep 1-min. This is why §2's 1-min plan is spot-only.
-- **Rate limit:** historical endpoint ≈ 3 req/s. Reuse the existing `-delay`
-  throttle pattern from `cmd/sync/main.go` between requests.
+- **Continuous mode is day-only for expired contracts (verified live).**
+  `continuous=1` + `minute` returned HTTP 400 `InputException`
+  (`invalid interval for continuous data`). `continuous=1` + `day` returned daily
+  candles around the sampled roll window. So `continuous=1` yields deep *daily*
+  futures history, never deep 1-min. This is why §2's 1-min plan is spot-only.
+- **Timestamp shape:** Kite returned timestamps like
+  `2018-01-02T09:15:00+0530`, i.e. IST with an explicit `+0530` offset.
+- **Rate limit:** historical endpoint is expected to be ≈3 req/s. A 6-request
+  short burst succeeded in the live probe, but keep the existing `-delay` throttle
+  pattern from `cmd/sync/main.go` between requests; burst success is not an
+  operational backfill rate.
 
 ### 3b. Canonical mapping into our schema (the details that bite)
 
@@ -390,21 +423,30 @@ Target branch per rule 23: the data-sourcing policy doc is already merged to
 
 ---
 
-## 9. Open assumptions to confirm against the live Kite API before coding
+## 9. Open assumptions after the live probe
 
-- Exact minute-data window cap (the "60 days" figure — the docs don't state it
-  explicitly; confirm the per-request limit live).
-- **RESOLVED:** `continuous=1` is **day-only for expired contracts** (no expired
-  minute data) — see §2/§3a. Remaining check: confirm minute data exists for the
-  **currently active** futures contract over its full life, for the forward-capture.
-- **Whether `continuous=1` returns back-adjusted or unadjusted prices** (matters
-  for the *daily* futures history and the forward-captured series).
-  Back-adjusted = seamless roll, no gap, but historical absolute price levels are
-  distorted. Unadjusted = true prices, but a visible basis gap at each monthly
-  roll, which can trigger spurious stop/target hits on the roll bar. Which one Kite
-  returns determines how the engine (workstream 5) must treat roll bars — confirm
-  before relying on absolute price levels in any backtest.
-- `instrument_token` stability for index spot across the backfill window.
-- Current historical-data add-on pricing (policy doc says ₹500/month — verify).
-- Confirmed IST offset on returned candle timestamps and the exact session window
-  for the per-day bar-count sanity check.
+- **RESOLVED:** Exact minute-data window cap is **60 calendar days** per request;
+  61 days fails with `interval exceeds max limit: 60 days`.
+- **RESOLVED:** `continuous=1` is **day-only**; `continuous=1` + `minute` fails
+  with `invalid interval for continuous data`.
+- **RESOLVED for NIFTY spot:** index spot 1-min data exists at least back to
+  **2018-01-02** for `NIFTY 50` token `256265`. Keep `2020-01-01` as the v1 start
+  unless a strategy specifically needs older data.
+- **RESOLVED:** returned candle timestamps include the IST offset (`+0530`), and a
+  normal sampled NIFTY spot session returned **375 one-minute bars** from 09:15 to
+  15:29 IST.
+- **RESOLVED:** signup pricing observed on 2026-06-04 was **500 credits**, valid
+  for **30 days from app creation**.
+- **PARTIAL:** active NIFTY futures minute data exists for the sampled active
+  contract on at least one date (`2026-05-05`, 375 bars), but the probe did not
+  prove minute coverage across the full listed contract life. Forward-capture
+  should still run daily and coverage should be measured from stored rows.
+- **OPEN:** whether `continuous=1` returns back-adjusted or unadjusted prices.
+  The live probe confirmed continuous daily bars, but `continuous=0` for the same
+  active token returned 0 bars on old dates, so it did not provide a raw expired
+  contract comparator. Resolve this later by comparing against a preserved
+  per-contract token archive, broker contract notes/reference prices, or another
+  licensed/raw source before relying on absolute roll-window prices in the engine.
+- **OPEN for non-NIFTY instruments:** confirm BANKNIFTY, FINNIFTY, and selected
+  equity spot history depth during PR B sample runs. The NIFTY spot finding is
+  strong evidence for index spot, not a blanket proof for every instrument.
