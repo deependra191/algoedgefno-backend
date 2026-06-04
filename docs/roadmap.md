@@ -12,7 +12,7 @@
 
 - Zerodha Kite Connect: one-off deep 1-min history backfill (one paid month, paginated 60-day windows back to ~2020)
 - AngelOne SmartAPI: ongoing free intraday top-up of recent candles
-- Standalone scripts in `scripts/` — NOT built-in providers; local dev DB only, never deployed to the VPS (broker data is personal-use)
+- Standalone scripts in a local-only repo path outside `scripts/` (the prod Dockerfile ships `scripts/` into the image) — NOT built-in providers; local dev DB only, never in the deployable image (broker data is personal-use)
 - Enables 1-min/15-min intraday backtesting for futures and spot; see `docs/data-sourcing-policy.md`
 
 ## Phase 3 — Vendor trial (TrueData or Global Datafeeds)

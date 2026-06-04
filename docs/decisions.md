@@ -47,7 +47,7 @@ Local development: Docker Compose with TimescaleDB; the deep 1-min broker backfi
 
 ## Broker intraday backfill is local scripts, not providers
 
-Zerodha (deep one-time backfill) and AngelOne (ongoing top-up) seed historical intraday data into the **local** dev DB. They do not implement MarketDataProvider and never run on the VPS — they are standalone scripts in `scripts/` holding local DB credentials only. This keeps the provider registry clean and keeps personal-use broker data off production. See `docs/data-sourcing-policy.md`.
+Zerodha (deep one-time backfill) and AngelOne (ongoing top-up) seed historical intraday data into the **local** dev DB. They do not implement MarketDataProvider and never run on the VPS — they are standalone scripts kept in a local-only repo path **outside** `scripts/` (the production Dockerfile ships the whole `scripts/` tree into the image), holding local DB credentials only. This keeps the provider registry clean and keeps personal-use broker data and tooling off production. See `docs/data-sourcing-policy.md`.
 
 ## Candle intervals: 1-min, 15-min, 1-hour, day, week, month
 

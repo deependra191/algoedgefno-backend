@@ -2,6 +2,8 @@
 
 This runbook promotes already-validated staging market data into production on the one-VPS deployment. Use it only for environment-neutral market data, not for whole-database cloning.
 
+> **Never run this from a broker-sourced (Zerodha/AngelOne) database.** Broker data is personal-use only and must never reach staging or production. Promote only environment-neutral, licensed/allowed datasets. See `docs/data-sourcing-policy.md`.
+
 The first supported flow is an initial production seed where production market-data tables are empty. If production already has market data, stop and design a separate merge plan.
 
 ## Scope

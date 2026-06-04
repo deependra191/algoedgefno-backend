@@ -131,7 +131,7 @@ VPS, so broker-sourced rows are forbidden in staging exactly as in production.
 | Now | `nse_eod` (bhavcopy) | Free daily EOD candles, all instruments. Ongoing. |
 | Phase 3 | Vendor (`internal/providers/vendor/`) | Live ticks, expired-F&O options, licensed user-facing display. |
 
-### Local R&D tooling (scripts in `scripts/`, **never on the VPS**, not registry providers)
+### Local R&D tooling (repo-root local-only path, **never in the deployable image**, not registry providers)
 
 | Source | Role | Cost |
 |---|---|---|
@@ -150,14 +150,24 @@ it. The sequencing is **Zerodha first** (the deep one-time history), **AngelOne
 second** (ongoing top-up once history exists), **vendor last** (Phase 3, when the
 product is proven and user-facing licensed data is required).
 
-**Code vs data.** The backfill *scripts* may live in `scripts/` (version-controlled,
-reproducible) — what is quarantined is the broker *data* and any staging/prod DB
-access, not the code. The tooling must take its DB connection from local config
-only, embed no credentials, and have no path to a staging or production database.
-It is personal R&D tooling, not deployable product code — so the
-`MarketDataProvider` interface requirement (CLAUDE.md rule 6) explicitly does
-**not** apply to it. That is an allowed exception precisely because the tooling is
-not part of the deployable backend; do not "promote" it into a registry provider.
+**Code vs data — and where the code lives.** The backfill *scripts* may be
+version-controlled, but **not under `scripts/`**: the production Dockerfile copies
+the whole `scripts/` tree into the runtime image (`Dockerfile:70`,
+`COPY scripts /app/scripts`), so anything there ships to the VPS — contradicting
+"never on the VPS." Broker tooling instead lives in a dedicated repo-root
+directory **outside every deployable path** (e.g. `local-rnd/`), which the
+Dockerfile does not copy; add that path to `.dockerignore` as belt-and-suspenders
+against a future broad `COPY`. The tooling must take its DB connection from local
+config only, embed no credentials, and have no path to a staging or production
+database. It is personal R&D tooling, not deployable product code — so the
+`MarketDataProvider` requirement (CLAUDE.md rule 6) explicitly does **not** apply,
+and it is never "promoted" into a registry provider.
+
+*Assumption to validate at implementation:* AngelOne SmartAPI exposes a historical
+candle endpoint, but its retention depth and reliability for the ongoing top-up
+need confirming against the live API before committing to it. Zerodha's historical
+candles, daily continuous futures, ₹500/month pricing, and display restrictions are
+documented in official Kite docs/terms.
 
 ---
 
