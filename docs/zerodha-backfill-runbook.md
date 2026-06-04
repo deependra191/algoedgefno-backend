@@ -95,6 +95,40 @@ must avoid.
 
 ---
 
+## 1a. Phase 1a — Live probe first (read-only, the empirical gate)
+
+**Before writing any backfill, prove what Kite actually serves.** This runbook has
+twice had to mark Kite behaviour "verify against live API" (continuous mode for
+expired contracts; back-adjusted vs raw prices). A small **read-only probe**
+against the real account settles all of it definitively and de-risks every
+downstream decision. Build this **first** and let its findings shape the rest —
+*integrate and see for ourselves*, rather than plan against assumptions.
+
+**Deliberately read-only — no DB, no inserts.** The probe only fires historical
+requests and prints the raw shape. Nothing touches Postgres, so there is zero
+rights exposure beyond personal-use API reads, and even the local-only DB guard
+(§5) is not yet on the critical path.
+
+Lives in `local-rnd/kite-probe/` + a tiny token helper (login `request_token` →
+`access_token`). It answers, empirically:
+
+- Does `continuous=1` + `minute` on an **expired** future return day-only / error?
+  (confirm the corrected §2 claim with our own eyes)
+- How far back does **index-spot 1-min** actually reach — 2020? earlier? later?
+- **Active-contract** futures minute depth — how much a forward-capture buys.
+- **Back-adjusted vs unadjusted** on continuous (eyeball a known monthly roll).
+- Exact **timestamp format/offset**, the real **per-request window cap**, and
+  rate-limit behaviour under load.
+
+**Everything downstream is gated on these findings.** The §2 universe, §7
+sequencing, and the deep-history start year are written as the *expected* shape;
+the probe is licensed to overturn them. If spot 1-min only reaches 2021, or
+forward-capture proves the only intraday-futures path, we **adjust the instrument
+scope and the strategies we validate accordingly** rather than force the plan onto
+data that isn't there.
+
+---
+
 ## 2. Phase 0 — Instrument model verification (workstream 1)
 
 **Finding: no migration is needed for the futures/options shape.** The
@@ -312,11 +346,15 @@ Data correctness (spot-check after a sample window, e.g. NIFTY spot, one week):
 Target branch per rule 23: the data-sourcing policy doc is already merged to
 `dev`, so these implementation PRs target **`dev`**; a human merges (rule 26).
 
+0. **PR P — live probe (read-only, the empirical gate).** `local-rnd/kite-probe`
+   + token helper. **No DB, no inserts.** Run it, capture the findings (§1a), and
+   reconcile §2/§9 with reality **before** building the backfill. Everything below
+   is provisional until this lands.
 1. **PR A — scaffold & boundary.** `local-rnd/` skeleton, `.dockerignore` entry,
    `.go-arch-lint.yml` `local_rnd` component, the **mechanical local-only DB guard**
    (§5), Kite client skeleton + env wiring, `CandleInterval1M` constant, README
-   documenting the daily-token step. No bulk data pull yet (or a single-window smoke
-   pull — which doubles as the live probe of what Kite actually serves).
+   documenting the daily-token step. No bulk data pull yet (the probe, PR P, already
+   established the data shapes).
 2. **PR B — spot 1-min backfill.** Index spot + equity spot (liquid subset first),
    2020→today at `minute`. Run it; verify coverage (§4) and the §6 checklist. This
    is the deep-1-min deliverable.
