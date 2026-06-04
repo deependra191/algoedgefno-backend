@@ -262,8 +262,9 @@ Implementation notes:
 ## Workstreams & sequencing
 
 This doc is the *what* and *why*. The *how* — broker auth/token flow, rate limits,
-resume-on-failure, exact script structure, schema DDL — is deliberately left for
-the implementation plan and the session that picks this up. The separable
+resume-on-failure, exact script structure, schema DDL — is the **implementation
+runbook** for workstreams 1, 2 and 4: see
+[`docs/zerodha-backfill-runbook.md`](zerodha-backfill-runbook.md). The separable
 workstreams, in dependency order:
 
 1. **Instrument model** — confirm `instruments` can represent futures roll series
