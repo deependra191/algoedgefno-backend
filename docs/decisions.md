@@ -28,11 +28,14 @@ Auto-migrate in code hides schema changes from version control and makes rollbac
 
 v1 has a single Firebase-bound owner identity. Registration is implicit on first Firebase sign-in via `/auth/session`; no password storage, no bcrypt. Tenant data is scoped by `users.id` (the Firebase UID is the external binding). An allowlist (`ALLOWED_FIREBASE_UIDS`) gates which Firebase UIDs can sign in. Multi-user remains a future expansion of the allowlist, not a re-architecture.
 
-## Data phases: NSE EOD → Angel One dump → vendor trial
+## Data phases: NSE EOD → broker intraday backfill (local) → vendor trial
+
+See `docs/data-sourcing-policy.md` for the full sourcing, rights, and local/prod
+separation policy. Summary:
 
 - **Phase 1:** NSE bhavcopy gives free EOD (daily) candles for all instruments. Enough for daily/weekly strategy backtesting.
-- **Phase 2:** One-off script pulls recent intraday history from Angel One API. Seeds 1-min and 15-min candles. Not a built-in provider — just a data seeding tool.
-- **Phase 3:** Paid vendor (TrueData or Global Datafeeds) for live ticks and expired F&O options data depth.
+- **Phase 2 (local R&D only):** Zerodha Kite Connect seeds the deep 1-min history (one paid month, paginated backfill); AngelOne SmartAPI provides ongoing free intraday top-up. Broker data is personal-use only — it lives on the local dev DB and is never deployed to the VPS, raw or derived.
+- **Phase 3:** Paid authorised vendor (TrueData or Global Datafeeds) for live ticks, expired F&O options depth, and the licence to display raw data to users.
 
 ## Engine runs on backend, not Android
 
@@ -40,11 +43,11 @@ Android OS kills background processes. Backtesting on-device would require live 
 
 ## Docker Compose locally, Hetzner CX22 for production
 
-Local development: Docker Compose with TimescaleDB. Production: Hetzner CX22 (~€4/month), 2 vCPU, 4 GB RAM, 40 GB SSD. With TimescaleDB compression, 5 years of 1-min candles for all F&O instruments fits comfortably under 5 GB.
+Local development: Docker Compose with TimescaleDB; the deep 1-min broker backfill lives here, not on the VPS. Production: Hetzner CX22 (~€4/month), 2 vCPU, 4 GB RAM, 40 GB SSD, serving only licensed data (NSE EOD now, vendor later). With TimescaleDB compression, 5 years of 1-min candles for all F&O instruments fits comfortably under 5 GB.
 
-## Angel One historical import is a script, not a provider
+## Broker intraday backfill is local scripts, not providers
 
-Angel One is used once (or periodically manually) to seed historical intraday data. It does not need to implement MarketDataProvider — it is a standalone script in `scripts/`. This keeps the provider registry clean.
+Zerodha (deep one-time backfill) and AngelOne (ongoing top-up) seed historical intraday data into the **local** dev DB. They do not implement MarketDataProvider and never run on the VPS — they are standalone scripts in `scripts/` holding local DB credentials only. This keeps the provider registry clean and keeps personal-use broker data off production. See `docs/data-sourcing-policy.md`.
 
 ## Candle intervals: 1-min, 15-min, 1-hour, day, week, month
 
