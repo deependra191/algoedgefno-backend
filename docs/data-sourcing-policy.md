@@ -47,9 +47,13 @@ stats. So the rule is:
 > **Provenance determines rights.** Production may only serve data — *or
 > anything derived from it* — whose source licence permits commercial display.
 
-The `candles` table already tags every row with `provider`. That column is the
-enforcement handle: `provider = zerodha` / `angelone` is **never** user-facing,
-raw or derived.
+**The primary control is physical separation**, not row-level filtering. Broker
+data exists only in the owner's local PostgreSQL database. It is never restored,
+promoted, copied, synced, backed up, or imported into staging or production.
+Production rights do not depend on filtering a mixed dataset, because broker rows
+never enter a deployable database in the first place. The `candles.provider`
+column is **audit metadata** and at most optional defence-in-depth — never the
+primary guard.
 
 ---
 
@@ -67,6 +71,10 @@ The local dataset is a **validation oracle**: its numbers inform the owner's
 decisions only. Once a strategy is validated locally, it is **re-run in
 production against licensed data**, and *those* runs produce anything a user
 sees. Broker-sourced numbers never reach users — not even derived ones.
+
+**Staging counts as production for data rights.** Staging and production share one
+VPS, so broker-sourced rows are forbidden in staging exactly as in production.
+"Deployable" below means staging *and* production.
 
 ---
 
@@ -142,6 +150,15 @@ it. The sequencing is **Zerodha first** (the deep one-time history), **AngelOne
 second** (ongoing top-up once history exists), **vendor last** (Phase 3, when the
 product is proven and user-facing licensed data is required).
 
+**Code vs data.** The backfill *scripts* may live in `scripts/` (version-controlled,
+reproducible) — what is quarantined is the broker *data* and any staging/prod DB
+access, not the code. The tooling must take its DB connection from local config
+only, embed no credentials, and have no path to a staging or production database.
+It is personal R&D tooling, not deployable product code — so the
+`MarketDataProvider` interface requirement (CLAUDE.md rule 6) explicitly does
+**not** apply to it. That is an allowed exception precisely because the tooling is
+not part of the deployable backend; do not "promote" it into a registry provider.
+
 ---
 
 ## Instrument scope & resolution tiering
@@ -175,9 +192,13 @@ timeframes are resampled from 1-min on demand (SQL window functions), not stored
 separately — consistent with the existing intervals decision in `decisions.md`.
 
 **`provider` is a tag, not part of candle identity.** The primary key is
-`(instrument_id, ts, interval)`, so two sources for the same bar collide
-(last-writer-wins). The backfill must upsert/dedupe on that key, not write a
-duplicate row per provider.
+`(instrument_id, ts, interval)`. Storage inserts via `ON CONFLICT … DO NOTHING`
+(`InsertBatchIgnoreDuplicates`) — **first-writer-wins**, not last. Implications:
+backfill re-runs are idempotent and safe; correcting an already-stored bad candle
+needs an explicit delete + reinsert, not just a re-run; and there is **no**
+automatic provider override — if vendor and broker data are ever co-located (e.g.
+to compare sources), a later vendor write will *not* replace an earlier broker
+row, so a source-precedence plan is required before mixing.
 
 ---
 
@@ -243,8 +264,12 @@ workstreams, in dependency order:
    the deep history exists.
 4. **Coverage metadata** — queryable from `candles`, runs recorded in `sync_runs`.
    The fill engine depends on this.
-5. **Fill engine** — the lazy bar-magnifier above, coverage-driven. Depends on
-   data (2–3) and coverage (4) existing first.
+5. **Fill engine** — the lazy bar-magnifier above, coverage-driven. **Net-new
+   engine work:** today the backtest runner handles a single interval per run
+   (`intervalDuration` knows `1d` and `5m`; a signal-vs-`TradeCandles` seam exists
+   but no 1-min fill descent). This adds dual-resolution (coarse signal bar +
+   1-min fill window) and extends the interval vocabulary (`1m`, `15m`). Depends
+   on data (2–3) and coverage (4) existing first.
 
 **Sequencing reality:** production stays **daily-only for users** until the Phase
 3 vendor. Intraday validated locally cannot be served to users before then —
@@ -256,10 +281,14 @@ user-facing intraday feature.
 
 ## Operational guards
 
-- `provider`-tagged broker rows are never served to users (raw or derived).
-  Optionally, have prod refuse to serve non-licensed providers as belt-and-
-  suspenders; physical DB separation is the primary guarantee.
-- Backfill scripts: local creds only. No prod credentials in any R&D tooling.
+- Physical DB separation is the primary guarantee: broker rows never exist in a
+  deployable (staging or production) database. `provider`-tagged filtering is at
+  most optional defence-in-depth, never the control.
+- **Market-data promotion runbooks** (`docs/market-data-promotion.md`) must never
+  be run from a broker-data DB. They may promote only environment-neutral,
+  licensed/allowed datasets — never broker-sourced rows.
+- Backfill scripts: local DB connection only, no embedded credentials, no path to
+  any staging or production database.
 - Verify `nse_eod` production use stays within NSE's bhavcopy terms (it is served
   to users) — lean to derived outputs pre-vendor; raw display waits for the
   vendor licence.
