@@ -17,7 +17,8 @@ internal/services/          — orchestration layer (calls storage, providers, e
 internal/handlers/          — HTTP handlers (parse request, call service, write response; define local response DTOs)
 internal/routes/            — route registration (groups, middleware attachment)
 migrations/                 — numbered SQL files (0001_*.up.sql / 0001_*.down.sql)
-scripts/                    — one-off import scripts (e.g. Angel One historical dump)
+scripts/                    — deployable operational scripts (deploy/smoke/notify/monitoring/security); copied into the runtime image via Dockerfile
+local-rnd/                  — local-only R&D tooling (e.g. broker historical backfill); NOT copied into the image, never on the VPS — see docs/data-sourcing-policy.md
 docker/                     — docker-compose for local PostgreSQL + TimescaleDB
 ```
 
