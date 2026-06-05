@@ -6,11 +6,23 @@ implementation companion to `docs/data-sourcing-policy.md` — that doc is the
 *what & why* and the rights boundary; this one is the build plan.
 
 **Scope of this runbook:** policy-doc workstreams **1 (instrument model), 2
-(Zerodha deep backfill), 4 (coverage metadata)** — i.e. *fill the local DB and
-make coverage queryable*. **Out of scope** (separate later plans): workstream 3
-(AngelOne ongoing top-up) and workstream 5 (the net-new intraday **fill engine**).
-Strategies validate end-to-end on intraday fills only once workstream 5 lands;
-this runbook stops at "trustworthy 1-min data is in the DB and queryable."
+(Zerodha backfill), 4 (coverage metadata)** — *fill the local DB and make coverage
+queryable*. **Out of scope** (separate later plans): workstream 3 (AngelOne
+top-up) and the *full* workstream 5 fill engine.
+
+> **⚠️ Plan status — pivoted after the 2026-06-04 live probe.** The original
+> premise ("deep 1-min backfill for spot *and* futures") is **half dead**: Kite
+> serves **no intraday history for expired futures/options** (confirmed
+> exhaustively — see §2). The plan is now **three tracks**:
+> 1. **Spot 1-min deep backfill** (index + equity spot, 2018→) — works; §3. The
+>    cheap, deep asset: signal source, equity fills, and a basis-proxy option.
+> 2. **Current-futures forward validation** (§4a) — pull the *active* contract's
+>    ~3-month 1-min and capture forward, then validate intraday strategies on
+>    **real futures candles** over a shallow recent window. **The near-term action**,
+>    run in parallel with vendor quotes; de-risks the vendor spend.
+> 3. **Vendor for deep realistic futures/options intraday** (§8) — TrueData /
+>    GlobalDatafeeds. The *only* source of deep expired-contract intraday; gated on
+>    quotes and on whether track 2 shows edge worth paying for.
 
 **Non-negotiable constraints (from the policy doc, restated as build rules):**
 
@@ -186,6 +198,19 @@ today by the NSE EOD provider's near-month stitch.
 > intraday (spot-as-fill-proxy with basis, or validate on the forward-captured
 > window) is a workstream-5 methodology question — flagged, not solved here.
 
+> **Settled — do not re-litigate (researched 2026-06-04/05).** "Can we hack
+> per-contract 1-min for *expired* futures?" was investigated exhaustively and is a
+> confirmed dead end, three independent ways: (1) our probe — `continuous=1`+`minute`
+> 400s; (2) Zerodha staff, verbatim — *"We don't have intra-day data for expired
+> future instruments"* ([forum 1724](https://kite.trade/forum/discussion/1724)) — a
+> statement about **retention**, not access path; (3) a working OSS tool
+> ([`ashwanthkumar/kite-history`](https://github.com/ashwanthkumar/kite-history))
+> that builds 1-min index-options data is **forward-capture-only** and warns the
+> Kite API has no access to expired instruments. The `exchange_token × 256`
+> token-reconstruction idea is therefore moot: even with the right token, the minute
+> data isn't retained. Deep realistic futures/options intraday is **vendor-only**
+> (§8). Do not reopen this against Zerodha.
+
 **Micro-task — start a daily instruments-dump snapshot now (free, high-leverage).**
 Kite's `/instruments` CSV lists only *currently-tradeable* contracts; once a
 contract expires, its `instrument_token` is dropped and becomes undiscoverable
@@ -330,6 +355,63 @@ explicitly **out of scope here**.
 
 ---
 
+## 4a. Parallel track — validate strategies on CURRENT futures (real candles, while vendor quotes land)
+
+**The near-term action.** Deep historical futures intraday is vendor-only, but the
+*currently listed* contract's 1-min **is** available now (probe: NIFTY fut token
+served a 375-bar session on 2026-05-05). So we can start validating intraday strategies on **real
+trade candles of the instrument we'd actually trade** — over a shallow, recent
+window — without waiting for, or pre-paying, a vendor.
+
+**Why do it now (not just kill time):**
+
+- **De-risks the vendor spend.** If strategies show *no edge* even on real recent
+  futures candles, you learned it for ~free *before* signing a vendor contract.
+  Negative evidence is cheapest here.
+- **Real fills, not a proxy** — the realistic trade candles that matter, on the
+  actual fill instrument.
+- **Builds the forward-capture pipeline you need anyway** — your own growing 1-min
+  futures dataset, vendor outcome notwithstanding.
+
+**What's actually available (be clear-eyed):** the current near-month future has
+1-min only from its listing (~**3 months**, growing as you capture forward).
+Shallow and **regime-specific** — low trade count, one regime, near-month only. So
+treat results as **directional (edge / no-edge), not proof**. Use it mainly to
+**kill losers cheaply** and shortlist what's worth re-validating on deep vendor
+history later. A strategy looking *good* on 3 months of 2026 data is weak positive
+evidence; looking *bad* is strong negative evidence.
+
+**The engine work is a bounded slice, not full workstream 5.** Crucial point: you
+have **complete 1-min coverage** for the current-futures window, so you do **not**
+need the coverage-driven lazy-bar-magnifier (that exists only for *partial*
+coverage). The engine's exit loop already checks fills **bar-by-bar on the trade
+candles** (`checkExitConditions` in `internal/engine/backtest.go`), so feeding it
+1-min trade candles yields **1-min fill accuracy for free**. What's actually needed:
+
+- **Interval vocabulary:** add `1m`/`15m` to `models.CandleInterval`,
+  `intervalDuration` (`internal/engine/backtest.go`), and
+  `ValidateStrategySourceIntervals` (`internal/models/strategy_sources.go`) — all
+  `1d`/`5m` / `1d`-only today.
+- **Dual-resolution fetch:** signals on 15-min (resampled from 1-min, SQL window
+  functions — or stored), fills on 1-min. `BacktestService.fetchEngineInputs`
+  currently fetches both sides at one interval; this splits them.
+
+The full lazy-descent + pessimistic-fallback machinery stays deferred to
+workstream 5; it only earns its keep once coverage is partial (post-vendor mixed
+data, deferred options).
+
+**Track shape:**
+
+1. **Capture tool** (`local-rnd/`): pull the active contract's existing ~3-month
+   1-min + a daily forward append (reuses the PR #136 Kite client). Stitch a rolling
+   continuous series onto the `-FUTCONT` instrument as contracts roll.
+2. **Engine slice:** the interval-vocab + dual-resolution change above.
+3. **Validate:** run the strategies; read edge / no-edge.
+4. **In parallel:** vendor quotes arrive (§8). Promising on recent real data →
+   justifies vendor depth; flat/negative → you saved the spend.
+
+---
+
 ## 5. Rights & safety guardrails (enforced during this work)
 
 - **Mechanical local-only guard — required in PR A, before any broker request or
@@ -379,38 +461,53 @@ Data correctness (spot-check after a sample window, e.g. NIFTY spot, one week):
 Target branch per rule 23: the data-sourcing policy doc is already merged to
 `dev`, so these implementation PRs target **`dev`**; a human merges (rule 26).
 
-0. **PR P — live probe (read-only, the empirical gate).** `local-rnd/kite-probe`
-   + token helper. **No DB, no inserts.** Run it, capture the findings (§1a), and
-   reconcile §2/§9 with reality **before** building the backfill. Everything below
-   is provisional until this lands.
+0. **PR P — live probe (read-only).** ✅ Done — PR #136. `local-rnd/kite-probe` +
+   token helper; findings recorded in §1a/§9. This pivoted the plan below.
 1. **PR A — scaffold & boundary.** `local-rnd/` skeleton, `.dockerignore` entry,
    `.go-arch-lint.yml` `local_rnd` component, the **mechanical local-only DB guard**
-   (§5), Kite client skeleton + env wiring, `CandleInterval1M` constant, README
-   documenting the daily-token step. No bulk data pull yet (the probe, PR P, already
-   established the data shapes).
-2. **PR B — spot 1-min backfill.** Index spot + equity spot (liquid subset first),
-   2020→today at `minute`. Run it; verify coverage (§4) and the §6 checklist. This
-   is the deep-1-min deliverable.
-3. **PR C — futures daily + forward 1-min capture.** Index/equity futures *daily*
-   history via `continuous=1` onto the `-FUTCONT` instruments, plus a forward-running
-   capture of active-contract **minute** data to start building a real 1-min futures
-   series over time. (Deep 1-min futures history is not backfillable — §2.)
+   (§5), Kite client wiring (reuse #136's), `CandleInterval1M`/`15M` constants,
+   README documenting the daily-token step.
+2. **PR B — current-futures forward validation (§4a) — *do this next*.** The
+   capture tool (active contract ~3-month 1-min + daily forward append) **and** the
+   bounded engine slice (interval vocab + dual-resolution fetch). Validate strategies
+   on real recent futures candles. This is what de-risks the vendor decision, so it
+   leads.
+3. **PR C — spot 1-min backfill.** Index spot + equity spot (liquid subset first),
+   2018→today at `minute`. The deep cheap asset (signals + equity fills +
+   basis-proxy). Verify coverage (§4) and the §6 checklist. Independent of B; can
+   run whenever.
+4. **(Not a PR) — vendor for deep futures/options intraday.** §8. Pursue quotes in
+   parallel; integration is a separate effort gated on the §4a edge read.
 
 ---
 
 ## 8. Out of scope — explicit handoffs
 
+- **Data vendor — deep realistic futures/options intraday (the real unblock).**
+  TrueData / GlobalDatafeeds are the **only** source of deep *expired-contract*
+  intraday (Zerodha cannot — §2). Two licences, kept distinct (mirrors the policy
+  doc's rights matrix):
+  - **Personal / non-display** — cheap-ish monthly, for the owner's own validation
+    & trading. Not free (the vendor pays NSE regardless of your revenue), but small.
+  - **Commercial redistribution / display** — to show data to app users. Priced
+    **per active user** (NSE sets display-fee structures the vendor passes through),
+    so negotiate **low/zero minimum until a user threshold, then per-user** — the
+    "pay as I earn" model. Confirm an upgrade path personal→display without
+    re-integration.
+  - **Gate:** confirm the vendor actually holds deep expired-contract intraday
+    *before* trialing; then take **your own** trial (never someone else's — ToS +
+    the rights discipline this whole project rests on). Spend gated on the §4a edge
+    read.
 - **Workstream 3 — AngelOne ongoing top-up.** Free recent-intraday append to keep
-  the local DB current once the deep Zerodha history exists. Its own small plan;
-  same `local-rnd/` home, same `InsertBatchIgnoreDuplicates` idempotency.
-- **Workstream 5 — intraday fill engine (the net-new engine work).** Required
-  before strategies validate intraday *end-to-end*. It needs: interval vocabulary
-  beyond data (`intervalDuration` in `internal/engine/backtest.go` and
-  `ValidateStrategySourceIntervals` in `internal/models/strategy_sources.go` today
-  accept only `1d`/`5m` / `1d`), the lazy bar-magnifier with 1-min fill descent,
-  the pessimistic-fallback rule, and the pessimistic-fallback counter. Track as a
-  separate `plan-critical` effort — it changes `internal/engine`, which this
-  runbook deliberately does not touch.
+  the local DB current. Same `local-rnd/` home, same `InsertBatchIgnoreDuplicates`
+  idempotency. Overlaps with the §4a forward-capture pipeline.
+- **Workstream 5 — *full* intraday fill engine.** The **bounded slice** (interval
+  vocab + dual-resolution fetch) is pulled forward into §4a/PR B, because
+  current-futures has complete 1-min coverage. What stays deferred to a separate
+  `plan-critical` effort is the machinery only *partial* coverage needs: the lazy
+  bar-magnifier with 1-min fill descent, the pessimistic-fallback rule, and the
+  pessimistic-fallback counter (relevant once mixed/vendor data and deferred options
+  arrive). It changes `internal/engine` more deeply than §4a's slice.
   - **Futures rolls & charges (parked here deliberately).** Intraday strategies
     never hold across an expiry, so no roll cost applies and the existing per-trade
     charge stack (`internal/engine/charges.go`) is already correct — continuous is
@@ -448,5 +545,13 @@ Target branch per rule 23: the data-sourcing policy doc is already merged to
   per-contract token archive, broker contract notes/reference prices, or another
   licensed/raw source before relying on absolute roll-window prices in the engine.
 - **OPEN for non-NIFTY instruments:** confirm BANKNIFTY, FINNIFTY, and selected
-  equity spot history depth during PR B sample runs. The NIFTY spot finding is
-  strong evidence for index spot, not a blanket proof for every instrument.
+  equity spot history depth during sample runs. The NIFTY spot finding is strong
+  evidence for index spot, not a blanket proof for every instrument.
+- **RESOLVED (definitive):** Zerodha retains **no intraday data for expired
+  futures or options**, by any access path or token — confirmed via staff statement
+  and a forward-capture-only OSS tool (see §2). Deep realistic futures/options
+  intraday is **vendor-only**. Closed; do not reopen against Zerodha.
+- **OPEN (pending vendor quotes):** does the chosen vendor actually hold deep
+  expired-contract 1-min (index + stock F&O), how far back, and at what
+  personal-vs-display price? This is the gating question for track 3 (§8) — confirm
+  before any trial or spend.
