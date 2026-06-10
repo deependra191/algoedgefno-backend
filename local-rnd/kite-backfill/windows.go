@@ -31,6 +31,11 @@ func sessionRange(fromDate, toDate time.Time, loc *time.Location) (time.Time, ti
 	return withClock(fromDate, marketSessionOpen, loc), withClock(toDate, marketSessionClose, loc)
 }
 
+func fullDayRange(fromDate, toDate time.Time, loc *time.Location) (time.Time, time.Time) {
+	return time.Date(fromDate.Year(), fromDate.Month(), fromDate.Day(), 0, 0, 0, 0, loc),
+		time.Date(toDate.Year(), toDate.Month(), toDate.Day(), 23, 59, 59, 0, loc)
+}
+
 func withClock(day time.Time, clock string, loc *time.Location) time.Time {
 	parts := strings.Split(clock, ":")
 	hour, _ := strconv.Atoi(parts[0])

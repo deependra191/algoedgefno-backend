@@ -31,12 +31,17 @@ type importer struct {
 
 func (i importer) importTargets(ctx context.Context, targets []importTarget) (int64, error) {
 	var totalInserted int64
-	for _, target := range targets {
+	for idx, target := range targets {
 		inserted, err := i.importTarget(ctx, target)
 		if err != nil {
 			return totalInserted, err
 		}
 		totalInserted += inserted
+		if idx < len(targets)-1 {
+			if err := sleepContext(ctx, i.opts.delay); err != nil {
+				return totalInserted, err
+			}
+		}
 	}
 	return totalInserted, nil
 }
@@ -88,13 +93,13 @@ func (i importer) replaceTarget(ctx context.Context, target importTarget) (int64
 
 func (i importer) fetchAndInsertTarget(ctx context.Context, target importTarget) (int64, error) {
 	var insertedTotal int64
-	windows := splitDateWindows(i.opts.fromDate, i.opts.toDate)
+	windows := i.dateWindows()
 	for idx, window := range windows {
-		from, to := sessionRange(window.FromDate, window.ToDate, i.opts.intradayLocation)
+		from, to := i.requestRange(window.FromDate, window.ToDate)
 		fetchCtx, fetchCancel := context.WithTimeout(ctx, i.opts.timeout)
 		result, err := i.client.FetchHistorical(fetchCtx, kite.HistoricalRequest{
 			InstrumentToken: target.KiteInstrument.InstrumentToken,
-			Interval:        kite.IntervalMinute,
+			Interval:        i.kiteInterval(),
 			From:            from,
 			To:              to,
 		})
@@ -107,7 +112,7 @@ func (i importer) fetchAndInsertTarget(ctx context.Context, target importTarget)
 			return insertedTotal, fmt.Errorf("fetch %s %s to %s: %w",
 				target.RequestedSymbol, window.FromDate.Format(dateLayout), window.ToDate.Format(dateLayout), err)
 		}
-		candles := kiteCandlesToModels(target.ModelInstrument.ID, result.Candles)
+		candles := kiteCandlesToModels(target.ModelInstrument.ID, i.modelInterval(), i.opts.intradayLocation, result.Candles)
 		insertCtx, insertCancel := context.WithTimeout(ctx, i.opts.timeout)
 		inserted, err := i.candles.InsertBatchIgnoreDuplicates(insertCtx, candles)
 		insertCancel()
@@ -125,13 +130,41 @@ func (i importer) fetchAndInsertTarget(ctx context.Context, target importTarget)
 }
 
 func (i importer) candleFilter(target importTarget) models.CandleFilter {
-	from, to := sessionRange(i.opts.fromDate, i.opts.toDate, i.opts.intradayLocation)
+	from, to := i.requestRange(i.opts.fromDate, i.opts.toDate)
 	return models.CandleFilter{
 		InstrumentID: target.ModelInstrument.ID,
 		From:         from,
 		To:           to,
-		Interval:     models.CandleInterval1M,
+		Interval:     i.modelInterval(),
 	}
+}
+
+func (i importer) dateWindows() []dateWindow {
+	if i.opts.daily {
+		return []dateWindow{{FromDate: i.opts.fromDate, ToDate: i.opts.toDate}}
+	}
+	return splitDateWindows(i.opts.fromDate, i.opts.toDate)
+}
+
+func (i importer) requestRange(fromDate, toDate time.Time) (time.Time, time.Time) {
+	if i.opts.daily {
+		return fullDayRange(fromDate, toDate, i.opts.intradayLocation)
+	}
+	return sessionRange(fromDate, toDate, i.opts.intradayLocation)
+}
+
+func (i importer) kiteInterval() string {
+	if i.opts.daily {
+		return kite.IntervalDay
+	}
+	return kite.IntervalMinute
+}
+
+func (i importer) modelInterval() string {
+	if i.opts.daily {
+		return models.CandleInterval1D
+	}
+	return models.CandleInterval1M
 }
 
 func validateHistoricalResult(result *kite.HistoricalResult) error {
@@ -149,13 +182,13 @@ func validateHistoricalResult(result *kite.HistoricalResult) error {
 	return nil
 }
 
-func kiteCandlesToModels(instrumentID uuid.UUID, candles []kite.Candle) []models.Candle {
+func kiteCandlesToModels(instrumentID uuid.UUID, interval string, loc *time.Location, candles []kite.Candle) []models.Candle {
 	result := make([]models.Candle, 0, len(candles))
 	for _, candle := range candles {
 		result = append(result, models.Candle{
 			InstrumentID: instrumentID,
-			Timestamp:    candle.Timestamp.UTC(),
-			Interval:     models.CandleInterval1M,
+			Timestamp:    modelCandleTimestamp(candle.Timestamp, interval, loc),
+			Interval:     interval,
 			Open:         candle.Open,
 			High:         candle.High,
 			Low:          candle.Low,
@@ -165,6 +198,14 @@ func kiteCandlesToModels(instrumentID uuid.UUID, candles []kite.Candle) []models
 		})
 	}
 	return result
+}
+
+func modelCandleTimestamp(ts time.Time, interval string, loc *time.Location) time.Time {
+	if interval != models.CandleInterval1D {
+		return ts.UTC()
+	}
+	localDate := ts.In(loc)
+	return time.Date(localDate.Year(), localDate.Month(), localDate.Day(), 0, 0, 0, 0, time.UTC)
 }
 
 func sleepContext(ctx context.Context, delay time.Duration) error {

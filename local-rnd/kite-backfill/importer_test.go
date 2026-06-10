@@ -120,3 +120,76 @@ func TestImporterImportsFixtureKiteCandlesWithoutNetwork(t *testing.T) {
 		t.Fatalf("timestamp = %s, want %s", first.Timestamp, kiteTimestamp.UTC())
 	}
 }
+
+func TestImporterDailyModeFetchesDayCandlesWithoutWindowing(t *testing.T) {
+	loc, err := time.LoadLocation(istLocationName)
+	if err != nil {
+		t.Fatalf("load IST: %v", err)
+	}
+	instrumentID := uuid.New()
+	kiteTimestamp := time.Date(2018, 1, 2, 0, 0, 0, 0, loc)
+	client := &fakeHistoricalClient{
+		result: &kite.HistoricalResult{
+			HTTPStatus: http.StatusOK,
+			APIStatus:  kite.APIStatusSuccess,
+			Candles: []kite.Candle{
+				{Timestamp: kiteTimestamp, Open: 100, High: 101, Low: 99, Close: 100.5, Volume: 10},
+			},
+		},
+	}
+	store := &fakeCandleStore{}
+	runner := importer{
+		client:  client,
+		candles: store,
+		opts: options{
+			fromDate:         time.Date(2018, 1, 1, 0, 0, 0, 0, loc),
+			toDate:           time.Date(2023, 12, 31, 0, 0, 0, 0, loc),
+			delay:            0,
+			timeout:          time.Second,
+			daily:            true,
+			intradayLocation: loc,
+		},
+		runID: uuid.New(),
+	}
+	target := importTarget{
+		RequestedSymbol: "RELIANCE",
+		KiteInstrument: kite.Instrument{
+			InstrumentToken: "738561",
+			TradingSymbol:   "RELIANCE",
+			Exchange:        kite.ExchangeNSE,
+		},
+		ModelInstrument: models.Instrument{
+			ID:       instrumentID,
+			Symbol:   "RELIANCE",
+			Exchange: models.ExchangeNSE,
+		},
+	}
+
+	inserted, err := runner.importTargets(context.Background(), []importTarget{target})
+	if err != nil {
+		t.Fatalf("import targets: %v", err)
+	}
+	if inserted != 1 {
+		t.Fatalf("inserted = %d, want 1", inserted)
+	}
+	if len(client.requests) != 1 {
+		t.Fatalf("expected 1 historical request, got %d", len(client.requests))
+	}
+	req := client.requests[0]
+	if req.Interval != kite.IntervalDay {
+		t.Fatalf("request interval = %s", req.Interval)
+	}
+	if req.From.Format(dateTimeLayout) != "2018-01-01 00:00:00" || req.To.Format(dateTimeLayout) != "2023-12-31 23:59:59" {
+		t.Fatalf("request range = %s to %s", req.From.Format(dateTimeLayout), req.To.Format(dateTimeLayout))
+	}
+	if len(store.inserted) != 1 {
+		t.Fatalf("stored candles = %d, want 1", len(store.inserted))
+	}
+	if store.inserted[0].Interval != models.CandleInterval1D {
+		t.Fatalf("interval = %s", store.inserted[0].Interval)
+	}
+	expectedTimestamp := time.Date(2018, 1, 2, 0, 0, 0, 0, time.UTC)
+	if !store.inserted[0].Timestamp.Equal(expectedTimestamp) {
+		t.Fatalf("timestamp = %s, want %s", store.inserted[0].Timestamp, expectedTimestamp)
+	}
+}

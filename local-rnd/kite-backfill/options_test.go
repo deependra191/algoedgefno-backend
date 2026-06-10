@@ -25,3 +25,10 @@ func TestParseOptions_ReplaceRequiresReason(t *testing.T) {
 		t.Fatal("expected -replace without reason to fail")
 	}
 }
+
+func TestParseOptions_DailyRejectsCurrentFNO(t *testing.T) {
+	now := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	if _, err := parseOptions([]string{"-daily", "-current-fno", "NIFTY26JUNFUT"}, now); err == nil {
+		t.Fatal("expected -daily with -current-fno to fail")
+	}
+}

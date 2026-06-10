@@ -2,9 +2,10 @@
 
 Local-only Zerodha Kite intraday importer for strategy validation.
 
-This command imports Kite `minute` candles as repo interval `1m` with provider
-`zerodha_kite`. It does not import Kite `day` candles. Daily `1d` data remains
-owned by the existing `nse_eod` sync.
+By default this command imports Kite `minute` candles as repo interval `1m` with
+provider `zerodha_kite`. It also has an explicit `-daily` fallback mode that
+imports Kite `day` candles as repo interval `1d` for older daily history where
+the NSE bhavcopy parser does not cover the source format.
 
 ## Clean Session Setup
 
@@ -98,6 +99,26 @@ The command fetches `minute` candles in 60-calendar-day windows and stores them
 as `1m`. Re-running the same command is idempotent: existing
 `(instrument_id, ts, interval)` rows are skipped.
 
+## Run Daily Fallback Backfill
+
+Use `-daily` only for spot/index/equity daily fallback history. It is intended
+for ranges such as `2018-01-01` through `2023-12-31`, where Kite `day` candles
+fill the local research DB because the NSE bhavcopy parser covers the newer
+format only.
+
+```bash
+go run ./local-rnd/kite-backfill \
+  -symbols 'NIFTY 50,NIFTY BANK,RELIANCE,HDFCBANK,INFY,TCS,ICICIBANK' \
+  -from 2018-01-01 \
+  -to 2023-12-31 \
+  -daily
+```
+
+Daily mode sends one Kite `day` request per symbol for the full date range and
+stores rows as `1d`. Daily candle timestamps are normalized to UTC midnight for
+the Kite trading date so they line up with existing `1d` candles. It cannot be
+combined with `-current-fno`.
+
 ## Run Current F&O Backfill
 
 Only currently listed Kite futures contracts can be imported. Expired intraday
@@ -159,10 +180,10 @@ GROUP BY i.exchange, i.symbol, c.interval
 ORDER BY i.exchange, i.symbol, c.interval;
 ```
 
-Confirm no Zerodha daily candles were inserted:
+Count Zerodha daily fallback rows:
 
 ```sql
-SELECT COUNT(*) AS zerodha_daily_rows
+SELECT COUNT(*) AS zerodha_daily_fallback_rows
 FROM candles
 WHERE provider = 'zerodha_kite' AND interval = '1d';
 ```
