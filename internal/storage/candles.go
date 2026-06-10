@@ -103,6 +103,20 @@ func (s *CandleStore) InsertBatchIgnoreDuplicates(ctx context.Context, candles [
 	return tag.RowsAffected(), nil
 }
 
+// DeleteRange removes candles for one instrument, interval, and inclusive
+// timestamp range. It returns the number of rows deleted.
+func (s *CandleStore) DeleteRange(ctx context.Context, filter models.CandleFilter) (int64, error) {
+	tag, err := s.pool.Exec(ctx, `
+		DELETE FROM candles
+		WHERE instrument_id = $1 AND interval = $2 AND ts >= $3 AND ts <= $4`,
+		filter.InstrumentID, filter.Interval, filter.From, filter.To,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
 // LastSyncedDate returns the most recent candle date for a given provider.
 // Returns a zero time.Time if no candles exist yet for that provider.
 func (s *CandleStore) LastSyncedDate(ctx context.Context, provider string) (time.Time, error) {

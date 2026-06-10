@@ -53,6 +53,10 @@ const (
 )
 
 const (
+	APIStatusSuccess = "success"
+)
+
+const (
 	JSONFieldStatus      = "status"
 	JSONFieldData        = "data"
 	JSONFieldCandles     = "candles"
@@ -82,6 +86,7 @@ const (
 
 	InstrumentTypeFuture = "FUT"
 	InstrumentTypeIndex  = "INDEX"
+	InstrumentTypeEquity = "EQ"
 
 	SegmentNFOFutures = "NFO-FUT"
 )

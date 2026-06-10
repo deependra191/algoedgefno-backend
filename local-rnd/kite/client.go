@@ -107,7 +107,7 @@ func ExchangeRequestToken(ctx context.Context, creds Credentials, requestToken s
 	if err := json.Unmarshal(body, &decoded); err != nil {
 		return "", fmt.Errorf("parse token response: %w", err)
 	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices || decoded.Status != "success" {
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices || decoded.Status != APIStatusSuccess {
 		return "", fmt.Errorf("token exchange failed: HTTP %d status=%s error_type=%s message=%s",
 			resp.StatusCode, decoded.Status, decoded.ErrorType, decoded.Message)
 	}
@@ -243,32 +243,39 @@ type Instrument struct {
 
 // Instruments retrieves the current Kite instruments CSV dump.
 func (c *Client) Instruments(ctx context.Context) ([]Instrument, string, error) {
+	instruments, body, err := c.InstrumentDump(ctx)
+	return instruments, previewBody(body), err
+}
+
+// InstrumentDump retrieves and parses the current Kite instruments CSV dump,
+// returning the raw CSV bytes so local tools can snapshot the exact token list.
+func (c *Client) InstrumentDump(ctx context.Context) ([]Instrument, []byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+endpointInstruments, nil)
 	if err != nil {
-		return nil, "", fmt.Errorf("build instruments request: %w", err)
+		return nil, nil, fmt.Errorf("build instruments request: %w", err)
 	}
 	c.setAuthHeaders(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, "", fmt.Errorf("instruments request failed: %w", err)
+		return nil, nil, fmt.Errorf("instruments request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, "", fmt.Errorf("read instruments response: %w", err)
+		return nil, nil, fmt.Errorf("read instruments response: %w", err)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, previewBody(body), fmt.Errorf("instruments request returned HTTP %d", resp.StatusCode)
+		return nil, body, fmt.Errorf("instruments request returned HTTP %d", resp.StatusCode)
 	}
 
 	rows, err := csv.NewReader(bytes.NewReader(body)).ReadAll()
 	if err != nil {
-		return nil, previewBody(body), fmt.Errorf("parse instruments CSV: %w", err)
+		return nil, body, fmt.Errorf("parse instruments CSV: %w", err)
 	}
 	if len(rows) == 0 {
-		return nil, previewBody(body), errors.New("instruments CSV was empty")
+		return nil, body, errors.New("instruments CSV was empty")
 	}
 
 	header := mapCSVHeader(rows[0])
@@ -289,7 +296,7 @@ func (c *Client) Instruments(ctx context.Context) ([]Instrument, string, error) 
 			Exchange:        csvValue(header, row, CSVColumnExchange),
 		})
 	}
-	return instruments, previewBody(body), nil
+	return instruments, body, nil
 }
 
 // FindByExchangeSymbol returns the current instrument row for an exchange/tradingsymbol pair.

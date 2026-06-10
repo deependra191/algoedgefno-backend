@@ -631,6 +631,16 @@ func TestRunBacktest_DailyIntervalDoesNotInferWeekendGap(t *testing.T) {
 	}
 }
 
+func TestIntervalDuration_OneMinute(t *testing.T) {
+	got, err := intervalDuration(models.CandleInterval1M)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != time.Minute {
+		t.Fatalf("intervalDuration(%q) = %s, want %s", models.CandleInterval1M, got, time.Minute)
+	}
+}
+
 // TestRunBacktest_AppliesCharges drives the engine with the real IndianRetailCharges
 // calculator and asserts that charges are deducted from the per-trade and aggregate
 // NetPnL. Uses a small OPTIDX BUY round-trip so STT/stamp leg mapping has to be right.

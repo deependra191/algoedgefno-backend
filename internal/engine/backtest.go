@@ -16,6 +16,7 @@ const (
 	ExitReasonEndOfData      = "end_of_data"
 
 	candleInterval1DDuration = 24 * time.Hour
+	candleInterval1MDuration = time.Minute
 	candleInterval5MDuration = 5 * time.Minute
 	errMsgUnknownInterval    = "unknown candle interval"
 )
@@ -181,6 +182,8 @@ func intervalDuration(interval string) (time.Duration, error) {
 	switch interval {
 	case models.CandleInterval1D:
 		return candleInterval1DDuration, nil
+	case models.CandleInterval1M:
+		return candleInterval1MDuration, nil
 	case models.CandleInterval5M:
 		return candleInterval5MDuration, nil
 	default:

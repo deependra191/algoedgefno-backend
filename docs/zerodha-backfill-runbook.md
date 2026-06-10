@@ -5,6 +5,9 @@ so strategies can start being validated against real intraday data. This is the
 implementation companion to `docs/data-sourcing-policy.md` — that doc is the
 *what & why* and the rights boundary; this one is the build plan.
 
+For the implemented clean-session operator flow, use
+`local-rnd/kite-backfill/README.md`.
+
 **Scope of this runbook:** policy-doc workstreams **1 (instrument model), 2
 (Zerodha backfill), 4 (coverage metadata)** — *fill the local DB and make coverage
 queryable*. **Out of scope** (separate later plans): workstream 3 (AngelOne

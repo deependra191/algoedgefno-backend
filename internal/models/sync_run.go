@@ -35,7 +35,9 @@ type SyncRunRepository interface {
 	Complete(ctx context.Context, id uuid.UUID, status string, records int, errMsg *string) error
 }
 
-// SyncTypeFull is the only sync type currently implemented — a complete bhavcopy
-// download covering all instruments and candles for a given day.
-// An incremental type may be added if NSE exposes delta feeds in future.
+// SyncTypeFull records a complete provider sync for the selected scope.
 const SyncTypeFull = "full"
+
+// SyncTypeReplace records an explicit correction run that deletes and reloads a
+// scoped provider/date/interval range after first backing up existing rows.
+const SyncTypeReplace = "replace"

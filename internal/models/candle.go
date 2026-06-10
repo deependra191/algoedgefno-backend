@@ -10,6 +10,7 @@ import (
 // CandleInterval constants for supported OHLCV bar resolutions.
 const (
 	CandleInterval1D = "1d"
+	CandleInterval1M = "1m"
 	CandleInterval5M = "5m"
 )
 
