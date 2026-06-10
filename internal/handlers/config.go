@@ -6,6 +6,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const (
+	navTabRouteStrategies = "strategies"
+	navTabRouteBacktest   = "backtest"
+	navTabIconStrategies  = "strategies"
+	navTabIconBacktest    = "backtest"
+)
+
 // NavTab is a single bottom-navigation entry delivered to the Android client.
 type NavTab struct {
 	Route   string `json:"route"`
@@ -16,11 +23,8 @@ type NavTab struct {
 // Dynamic or user-specific configuration must move behind authenticated routes.
 func AppConfig(c *gin.Context) {
 	tabs := []NavTab{
-		{Route: "home", IconKey: "home"},
-		{Route: "scanner", IconKey: "scanner"},
-		{Route: "strategies", IconKey: "strategies"},
-		{Route: "backtest", IconKey: "backtest"},
-		{Route: "profile", IconKey: "profile"},
+		{Route: navTabRouteStrategies, IconKey: navTabIconStrategies},
+		{Route: navTabRouteBacktest, IconKey: navTabIconBacktest},
 	}
 
 	c.JSON(http.StatusOK, gin.H{

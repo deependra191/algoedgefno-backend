@@ -80,7 +80,12 @@ Body: { "refreshToken": "<43-char-base64url>" }
 
 ```
 GET /api/v1/config/app
-→ { "navTabs": [{ "route": "...", "iconKey": "..." }, ...] }
+→ {
+    "navTabs": [
+      { "route": "strategies", "iconKey": "strategies" },
+      { "route": "backtest", "iconKey": "backtest" }
+    ]
+  }
 ```
 
 ## Docker Compose
