@@ -8,17 +8,19 @@
 - Engine: indicators (SMA, EMA, RSI, Supertrend), evaluator, backtest runner
 - API: instrument/candle queries, strategy CRUD, backtest submit/results
 
-## Phase 2 — Angel One historical dump
+## Phase 2 — Broker intraday backfill (local R&D only)
 
-- One-off script: pull recent intraday history from Angel One API, insert into candles
-- NOT a built-in provider — just a data seeding tool in `scripts/`
-- Enables intraday (1-min, 15-min) backtesting on recent data
+- Zerodha Kite Connect: one-off deep 1-min history backfill (one paid month, paginated 60-day windows back to ~2020)
+- AngelOne SmartAPI: ongoing free intraday top-up of recent candles
+- Standalone scripts in a local-only repo path outside `scripts/` (the prod Dockerfile ships `scripts/` into the image) — NOT built-in providers; local dev DB only, never in the deployable image (broker data is personal-use)
+- Enables 1-min/15-min intraday backtesting for futures and spot; see `docs/data-sourcing-policy.md`
 
 ## Phase 3 — Vendor trial (TrueData or Global Datafeeds)
 
 - Evaluate: expired F&O options data depth, intraday coverage, query model
 - Implement VendorProvider (replaces stub in `internal/providers/vendor/`)
 - Live tick streaming: vendor → backend → Android via SSE or WebSocket
+- Authorised-vendor licence unlocks raw data display to users (charts, quotes) and expired-F&O options data brokers cannot supply
 - Watchlist feature goes live on Android
 - Paper trading becomes possible
 
