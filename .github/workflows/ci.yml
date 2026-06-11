@@ -10,12 +10,17 @@ name: CI
 # pass/fail whether the heavy `ci` job ran or was skipped for a docs-only PR.
 on:
   pull_request:
+    # `closed` is included so merging/closing a PR enqueues a fast run in the
+    # same PR concurrency group, cancelling any stale CI still in flight.
+    # The other types are the defaults, restated because specifying `types`
+    # would otherwise drop them.
+    types: [opened, synchronize, reopened, closed]
     branches:
       - dev
       - main
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 permissions:
@@ -29,13 +34,20 @@ jobs:
   changes:
     runs-on: ubuntu-24.04
     outputs:
-      code: ${{ steps.filter.outputs.code }}
+      code: ${{ steps.closed.outputs.code || steps.filter.outputs.code }}
     steps:
+      - id: closed
+        name: Skip code detection on PR close
+        if: github.event.action == 'closed'
+        run: echo "code=false" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
+        if: github.event.action != 'closed'
         with:
           fetch-depth: 0
       - id: filter
         name: Detect non-markdown changes
+        if: github.event.action != 'closed'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
