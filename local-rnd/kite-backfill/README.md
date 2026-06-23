@@ -47,6 +47,9 @@ AUTO_MIGRATE=true go run ./cmd/server
 
 ## Kite Token Setup
 
+All commands in this section must be run from the repo root (the directory
+containing `go.mod`). If you are using a git worktree, `cd` into it first.
+
 Export the Kite app credentials locally:
 
 ```bash
@@ -61,7 +64,20 @@ printf 'https://kite.zerodha.com/connect/login?v=3&api_key=%s\n' "$KITE_API_KEY"
 ```
 
 After login, Zerodha redirects to your configured redirect URL with a
-`request_token` query parameter. Exchange only that request token:
+`request_token` query parameter. Exchange only that request token.
+
+On **zsh** (macOS default):
+
+```zsh
+read -rs "REQUEST_TOKEN?Kite request_token: "; echo
+go run ./local-rnd/kite-token \
+  -request-token "$REQUEST_TOKEN" \
+  -out /private/tmp/kite-access-token.env
+unset REQUEST_TOKEN
+source /private/tmp/kite-access-token.env
+```
+
+On **bash**:
 
 ```bash
 read -rsp 'Kite request_token: ' REQUEST_TOKEN; echo
@@ -131,6 +147,24 @@ go run ./local-rnd/kite-backfill \
   -to "$(TZ=Asia/Kolkata date +%F)" \
   -delay 350ms
 ```
+
+## Run Current Options Backfill
+
+Only currently listed (non-expired) Kite options contracts can be imported.
+Pass the exact Kite trading symbols — the format is `<UNDERLYING><YYMONDD><STRIKE><CE|PE>`,
+for example `NIFTY26JUN24000CE` or `BANKNIFTY26JUN53000PE`.
+
+```bash
+go run ./local-rnd/kite-backfill \
+  -current-options 'NIFTY26JUN24000CE,NIFTY26JUN24000PE,BANKNIFTY26JUN53000CE,BANKNIFTY26JUN53000PE' \
+  -from 2026-06-01 \
+  -to "$(TZ=Asia/Kolkata date +%F)" \
+  -delay 350ms
+```
+
+The importer resolves each symbol in the live Kite instruments dump, validates
+it is CE or PE in NFO-OPT segment and has not expired, then stores rows as `1m`
+candles. Re-running is idempotent. Cannot be combined with `-daily`.
 
 Each run snapshots the current Kite `/instruments` CSV under
 `/private/tmp/kite-backfill-instruments/` so current contract tokens are

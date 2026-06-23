@@ -10,6 +10,7 @@ import (
 type options struct {
 	symbols          []string
 	currentFNO       []string
+	currentOptions   []string
 	symbolsExplicit  bool
 	fromDate         time.Time
 	toDate           time.Time
@@ -32,6 +33,7 @@ func parseOptions(args []string, now time.Time) (options, error) {
 	fs := flag.NewFlagSet("kite-backfill", flag.ContinueOnError)
 	symbolsCSV := fs.String("symbols", "", "comma-separated NSE index/equity symbols to import")
 	currentFNOCSV := fs.String("current-fno", "", "comma-separated currently listed NFO futures contract symbols to import")
+	currentOptionsCSV := fs.String("current-options", "", "comma-separated currently listed NFO options contract symbols (CE/PE) to import")
 	fromValue := fs.String("from", defaultFromDate, "backfill start date in YYYY-MM-DD")
 	toValue := fs.String("to", now.In(loc).Format(dateLayout), "backfill end date in YYYY-MM-DD")
 	delay := fs.Duration("delay", defaultDelay, "delay between Kite historical requests")
@@ -52,7 +54,7 @@ func parseOptions(args []string, now time.Time) (options, error) {
 		}
 	})
 
-	if !symbolsExplicit && strings.TrimSpace(*currentFNOCSV) == "" {
+	if !symbolsExplicit && strings.TrimSpace(*currentFNOCSV) == "" && strings.TrimSpace(*currentOptionsCSV) == "" {
 		*symbolsCSV = defaultSymbolsCSV
 	}
 
@@ -76,6 +78,9 @@ func parseOptions(args []string, now time.Time) (options, error) {
 	if *daily && strings.TrimSpace(*currentFNOCSV) != "" {
 		return options{}, fmt.Errorf("-daily cannot be combined with -current-fno")
 	}
+	if *daily && strings.TrimSpace(*currentOptionsCSV) != "" {
+		return options{}, fmt.Errorf("-daily cannot be combined with -current-options")
+	}
 	reason := strings.TrimSpace(*replaceReason)
 	if *replace && reason == "" {
 		return options{}, fmt.Errorf("-replace requires -replace-reason")
@@ -84,6 +89,7 @@ func parseOptions(args []string, now time.Time) (options, error) {
 	opts := options{
 		symbols:          splitCSV(*symbolsCSV),
 		currentFNO:       splitCSV(*currentFNOCSV),
+		currentOptions:   splitCSV(*currentOptionsCSV),
 		symbolsExplicit:  symbolsExplicit,
 		fromDate:         fromDate,
 		toDate:           toDate,
@@ -96,8 +102,8 @@ func parseOptions(args []string, now time.Time) (options, error) {
 		replacementRoot:  replacementRootPath,
 		intradayLocation: loc,
 	}
-	if len(opts.symbols) == 0 && len(opts.currentFNO) == 0 {
-		return options{}, fmt.Errorf("at least one -symbols or -current-fno target is required")
+	if len(opts.symbols) == 0 && len(opts.currentFNO) == 0 && len(opts.currentOptions) == 0 {
+		return options{}, fmt.Errorf("at least one -symbols, -current-fno, or -current-options target is required")
 	}
 	if opts.snapshotDir == "" {
 		return options{}, fmt.Errorf("-snapshot-dir is required")

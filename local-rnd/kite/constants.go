@@ -85,8 +85,11 @@ const (
 	ExchangeNFO = "NFO"
 
 	InstrumentTypeFuture = "FUT"
+	InstrumentTypeCall   = "CE"
+	InstrumentTypePut    = "PE"
 	InstrumentTypeIndex  = "INDEX"
 	InstrumentTypeEquity = "EQ"
 
 	SegmentNFOFutures = "NFO-FUT"
+	SegmentNFOOptions = "NFO-OPT"
 )

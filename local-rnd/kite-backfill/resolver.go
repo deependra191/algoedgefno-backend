@@ -141,8 +141,66 @@ func (r instrumentResolver) resolveCurrentFNO(symbol string) (importTarget, bool
 	}, true, nil
 }
 
+func (r instrumentResolver) resolveCurrentOptions(symbol string) (importTarget, bool, error) {
+	symbol = strings.TrimSpace(symbol)
+	inst, ok := r.byExchangeSymbol[targetKey{
+		Symbol:   strings.ToUpper(symbol),
+		Exchange: kite.ExchangeNFO,
+	}]
+	if !ok {
+		return importTarget{}, false, nil
+	}
+	instType := strings.ToUpper(inst.InstrumentType)
+	if instType != kite.InstrumentTypeCall && instType != kite.InstrumentTypePut {
+		return importTarget{}, false, fmt.Errorf("%s is not a Kite options contract (CE/PE), got %q", symbol, inst.InstrumentType)
+	}
+	if inst.Segment != "" && !strings.EqualFold(inst.Segment, kite.SegmentNFOOptions) {
+		return importTarget{}, false, fmt.Errorf("%s is not in Kite NFO options segment", symbol)
+	}
+
+	expiry, ok := kite.ParseKiteDate(inst.Expiry)
+	if !ok {
+		return importTarget{}, false, fmt.Errorf("%s has invalid Kite expiry %q", symbol, inst.Expiry)
+	}
+	if expiry.Before(startOfDay(r.asOf, expiry.Location())) {
+		return importTarget{}, false, fmt.Errorf("%s expired before this run", symbol)
+	}
+
+	strike, err := parseStrike(inst.Strike)
+	if err != nil {
+		return importTarget{}, false, fmt.Errorf("%s has invalid strike %q: %w", symbol, inst.Strike, err)
+	}
+
+	underlying := strings.ToUpper(strings.TrimSpace(inst.Name))
+	if underlying == "" {
+		underlying = inferUnderlyingFromFutureSymbol(symbol)
+	}
+	instrumentType := models.InstrumentTypeOptionsStock
+	if isIndexUnderlying(underlying) {
+		instrumentType = models.InstrumentTypeOptionsIndex
+	}
+	optionType := instType
+	lotSize := parsePositiveInt(inst.LotSize, 1)
+
+	return importTarget{
+		RequestedSymbol: symbol,
+		KiteInstrument:  inst,
+		ModelInstrument: models.Instrument{
+			Symbol:         strings.ToUpper(symbol),
+			Name:           strings.ToUpper(symbol),
+			Exchange:       models.ExchangeNFO,
+			InstrumentType: instrumentType,
+			Underlying:     &underlying,
+			Expiry:         &expiry,
+			Strike:         &strike,
+			OptionType:     &optionType,
+			LotSize:        lotSize,
+		},
+	}, true, nil
+}
+
 func resolveTargets(resolver instrumentResolver, opts options) ([]importTarget, error) {
-	targets := make([]importTarget, 0, len(opts.symbols)+len(opts.currentFNO))
+	targets := make([]importTarget, 0, len(opts.symbols)+len(opts.currentFNO)+len(opts.currentOptions))
 	for _, symbol := range opts.symbols {
 		target, ok, err := resolver.resolveSpot(symbol)
 		if err != nil {
@@ -163,6 +221,16 @@ func resolveTargets(resolver instrumentResolver, opts options) ([]importTarget, 
 		}
 		if !ok {
 			return nil, fmt.Errorf("could not resolve current NFO futures symbol %s in Kite instruments", symbol)
+		}
+		targets = append(targets, target)
+	}
+	for _, symbol := range opts.currentOptions {
+		target, ok, err := resolver.resolveCurrentOptions(symbol)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, fmt.Errorf("could not resolve current NFO options symbol %s in Kite instruments", symbol)
 		}
 		targets = append(targets, target)
 	}
@@ -229,4 +297,12 @@ func parsePositiveInt(value string, fallback int) int {
 func startOfDay(t time.Time, loc *time.Location) time.Time {
 	converted := t.In(loc)
 	return time.Date(converted.Year(), converted.Month(), converted.Day(), 0, 0, 0, 0, loc)
+}
+
+func parseStrike(value string) (float64, error) {
+	f, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	if err != nil {
+		return 0, err
+	}
+	return f, nil
 }
